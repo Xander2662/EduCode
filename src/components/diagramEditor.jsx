@@ -84,7 +84,6 @@ const StartEndNode = ({ id, data, selected }) => {
 
   let startName = 'main';
   if (mode === 'end') {
-    // Algoritmus projde šipky proti proudu až najde začátek
     const findStartNode = (nodeId, visited = new Set()) => {
         if (visited.has(nodeId)) return null;
         visited.add(nodeId);
@@ -105,7 +104,7 @@ const StartEndNode = ({ id, data, selected }) => {
 
   return (
     <div className={`bg-white border-2 rounded-[2rem] min-w-[140px] min-h-[60px] flex flex-col justify-center items-center shadow-sm p-2 transition-all relative ${getSelectClass(selected)}`}>
-      <Handle type="target" position={Position.Top} className="!w-2 !h-2 !bg-indigo-600" />
+      <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
       
       {mode === 'unassigned' && (
         <>
@@ -137,17 +136,21 @@ const StartEndNode = ({ id, data, selected }) => {
           </div>
         </>
       )}
-      <Handle type="source" position={Position.Bottom} className="!w-2 !h-2 !bg-indigo-600" />
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" />
     </div>
   );
 };
 
 const ActionNode = ({ id, data, selected }) => (
   <div className={`bg-white border-2 p-2 min-w-[120px] min-h-[60px] flex flex-col shadow-sm rounded-md relative transition-all ${getSelectClass(selected)}`}>
-    <Handle type="target" position={Position.Top} className="!w-2 !h-2 !bg-indigo-600" />
+    <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
+    <Handle type="source" position={Position.Top} id="s-top" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+    
     <DragHandle />
     <textarea id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={getInputClass(selected, data.readOnly)} />
-    <Handle type="source" position={Position.Bottom} className="!w-2 !h-2 !bg-indigo-600" />
+    
+    <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" />
+    <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
   </div>
 );
 
@@ -156,10 +159,14 @@ const IONode = ({ id, data, selected }) => (
     <svg className="absolute inset-0 w-full h-full pointer-events-none -z-10" preserveAspectRatio="none" viewBox="0 0 100 100">
       <polygon points="15,2 98,2 85,98 2,98" fill="white" stroke={selected ? '#4f46e5' : '#1f2937'} strokeWidth={selected ? "4" : "2"} vectorEffect="non-scaling-stroke" />
     </svg>
-    <Handle type="target" position={Position.Top} className="!w-2 !h-2 !bg-indigo-600" />
+    <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
+    <Handle type="source" position={Position.Top} id="s-top" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+    
     <div className="pt-2 z-10"><DragHandle /></div>
     <textarea id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`${getInputClass(selected, data.readOnly)} px-6 z-10`} />
-    <Handle type="source" position={Position.Bottom} className="!w-2 !h-2 !bg-indigo-600" />
+    
+    <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" />
+    <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
   </div>
 );
 
@@ -177,16 +184,17 @@ const ConditionNode = ({ id, data, selected }) => {
       <svg className="absolute inset-0 w-full h-full pointer-events-none -z-10" preserveAspectRatio="none" viewBox="0 0 100 100">
         <polygon points="50,2 98,50 50,98 2,50" fill={hasWarning ? '#fef2f2' : 'white'} stroke={strokeColor} strokeWidth={selected ? "4" : "2"} vectorEffect="non-scaling-stroke" />
       </svg>
-      
+
       <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
-      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-indigo-600" />
-      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-indigo-600" style={{ left: '35%' }} title="Návrat do cyklu zespodu" />
+      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
 
       <div className="absolute top-6 z-10"><DragHandle /></div>
       <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-16 text-center outline-none bg-transparent text-xs font-mono nodrag mt-2 z-10 ${hasWarning ? 'text-red-700 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" style={{ left: '65%' }} />
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" />
       <Handle type="source" position={Position.Right} id="s-right" className="!w-2 !h-2 !bg-indigo-600" />
+      <Handle type="source" position={Position.Top} id="s-top" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
     </div>
   );
 };
@@ -353,16 +361,51 @@ function EditorCanvas({ xml, onXmlChange, readOnly }) {
     }
   }, [nodes, edges, onXmlChange]);
 
+  const isValidConnection = useCallback((connection) => {
+    const sourceNode = nodes.find(n => n.id === connection.source);
+    const targetNode = nodes.find(n => n.id === connection.target);
+
+    const checkSide = (nodeId, isSource, handleId, type) => {
+      if (type !== 'ACTION' && type !== 'IO') return true;
+      const nodeEdges = edges.filter(e => e.source === nodeId || e.target === nodeId);
+      
+      const inSide = nodeEdges.find(e => e.target === nodeId)?.targetHandle?.replace('t-', ''); 
+      const outSide = nodeEdges.find(e => e.source === nodeId)?.sourceHandle?.replace('s-', '');
+      
+      const currentSide = handleId ? handleId.replace(/^[ts]-/, '') : null;
+      if (!currentSide) return true;
+
+      if (isSource) {
+          if (inSide === currentSide) return false;
+          if (outSide && outSide !== currentSide) return false;
+      } else {
+          if (outSide === currentSide) return false;
+          if (inSide && inSide !== currentSide) return false;
+      }
+      return true;
+    };
+
+    if (!checkSide(connection.source, true, connection.sourceHandle, sourceNode?.type)) return false;
+    if (!checkSide(connection.target, false, connection.targetHandle, targetNode?.type)) return false;
+
+    const sourceEdges = edges.filter(e => e.source === connection.source);
+    if (sourceNode?.type === 'CONDITION') {
+      if (sourceEdges.length >= 2) return false;
+    } else {
+      if (sourceEdges.length >= 1) return false;
+    }
+
+    return true;
+  }, [nodes, edges]);
+
   const onConnect = useCallback((params) => {
     const sourceNode = nodes.find(n => n.id === params.source);
     const sourceEdges = edges.filter(e => e.source === params.source);
 
     if (sourceNode?.type === 'CONDITION') {
-      if (sourceEdges.length >= 2) return;
       const lbl = sourceEdges.length === 0 ? '+' : (sourceEdges[0].data?.label === '+' ? '-' : '+');
       setEdges((eds) => addEdge({ ...params, type: 'customEdge', data: { label: lbl }, markerEnd: { type: MarkerType.ArrowClosed } }, eds));
     } else {
-      if (sourceEdges.length >= 1) return;
       setEdges((eds) => addEdge({ ...params, type: 'customEdge', markerEnd: { type: MarkerType.ArrowClosed } }, eds));
     }
   }, [nodes, edges, setEdges]);
@@ -443,6 +486,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly }) {
         onNodesChange={readOnly ? undefined : onNodesChange} 
         onEdgesChange={readOnly ? undefined : onEdgesChange} 
         onConnect={readOnly ? undefined : onConnect} 
+        isValidConnection={isValidConnection} 
         nodeTypes={nodeTypes} edgeTypes={edgeTypes} 
         defaultEdgeOptions={{ type: 'customEdge', markerEnd: { type: MarkerType.ArrowClosed } }}
         fitView deleteKeyCode={null} selectionOnDrag={true} panOnDrag={[1, 2]} panOnScroll={true} selectionMode="partial" multiSelectionKeyCode="Control"

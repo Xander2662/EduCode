@@ -39,7 +39,10 @@ export const parseDrawioToPseudocode = (xml) => {
             type = 'COMMENT';
         }
         else if (style.includes('swimlane') || style.includes('dashed=1')) type = 'BUBBLE';
-        else if (style.includes('ellipse')) type = 'START_END';
+        else if (style.includes('ellipse')) {
+            if (!value) type = 'MERGE'; 
+            else type = 'START_END';
+        }
         else if (style.includes('rhombus') || style.includes('hexagon')) type = 'CONDITION';
         else if (style.includes('shape=parallelogram')) {
           if (value.includes('=') && !value.toLowerCase().startsWith('vstup')) type = 'ACTION';
@@ -102,12 +105,13 @@ export const parseDrawioToPseudocode = (xml) => {
 
         if (hasReturn && node.next.length > 0) {
             errors.push(`Z bloku obsahujícího RETURN ('${node.value}') nesmí vést žádné další šipky.`);
-            blockCode += `${indent}// [CHYBA] Z RETURN nesmí vést šipky!\n`;
+            blockCode += `${indent}# [CHYBA] Z RETURN nesmí vést šipky!\n`;
         }
 
         if (node.type === 'ACTION') {
+            if (!node.value) return blockCode;
             let lines = node.value.split('\n');
-            if (lines.length > 1) blockCode += `${indent}// Pozn.: Každá operace by měla být zapsána ve vlastním bloku.\n`;
+            if (lines.length > 1) blockCode += `${indent}# Pozn.: Každá operace by měla být zapsána ve vlastním bloku.\n`;
 
             lines.forEach(line => {
                 let val = line.trim();
@@ -120,7 +124,7 @@ export const parseDrawioToPseudocode = (xml) => {
                     let left = parts[0].trim();
                     if (left.includes('(') || left.includes(')')) {
                         errors.push(`Neplatná syntaxe přiřazení: '${val}'. Nelze přiřadit hodnotu do funkce.`);
-                        blockCode += `${indent}// [CHYBA] Nelze přiřazovat do funkce!\n${indent}${val}\n`;
+                        blockCode += `${indent}# [CHYBA] Nelze přiřazovat do funkce!\n${indent}${val}\n`;
                     } else {
                         variables.add(left.replace(/^(INT|STRING|REAL|BOOLEAN)\s+/i, '').trim());
                         blockCode += `${indent}${val}\n`;
@@ -130,7 +134,7 @@ export const parseDrawioToPseudocode = (xml) => {
                     let rawName = val.replace(/[()]/g, '');
                     if (!isFuncFormat && variables.has(rawName)) blockCode += `${indent}${val}\n`;
                     else {
-                        if (!isFuncFormat && !hasReturn && val.toUpperCase() !== 'RETURN') blockCode += `${indent}// Pozn.: '${rawName}' nebylo definováno jako proměnná, volá se jako funkce.\n`;
+                        if (!isFuncFormat && !hasReturn && val.toUpperCase() !== 'RETURN') blockCode += `${indent}# Pozn.: '${rawName}' nebylo definováno jako proměnná, volá se jako funkce.\n`;
                         blockCode += `${indent}${isFuncFormat ? val : val + '()'}\n`;
                     }
                 }
@@ -140,7 +144,7 @@ export const parseDrawioToPseudocode = (xml) => {
         
         if (node.type === 'IO') {
             if (/^(INT\s|STRING\s|REAL\s|BOOLEAN\s|DEKLARACE)/i.test(node.value) || upperVal.startsWith('VSTUP')) {
-                return blockCode + `${indent}// Deklarace / Vstup\n${indent}${node.value}\n`;
+                return blockCode + `${indent}# Deklarace / Vstup\n${indent}${node.value}\n`;
             }
             if (upperVal.startsWith('PRINT')) {
                 let innerText = node.value.substring(5).trim();
@@ -153,19 +157,37 @@ export const parseDrawioToPseudocode = (xml) => {
         return blockCode;
     };
 
-    const findAncestor = (startId, inPathSet) => {
-        let queue = [startId];
-        let locVis = new Set();
+    const doesPathLoopBack = (startNodeId, targetNodeId) => {
+        if (startNodeId === targetNodeId) return true;
+        let visited = new Set();
+        let queue = [startNodeId];
         while(queue.length > 0) {
             let curr = queue.shift();
             if (!curr) continue;
-            if (inPathSet.has(curr)) return curr; 
-            if (!locVis.has(curr)) {
-                locVis.add(curr);
+            if (!visited.has(curr)) {
+                visited.add(curr);
+                if (nodes[curr] && nodes[curr].next) {
+                    for (let edge of nodes[curr].next) {
+                        if (edge.target === targetNodeId) return true;
+                        queue.push(edge.target);
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
+    const getReachable = (startId) => {
+        let reach = new Set();
+        let queue = [startId];
+        while(queue.length > 0) {
+            let curr = queue.shift();
+            if (curr && !reach.has(curr)) {
+                reach.add(curr);
                 if (nodes[curr]) nodes[curr].next.forEach(e => queue.push(e.target));
             }
         }
-        return null;
+        return reach;
     };
 
     const getLinearPath = (startId, stopId) => {
@@ -183,33 +205,23 @@ export const parseDrawioToPseudocode = (xml) => {
         return path;
     };
 
-    const getReachable = (startId) => {
-        let reach = new Set();
-        let queue = [startId];
-        while(queue.length > 0) {
-            let curr = queue.shift();
-            if (curr && !reach.has(curr)) {
-                reach.add(curr);
-                if (nodes[curr]) nodes[curr].next.forEach(e => queue.push(e.target));
-            }
-        }
-        return reach;
-    };
-
     startNodes.forEach(start => {
       let entity = start.entityType || 'FUNCTION';
       let bundleCode = `${entity} ${start.value}()\n`;
       let inPath = new Set();
       
-      const traverse = (nodeId, indent = "    ") => {
-        if (!nodeId || processed.has(nodeId)) return;
+      const traverse = (nodeId, indent = "    ", stopId = null) => {
+        if (!nodeId || processed.has(nodeId) || nodeId === stopId) return;
+
         const node = nodes[nodeId];
         processed.add(nodeId);
         inPath.add(nodeId);
 
-        if (node.type === 'ACTION' || node.type === 'IO') {
+        if (node.type === 'MERGE' || (node.type === 'ACTION' && !node.value)) {
+            if (node.next.length > 0) traverse(node.next[0].target, indent, stopId);
+        } else if (node.type === 'ACTION' || node.type === 'IO') {
             bundleCode += generateStatement(node, indent);
-            if (node.next.length > 0) traverse(node.next[0].target, indent);
+            if (node.next.length > 0) traverse(node.next[0].target, indent, stopId);
         } else if (node.type === 'CONDITION') {
             bundleCode += printCommentsBeforeY(node.y, indent);
             const trueEdge = node.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes(e.value)) || node.next[0];
@@ -218,29 +230,47 @@ export const parseDrawioToPseudocode = (xml) => {
             const tTarget = trueEdge?.target;
             const fTarget = falseEdge?.target;
 
-            const tAncestor = tTarget ? findAncestor(tTarget, inPath) : null;
-            const fAncestor = fTarget ? findAncestor(fTarget, inPath) : null;
+            const tIsAncestor = tTarget ? inPath.has(tTarget) : false;
+            const fIsAncestor = fTarget ? inPath.has(fTarget) : false;
 
-            if (tAncestor || fAncestor) {
-                const isTrueLoop = !!tAncestor;
-                const loopTarget = isTrueLoop ? tTarget : fTarget;
-                const nextTarget = isTrueLoop ? fTarget : tTarget;
-                const ancestor = isTrueLoop ? tAncestor : fAncestor;
-                
+            const tLoopsBack = (tTarget && !tIsAncestor) ? doesPathLoopBack(tTarget, node.id) : false;
+            const fLoopsBack = (fTarget && !fIsAncestor) ? doesPathLoopBack(fTarget, node.id) : false;
+
+            if (tLoopsBack || fLoopsBack) {
+                const isTrueLoop = tLoopsBack;
+                const bodyTarget = isTrueLoop ? tTarget : fTarget;
+                const exitTarget = isTrueLoop ? fTarget : tTarget;
+
                 const isForLoop = node.value.toUpperCase().startsWith('FOR ');
-                const conditionText = isTrueLoop ? node.value : (isForLoop ? node.value : `NOT (${node.value})`);
+                const conditionText = isTrueLoop ? node.value : `NOT (${node.value})`;
                 
-                const loopBody = getLinearPath(loopTarget, ancestor).concat(getLinearPath(ancestor, node.id));
-
                 if (isForLoop) bundleCode += `${indent}${conditionText} DO\n`;
                 else bundleCode += `${indent}WHILE ${conditionText} DO\n`;
                 
+                traverse(bodyTarget, indent + "    ", node.id);
+
+                if (isForLoop) bundleCode += `${indent}ENDFOR\n`;
+                else bundleCode += `${indent}ENDWHILE\n`;
+
+                if (exitTarget) traverse(exitTarget, indent, stopId);
+            } else if (tIsAncestor || fIsAncestor) {
+                const isTrueLoop = tIsAncestor;
+                const loopTarget = isTrueLoop ? tTarget : fTarget;
+                const exitTarget = isTrueLoop ? fTarget : tTarget;
+
+                const isForLoop = node.value.toUpperCase().startsWith('FOR ');
+                const conditionText = isTrueLoop ? node.value : `NOT (${node.value})`;
+                
+                if (isForLoop) bundleCode += `${indent}${conditionText} DO\n`;
+                else bundleCode += `${indent}WHILE ${conditionText} DO\n`;
+                
+                const loopBody = getLinearPath(loopTarget, node.id);
                 loopBody.forEach(bNode => { bundleCode += generateStatement(bNode, indent + "    "); });
 
                 if (isForLoop) bundleCode += `${indent}ENDFOR\n`;
                 else bundleCode += `${indent}ENDWHILE\n`;
 
-                if (nextTarget) traverse(nextTarget, indent);
+                if (exitTarget) traverse(exitTarget, indent, stopId);
             } else {
                 let mergeNodeId = null;
                 if (tTarget && fTarget) {
@@ -255,21 +285,21 @@ export const parseDrawioToPseudocode = (xml) => {
                 
                 if (isForLoop) {
                     bundleCode += `${indent}${node.value} DO\n`;
-                    if (tTarget) traverse(tTarget, indent + "    ");
+                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", mergeNodeId || stopId);
                     bundleCode += `${indent}ENDFOR\n`;
-                    if (fTarget && nodes[fTarget] && nodes[fTarget].type !== 'START_END') traverse(fTarget, indent);
+                    if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'START_END') traverse(fTarget, indent, stopId);
                 } else {
                     bundleCode += `${indent}IF ${node.value} THEN\n`;
-                    if (tTarget) traverse(tTarget, indent + "    ");
+                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", mergeNodeId || stopId);
                     
-                    if (fTarget && nodes[fTarget] && nodes[fTarget].type !== 'START_END') {
+                    if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'START_END') {
                         bundleCode += `${indent}ELSE\n`;
-                        traverse(fTarget, indent + "    ");
+                        traverse(fTarget, indent + "    ", mergeNodeId || stopId);
                     }
                     bundleCode += `${indent}ENDIF\n`;
                 }
 
-                if (mergeNodeId && !inPath.has(mergeNodeId)) traverse(mergeNodeId, indent);
+                if (mergeNodeId && !inPath.has(mergeNodeId)) traverse(mergeNodeId, indent, stopId);
             }
         }
         inPath.delete(nodeId);
@@ -281,7 +311,7 @@ export const parseDrawioToPseudocode = (xml) => {
     });
 
     if (bundles.length === 0) return { code: "", errors: ["Diagram neobsahuje počáteční blok."] };
-    return { code: bundles.join('\n\n# ----------------------\n\n'), errors: [] };
+    return { code: bundles.join('\n\n# ----------------------\n\n'), errors };
   } catch (err) {
     return { bundles: [], code: "", errors: [err.message] };
   }
