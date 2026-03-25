@@ -6,12 +6,11 @@ export const drawioToReactFlow = (xml) => {
 
   let nodes = [];
   let edges = [];
-  let usedHandles = {};
 
-  // 1. Průchod - sestavení uzlů
   cells.forEach(cell => {
     const id = cell.getAttribute('id');
     const vertex = cell.getAttribute('vertex');
+    const edge = cell.getAttribute('edge');
 
     if (vertex === '1') {
       let value = cell.getAttribute('value') || '';
@@ -28,57 +27,39 @@ export const drawioToReactFlow = (xml) => {
       else if (style.includes('shape=parallelogram')) type = 'IO';
       else if (style.includes('shape=note') || style.includes('fillColor=#fff2cc')) type = 'COMMENT';
 
-      nodes.push({ id, type, position: { x, y }, data: { label: value } });
-      usedHandles[id] = { s: new Set(), t: new Set() };
-    }
-  });
+      // Přečtení uloženého módu a entityType z XML stylu
+      const modeMatch = style.match(/mode=([^;]+)/);
+      const entityMatch = style.match(/entityType=([^;]+)/);
 
-  // 2. Průchod - sestavení hran s přesným mapováním "handle" puntíků
-  cells.forEach(cell => {
-    const edge = cell.getAttribute('edge');
-    if (edge === '1') {
-      const id = cell.getAttribute('id');
+      nodes.push({ 
+          id, type, position: { x, y }, 
+          data: { 
+              label: value,
+              mode: modeMatch ? modeMatch[1] : undefined,
+              entityType: entityMatch ? entityMatch[1] : undefined
+          } 
+      });
+    } else if (edge === '1') {
       const source = cell.getAttribute('source');
       const target = cell.getAttribute('target');
       let value = cell.getAttribute('value') || '';
       value = value.replace(/<[^>]*>?/gm, '').replace(/&nbsp;/gi, ' ').trim();
 
       if (source && target) {
-        let sourceHandle = 's-bottom';
-        let targetHandle = 't-top';
-
         const style = cell.getAttribute('style') || '';
         const shMatch = style.match(/sourceHandle=([^;]+)/);
-        if (shMatch) sourceHandle = shMatch[1];
-        
         const thMatch = style.match(/targetHandle=([^;]+)/);
-        if (thMatch) targetHandle = thMatch[1];
+        
+        let edgeProps = {
+            id, source, target,
+            data: { label: value }, 
+            type: 'customEdge'      
+        };
 
-        // Pokud to XML neobsahuje (např. automaticky vygenerovaný nebo starý graf), zkusíme to odhadnout
-        if (!shMatch || !thMatch) {
-            const sourceNode = nodes.find(n => n.id === source);
-            const targetNode = nodes.find(n => n.id === target);
+        if (shMatch) edgeProps.sourceHandle = shMatch[1];
+        if (thMatch) edgeProps.targetHandle = thMatch[1];
 
-            if (!shMatch && sourceNode) {
-                if (sourceNode.type === 'CONDITION') {
-                    sourceHandle = ['ne', 'no', 'false', '0', 'n', '-'].includes(value.toLowerCase()) ? 's-right' : 's-bottom';
-                } else {
-                    sourceHandle = usedHandles[source].s.has('s-bottom') ? 's-top' : 's-bottom';
-                }
-            }
-            if (!thMatch && targetNode) {
-                targetHandle = usedHandles[target].t.has('t-top') ? 't-bottom' : 't-top';
-            }
-        }
-
-        if (usedHandles[source]) usedHandles[source].s.add(sourceHandle);
-        if (usedHandles[target]) usedHandles[target].t.add(targetHandle);
-
-        edges.push({ 
-            id, source, target, label: value, 
-            sourceHandle, targetHandle,
-            type: 'customEdge' 
-        });
+        edges.push(edgeProps);
       }
     }
   });
@@ -103,17 +84,20 @@ export const reactFlowToDrawio = (nodes, edges) => {
     if (n.type === 'START_END') { w = 100; h = 40; }
     if (n.type === 'COMMENT') { w = 120; h = 50; }
     const safeText = (n.data.label || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/\n/g, '&#xa;');
-    xml += `    <mxCell id="${n.id}" value="${safeText}" style="${STYLES[n.type] || n.type}" vertex="1" parent="1">\n`;
+    
+    // Uložení interního stavu uzlu do atributů stylů (jinak to draw.io ztratí)
+    let style = STYLES[n.type] || n.type;
+    if (n.data?.mode) style += `mode=${n.data.mode};`;
+    if (n.data?.entityType) style += `entityType=${n.data.entityType};`;
+
+    xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}" vertex="1" parent="1">\n`;
     xml += `      <mxGeometry x="${Math.round(n.position.x)}" y="${Math.round(n.position.y)}" width="${w}" height="${h}" as="geometry" />\n`;
     xml += `    </mxCell>\n`;
   });
 
   edges.forEach(e => {
-    let finalLabel = e.label || e.data?.label || '';
-    if (finalLabel === '+') finalLabel = 'Ano';
-    if (finalLabel === '-') finalLabel = 'Ne';
-
-    // Vložení přesných pozic handle přímo do stylu pro uložení
+    let finalLabel = e.data?.label || e.label || '';
+    
     let style = STYLES.EDGE;
     if (e.sourceHandle) style += `sourceHandle=${e.sourceHandle};`;
     if (e.targetHandle) style += `targetHandle=${e.targetHandle};`;

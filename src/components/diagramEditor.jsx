@@ -4,6 +4,14 @@ import '@xyflow/react/dist/style.css';
 import { Download, Upload, Square, Circle, Diamond, AlignLeft, RefreshCcw, Copy, Trash2, MessageSquare } from 'lucide-react';
 import { drawioToReactFlow, reactFlowToDrawio } from '../utils/diagramConverter';
 
+const edgeLabels = {
+  '+-': { t: '+', f: '-' },
+  'ano-ne': { t: 'Ano', f: 'Ne' },
+  'yes-no': { t: 'Yes', f: 'No' },
+  'check-cross': { t: '✔', f: '✖' },
+  'true-false': { t: 'True', f: 'False' }
+};
+
 const CustomEdge = ({ id, source, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data, selected }) => {
   const { setEdges } = useReactFlow();
   const nodes = useNodes();
@@ -13,26 +21,40 @@ const CustomEdge = ({ id, source, sourceX, sourceY, targetX, targetY, sourcePosi
 
   const onSwap = (e) => {
     e.stopPropagation();
+    if (data?.readOnly) return;
+    
     setEdges(eds => {
       const sibling = eds.find(edge => edge.source === source && edge.id !== id);
+      const pref = edgeLabels[data.edgeStyle || 'ano-ne'];
+      
+      const toggleLabel = (l) => {
+          return (l === pref.t || l === 'Ano' || l === '+' || l === 'Yes' || l === '✔' || l === 'True') ? pref.f : pref.t;
+      };
+      
       if (!sibling) return eds;
       return eds.map(edge => {
-        if (edge.id === id) return { ...edge, data: { ...edge.data, label: edge.data.label === '+' ? '-' : '+' } };
-        if (edge.id === sibling.id) return { ...edge, data: { ...edge.data, label: sibling.data.label === '+' ? '-' : '+' } };
+        if (edge.id === id) return { ...edge, data: { ...edge.data, label: toggleLabel(edge.data.label) } };
+        if (edge.id === sibling.id) return { ...edge, data: { ...edge.data, label: toggleLabel(sibling.data.label) } };
         return edge;
       });
     });
   };
 
+  const labelText = data?.label || 'Ano';
+  const pref = edgeLabels[data.edgeStyle || 'ano-ne'];
+  const isPositive = labelText === pref.t || labelText === 'Ano' || labelText === '+' || labelText === 'Yes' || labelText === '✔' || labelText === 'True';
+
   return (
     <>
-      <BaseEdge path={edgePath} markerEnd={markerEnd} style={{ ...style, stroke: selected ? '#4f46e5' : (style?.stroke || '#1f2937'), strokeWidth: selected ? 3 : 2 }} />
+      <BaseEdge path={edgePath} markerEnd={markerEnd} className={selected ? "!stroke-indigo-600" : "!stroke-gray-800 dark:!stroke-gray-400"} style={{ strokeWidth: selected ? 3 : 2 }} />
       {isCondition && (
         <EdgeLabelRenderer>
           <div style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, pointerEvents: 'all' }}
-               className={`group bg-white border ${selected ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-300'} rounded px-2 py-1 text-xs font-bold shadow-sm flex items-center gap-1 cursor-pointer hover:bg-gray-50`}>
-            <span className={data?.label === '+' ? 'text-green-600' : 'text-red-600'}>{data?.label || '+'}</span>
-            <button onClick={onSwap} className="hidden group-hover:block text-gray-500 hover:text-indigo-600"><RefreshCcw size={12} /></button>
+               className={`group bg-white dark:bg-gray-800 border ${selected ? 'border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900' : 'border-gray-300 dark:border-gray-600'} rounded px-2 py-1 text-xs font-bold shadow-sm flex items-center gap-1 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700`}>
+            <span className={isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>{labelText}</span>
+            {!data?.readOnly && (
+              <button onClick={onSwap} className="hidden group-hover:block text-gray-500 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400"><RefreshCcw size={12} /></button>
+            )}
           </div>
         </EdgeLabelRenderer>
       )}
@@ -40,15 +62,13 @@ const CustomEdge = ({ id, source, sourceX, sourceY, targetX, targetY, sourcePosi
   );
 };
 
-const DragHandle = () => <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 rounded-full hover:bg-gray-300 transition-colors mx-auto mb-1" title="Chytit a přesunout" />;
+const DragHandle = () => <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors mx-auto mb-1" title="Chytit a přesunout" />;
 
-const getSelectClass = (selected) => selected ? 'ring-4 ring-indigo-400 border-indigo-600' : 'border-gray-800';
-const getInputClass = (selected, readOnly) => `w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden ${selected && !readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`;
+const getSelectClass = (selected) => selected ? 'ring-4 ring-indigo-400 border-indigo-600 dark:border-indigo-400' : 'border-gray-800 dark:border-gray-400';
+const getInputClass = (selected, readOnly) => `w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-800 dark:text-gray-100 ${selected && !readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`;
 
 const handleInputMouseDown = (e, selected) => {
-  if (!selected && document.activeElement !== e.target) {
-    e.preventDefault();
-  }
+  if (!selected && document.activeElement !== e.target) e.preventDefault();
 };
 
 const StartEndNode = ({ id, data, selected }) => {
@@ -103,15 +123,15 @@ const StartEndNode = ({ id, data, selected }) => {
   }
 
   return (
-    <div className={`bg-white border-2 rounded-[2rem] min-w-[140px] min-h-[60px] flex flex-col justify-center items-center shadow-sm p-2 transition-all relative ${getSelectClass(selected)}`}>
-      <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
+    <div className={`bg-white dark:bg-gray-800 border-2 rounded-[2rem] min-w-[140px] min-h-[60px] flex flex-col justify-center items-center shadow-sm p-2 transition-all relative ${getSelectClass(selected)}`}>
+      {mode !== 'start' && <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />}
       
       {mode === 'unassigned' && (
         <>
           <DragHandle />
           <div className="flex gap-2 w-full px-2 mt-1 z-10">
-            <button onClick={() => setMode('start')} className="flex-1 text-xs bg-green-100 text-green-700 hover:bg-green-200 rounded py-1 font-bold pointer-events-auto">Start</button>
-            <button onClick={() => setMode('end')} className="flex-1 text-xs bg-red-100 text-red-700 hover:bg-red-200 rounded py-1 font-bold pointer-events-auto">Konec</button>
+            <button onClick={() => setMode('start')} className="flex-1 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-800 rounded py-1 font-bold pointer-events-auto">Start</button>
+            <button onClick={() => setMode('end')} className="flex-1 text-xs bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-800 rounded py-1 font-bold pointer-events-auto">Konec</button>
           </div>
         </>
       )}
@@ -120,10 +140,10 @@ const StartEndNode = ({ id, data, selected }) => {
         <div className="w-full flex flex-col px-2 relative pb-1">
           <div className="flex justify-between items-center w-full mb-1 px-1">
             <span className="text-[9px] text-gray-400 font-bold w-12 text-left">START</span>
-            <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 rounded-full hover:bg-gray-300 transition-colors" title="Chytit a přesunout" />
-            <span onClick={toggleEntity} className={`text-[9px] text-gray-400 font-bold w-12 text-right cursor-pointer hover:text-indigo-600 ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`}>{entityType}</span>
+            <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors" title="Chytit a přesunout" />
+            <span onClick={toggleEntity} className={`text-[9px] text-gray-400 font-bold w-12 text-right cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`}>{entityType}</span>
           </div>
-          <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full text-center outline-none bg-transparent text-sm font-mono font-bold nodrag ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+          <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full text-center outline-none bg-transparent text-sm font-mono font-bold nodrag text-gray-800 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
         </div>
       )}
 
@@ -131,42 +151,34 @@ const StartEndNode = ({ id, data, selected }) => {
         <>
           <DragHandle />
           <div className="w-full flex flex-col items-center px-3 pb-1">
-            <span className="text-sm font-bold text-gray-800">Konec</span>
-            <span className="text-[10px] text-gray-500 font-mono mt-0.5">{startName}</span>
+            <span className="text-sm font-bold text-gray-800 dark:text-gray-100">Konec</span>
+            <span className="text-[10px] text-gray-500 dark:text-gray-400 font-mono mt-0.5">{startName}</span>
           </div>
         </>
       )}
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" />
+      {mode !== 'end' && <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" />}
     </div>
   );
 };
 
 const ActionNode = ({ id, data, selected }) => (
-  <div className={`bg-white border-2 p-2 min-w-[120px] min-h-[60px] flex flex-col shadow-sm rounded-md relative transition-all ${getSelectClass(selected)}`}>
+  <div className={`bg-white dark:bg-gray-800 border-2 p-2 min-w-[120px] min-h-[60px] flex flex-col shadow-sm rounded-md relative transition-all ${getSelectClass(selected)}`}>
     <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
-    <Handle type="source" position={Position.Top} id="s-top" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-    
     <DragHandle />
     <textarea id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={getInputClass(selected, data.readOnly)} />
-    
     <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" />
-    <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
   </div>
 );
 
 const IONode = ({ id, data, selected }) => (
   <div className="relative min-w-[140px] min-h-[60px] flex flex-col shadow-sm">
-    <svg className="absolute inset-0 w-full h-full pointer-events-none -z-10" preserveAspectRatio="none" viewBox="0 0 100 100">
-      <polygon points="15,2 98,2 85,98 2,98" fill="white" stroke={selected ? '#4f46e5' : '#1f2937'} strokeWidth={selected ? "4" : "2"} vectorEffect="non-scaling-stroke" />
+    <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${selected ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-800 dark:text-gray-400'}`} preserveAspectRatio="none" viewBox="0 0 100 100">
+      <polygon points="15,2 98,2 85,98 2,98" className="fill-white dark:fill-gray-800" stroke="currentColor" strokeWidth={selected ? "4" : "2"} vectorEffect="non-scaling-stroke" />
     </svg>
     <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
-    <Handle type="source" position={Position.Top} id="s-top" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-    
     <div className="pt-2 z-10"><DragHandle /></div>
     <textarea id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`${getInputClass(selected, data.readOnly)} px-6 z-10`} />
-    
     <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" />
-    <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
   </div>
 );
 
@@ -175,26 +187,21 @@ const ConditionNode = ({ id, data, selected }) => {
   const outEdges = edges.filter(e => e.source === id).length;
   const hasWarning = outEdges === 1;
 
-  let strokeColor = '#1f2937';
-  if (hasWarning) strokeColor = '#ef4444';
-  if (selected) strokeColor = '#4f46e5';
+  let textColor = selected ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-800 dark:text-gray-400';
+  if (hasWarning && !selected) textColor = 'text-red-500';
 
   return (
     <div className="relative w-28 h-28 flex flex-col items-center justify-center shadow-sm">
-      <svg className="absolute inset-0 w-full h-full pointer-events-none -z-10" preserveAspectRatio="none" viewBox="0 0 100 100">
-        <polygon points="50,2 98,50 50,98 2,50" fill={hasWarning ? '#fef2f2' : 'white'} stroke={strokeColor} strokeWidth={selected ? "4" : "2"} vectorEffect="non-scaling-stroke" />
+      <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${textColor}`} preserveAspectRatio="none" viewBox="0 0 100 100">
+        <polygon points="50,2 98,50 50,98 2,50" className={hasWarning ? 'fill-red-50 dark:fill-red-900/20' : 'fill-white dark:fill-gray-800'} stroke="currentColor" strokeWidth={selected ? "4" : "2"} vectorEffect="non-scaling-stroke" />
       </svg>
-
       <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
-      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
 
       <div className="absolute top-6 z-10"><DragHandle /></div>
-      <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-16 text-center outline-none bg-transparent text-xs font-mono nodrag mt-2 z-10 ${hasWarning ? 'text-red-700 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-16 text-center outline-none bg-transparent text-xs font-mono nodrag mt-2 z-10 text-gray-800 dark:text-gray-100 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       
       <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" />
       <Handle type="source" position={Position.Right} id="s-right" className="!w-2 !h-2 !bg-indigo-600" />
-      <Handle type="source" position={Position.Top} id="s-top" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
     </div>
   );
 };
@@ -206,7 +213,7 @@ const CommentNode = ({ id, data, selected }) => {
   };
 
   return (
-    <div className={`bg-yellow-50 border-2 border-yellow-300 p-2 min-w-[140px] flex flex-col shadow-sm rounded-md relative transition-all ${selected ? 'ring-4 ring-yellow-400' : ''}`}>
+    <div className={`bg-yellow-50 dark:bg-yellow-900/30 border-2 border-yellow-300 dark:border-yellow-700 p-2 min-w-[140px] flex flex-col shadow-sm rounded-md relative transition-all ${selected ? 'ring-4 ring-yellow-400 dark:ring-yellow-600' : ''}`}>
       <DragHandle />
       <textarea 
         id={`input-${id}`} 
@@ -215,7 +222,7 @@ const CommentNode = ({ id, data, selected }) => {
         onFocus={adjustHeight}
         onMouseDown={(e) => handleInputMouseDown(e, selected)} 
         readOnly={data.readOnly} 
-        className={`w-full flex-1 outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-700 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} 
+        className={`w-full flex-1 outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-700 dark:text-yellow-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} 
         style={{ minHeight: '30px' }}
       />
     </div>
@@ -225,10 +232,9 @@ const CommentNode = ({ id, data, selected }) => {
 const nodeTypes = { ACTION: ActionNode, IO: IONode, CONDITION: ConditionNode, START_END: StartEndNode, COMMENT: CommentNode };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, readOnly }) {
+function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [isInternalChange, setIsInternalChange] = useState(false);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
@@ -343,18 +349,17 @@ function EditorCanvas({ xml, onXmlChange, readOnly }) {
   };
 
   useEffect(() => {
-    if (xml && !isInternalChange) {
+    if (xml) {
       const { nodes: parsedNodes, edges: parsedEdges } = drawioToReactFlow(xml);
       setNodes(parsedNodes.map(n => ({ ...n, data: { ...n.data, readOnly, onChange: (e) => updateNodeLabel(n.id, e.target.value) } })));
-      setEdges(parsedEdges.map(e => ({ ...e, markerEnd: { type: MarkerType.ArrowClosed } })));
+      // Predani edgeStyle do dat hrany, aby CustomEdge vedela, jaky preferovany text ma pouzit pro swapnuti
+      setEdges(parsedEdges.map(e => ({ ...e, data: { ...e.data, readOnly, edgeStyle }, markerEnd: { type: MarkerType.ArrowClosed } })));
     }
-    setIsInternalChange(false);
-  }, [xml, readOnly, setNodes, setEdges]);
+  }, [xml, readOnly, edgeStyle, setNodes, setEdges]);
 
   useEffect(() => {
     if (nodes.length > 0 || edges.length > 0) {
       const timer = setTimeout(() => {
-        setIsInternalChange(true);
         onXmlChange(reactFlowToDrawio(nodes, edges));
       }, 300);
       return () => clearTimeout(timer);
@@ -363,32 +368,8 @@ function EditorCanvas({ xml, onXmlChange, readOnly }) {
 
   const isValidConnection = useCallback((connection) => {
     const sourceNode = nodes.find(n => n.id === connection.source);
-    const targetNode = nodes.find(n => n.id === connection.target);
-
-    const checkSide = (nodeId, isSource, handleId, type) => {
-      if (type !== 'ACTION' && type !== 'IO') return true;
-      const nodeEdges = edges.filter(e => e.source === nodeId || e.target === nodeId);
-      
-      const inSide = nodeEdges.find(e => e.target === nodeId)?.targetHandle?.replace('t-', ''); 
-      const outSide = nodeEdges.find(e => e.source === nodeId)?.sourceHandle?.replace('s-', '');
-      
-      const currentSide = handleId ? handleId.replace(/^[ts]-/, '') : null;
-      if (!currentSide) return true;
-
-      if (isSource) {
-          if (inSide === currentSide) return false;
-          if (outSide && outSide !== currentSide) return false;
-      } else {
-          if (outSide === currentSide) return false;
-          if (inSide && inSide !== currentSide) return false;
-      }
-      return true;
-    };
-
-    if (!checkSide(connection.source, true, connection.sourceHandle, sourceNode?.type)) return false;
-    if (!checkSide(connection.target, false, connection.targetHandle, targetNode?.type)) return false;
-
     const sourceEdges = edges.filter(e => e.source === connection.source);
+
     if (sourceNode?.type === 'CONDITION') {
       if (sourceEdges.length >= 2) return false;
     } else {
@@ -403,12 +384,16 @@ function EditorCanvas({ xml, onXmlChange, readOnly }) {
     const sourceEdges = edges.filter(e => e.source === params.source);
 
     if (sourceNode?.type === 'CONDITION') {
-      const lbl = sourceEdges.length === 0 ? '+' : (sourceEdges[0].data?.label === '+' ? '-' : '+');
-      setEdges((eds) => addEdge({ ...params, type: 'customEdge', data: { label: lbl }, markerEnd: { type: MarkerType.ArrowClosed } }, eds));
+      const pref = edgeLabels[edgeStyle || 'ano-ne'];
+      const firstLabel = sourceEdges[0]?.data?.label;
+      const isPositive = firstLabel === pref.t || firstLabel === 'Ano' || firstLabel === '+' || firstLabel === 'Yes' || firstLabel === '✔' || firstLabel === 'True';
+      
+      const lbl = sourceEdges.length === 0 ? pref.t : (isPositive ? pref.f : pref.t);
+      setEdges((eds) => addEdge({ ...params, type: 'customEdge', data: { label: lbl, edgeStyle }, markerEnd: { type: MarkerType.ArrowClosed } }, eds));
     } else {
-      setEdges((eds) => addEdge({ ...params, type: 'customEdge', markerEnd: { type: MarkerType.ArrowClosed } }, eds));
+      setEdges((eds) => addEdge({ ...params, type: 'customEdge', data: { edgeStyle }, markerEnd: { type: MarkerType.ArrowClosed } }, eds));
     }
-  }, [nodes, edges, setEdges]);
+  }, [nodes, edges, setEdges, edgeStyle]);
 
   const updateNodeLabel = (nodeId, newLabel) => {
     setNodes((nds) => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, label: newLabel } } : n));

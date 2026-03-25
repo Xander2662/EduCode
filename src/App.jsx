@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, ExternalLink } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, ExternalLink, Settings } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parsePseudocodeToPython } from './parsers/pseudocodeToPython';
@@ -40,7 +40,6 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
         {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => <div key={i} className="leading-6">{i + 1}</div>)}
       </div>
 
-      {/* Checker Overlay (nezávislý na textarea, neblokuje klikání na kód) */}
       <div ref={overlayRef} className="absolute inset-y-0 right-0 left-12 overflow-hidden pointer-events-none z-10">
         <div className="relative w-full" style={{ height: `${Math.max(lineCount * 24 + 32, 100)}px` }}>
           {blocks.map((b, i) => (
@@ -87,8 +86,9 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [dialog, setDialog] = useState(null);
 
-  const lastSource = useRef(null);
-  const focusedPanel = useRef('diagram');
+  const [edgeStyle, setEdgeStyle] = useState(localStorage.getItem('edgeStyle') || 'ano-ne');
+
+  const activeWindow = useRef('pseudocode'); 
 
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
@@ -98,7 +98,7 @@ export default function App() {
   // Diagram -> Pseudocode Sync
   useEffect(() => {
     if (flow === 'code-to-diagram') return;
-    if (flow === 'bidirectional' && focusedPanel.current !== 'diagram') return;
+    if (flow === 'bidirectional' && activeWindow.current !== 'drawio') return;
 
     const timeoutId = setTimeout(() => {
       try {
@@ -115,20 +115,23 @@ export default function App() {
   // Pseudocode -> Diagram Sync
   useEffect(() => {
     if (flow === 'diagram-to-code') return;
-    if (flow === 'bidirectional' && focusedPanel.current !== 'pseudocode') return;
+    if (flow === 'bidirectional' && activeWindow.current !== 'pseudocode') return;
 
     const timeoutId = setTimeout(() => {
       try {
         let fullCode = activeTab === 'Hlavní' ? pseudocode : tabContents[activeTab];
-        const generatedXml = parsePseudocodeToDrawio(fullCode || '');
-        setDiagramXml(generatedXml);
+        // Přidáno posílání current diagramXml a edgeStyle do parseru pro recyklaci pozic a styl
+        const generatedXml = parsePseudocodeToDrawio(fullCode || '', diagramXml, edgeStyle);
+        if (diagramXml !== generatedXml) {
+            setDiagramXml(generatedXml);
+        }
         setParseErrors([]);
       } catch (err) {
         setParseErrors([err.message]);
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [pseudocode, tabContents, activeTab, flow]);
+  }, [pseudocode, tabContents, activeTab, flow, edgeStyle]);
 
   // Pseudocode -> Python Sync
   useEffect(() => {
@@ -162,7 +165,6 @@ export default function App() {
     setActiveTab(funcName);
   };
 
-
   const blocksToHighlight = [];
   if (activeTab === 'Hlavní') {
     const lines = pseudocode.split('\n');
@@ -189,14 +191,16 @@ export default function App() {
       return (
         <div
           className="flex-1 flex flex-col relative w-full h-full"
-          onFocusCapture={() => { focusedPanel.current = 'diagram'; }}
-          onPointerDownCapture={() => { focusedPanel.current = 'diagram'; }}
+          onMouseEnter={() => { activeWindow.current = 'drawio'; }}
+          onFocusCapture={() => { activeWindow.current = 'drawio'; }}
         >
           <DiagramEditor
             xml={diagramXml}
+            edgeStyle={edgeStyle} // Předání nastavení hran do editoru
             onXmlChange={(xml) => {
-              lastSource.current = 'diagram';
-              setDiagramXml(xml);
+              if (flow === 'diagram-to-code' || (flow === 'bidirectional' && activeWindow.current === 'drawio')) {
+                setDiagramXml(xml);
+              }
             }}
             readOnly={flow === 'code-to-diagram'}
           />
@@ -220,8 +224,8 @@ export default function App() {
       return (
         <div 
           className="flex-1 flex flex-col overflow-hidden relative bg-white dark:bg-gray-900"
-          onFocusCapture={() => { focusedPanel.current = 'pseudocode'; }}
-          onPointerDownCapture={() => { focusedPanel.current = 'pseudocode'; }}
+          onMouseEnter={() => { activeWindow.current = 'pseudocode'; }}
+          onFocusCapture={() => { activeWindow.current = 'pseudocode'; }}
         >
           {parseErrors.length > 0 && (
             <div className="bg-red-50 dark:bg-red-900/30 border-b border-red-500 p-3 z-10">
@@ -257,7 +261,6 @@ export default function App() {
           <LineNumberedTextarea
             value={activeTab === 'Hlavní' ? pseudocode : (tabContents[activeTab] || '')}
             onChange={(e) => {
-              lastSource.current = 'pseudocode';
               const newVal = e.target.value;
               if (activeTab === 'Hlavní') {
                 setPseudocode(newVal);
@@ -303,14 +306,33 @@ export default function App() {
         <button onClick={(e) => { e.stopPropagation(); setIsDarkMode(!isDarkMode); }} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"><Sun size={20} /></button>
       </header>
 
-      <main className="flex-1 flex overflow-hidden p-4 gap-4">
+      <main className="flex-1 flex p-4 gap-4" style={{ overflow: 'hidden' }}>
         {panels.map((type, index) => (
           <React.Fragment key={type}>
-            <div className="flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden relative">
-              <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 flex justify-between items-center z-10">
+            <div className={`flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 relative transition-all ${activeDropdown === index ? 'z-50 overflow-visible' : 'z-10 overflow-hidden'}`}>
+              <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 flex justify-between items-center relative z-50">
                 <span>{PANEL_TYPES[type].title}</span>
-                <div className="flex items-center gap-1">
-                  <div className="relative">
+                <div className="flex items-center gap-2">
+                  
+                  {/* Select stylů hran je vložený přímo sem */}
+                  {type === 'drawio' && (
+                    <select
+                      value={edgeStyle}
+                      onChange={(e) => {
+                        setEdgeStyle(e.target.value);
+                        localStorage.setItem('edgeStyle', e.target.value);
+                      }}
+                      className="text-xs bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none text-gray-600 dark:text-gray-400 cursor-pointer p-1"
+                    >
+                      <option value="ano-ne">Ano / Ne</option>
+                      <option value="+-">+ / -</option>
+                      <option value="yes-no">Yes / No</option>
+                      <option value="check-cross">✔ / ✖</option>
+                      <option value="true-false">True / False</option>
+                    </select>
+                  )}
+
+                  <div className="relative ml-1">
                     <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === index ? null : index); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors">
                       <ChevronDown size={16} />
                     </button>
@@ -381,4 +403,4 @@ export default function App() {
       </main>
     </div>
   );
-}
+};
