@@ -6,17 +6,11 @@ export const parseDrawioToPseudocode = (xml) => {
 
     let nodes = {};
     let edges = [];
-    let variables = new Set();
     let errors = [];
 
     const cleanTextWithLines = (html) => {
       if (!html) return '';
-      let t = html.replace(/<br\s*\/?>/gi, '\n');
-      t = t.replace(/<\/div>/gi, '\n');
-      t = t.replace(/<\/p>/gi, '\n');
-      t = t.replace(/<[^>]*>?/gm, ''); 
-      t = t.replace(/&nbsp;/gi, ' ').replace(/\u00A0/g, ' ');
-      t = t.replace(/&gt;/gi, '>').replace(/&lt;/gi, '<').replace(/&amp;/gi, '&');
+      let t = html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/div>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]*>?/gm, '').replace(/&nbsp;/gi, ' ').replace(/\u00A0/g, ' ').replace(/&gt;/gi, '>').replace(/&lt;/gi, '<').replace(/&amp;/gi, '&');
       return t.split('\n').map(l => l.trim()).filter(Boolean).join('\n');
     };
 
@@ -24,7 +18,6 @@ export const parseDrawioToPseudocode = (xml) => {
       const id = cell.getAttribute('id');
       const vertex = cell.getAttribute('vertex');
       const edge = cell.getAttribute('edge');
-      const parentId = cell.getAttribute('parent');
 
       if (vertex === '1') {
         let value = cleanTextWithLines(cell.getAttribute('value'));
@@ -33,15 +26,13 @@ export const parseDrawioToPseudocode = (xml) => {
         const y = geo ? parseFloat(geo.getAttribute('y') || 0) : 0;
 
         let type = 'ACTION';
-        let entityType = 'FUNCTION';
-        
-        if (style.includes('shape=note') || style.includes('fillColor=#fff2cc') || value.startsWith('#') || value.startsWith('//')) {
-            type = 'COMMENT';
-        }
-        else if (style.includes('swimlane') || style.includes('dashed=1')) type = 'BUBBLE';
+        if (style.includes('shape=note') || style.includes('fillColor=#fff2cc') || value.startsWith('#') || value.startsWith('//')) type = 'COMMENT';
+        else if (style.includes('ellipse') && style.includes('strokeColor=none') && style.includes('fillColor=none')) type = 'MERGE';
         else if (style.includes('ellipse')) {
-            if (!value) type = 'MERGE'; 
-            else type = 'START_END';
+            const modeMatch = style.match(/mode=([^;]+)/);
+            const mode = modeMatch ? modeMatch[1] : null;
+            if (mode === 'end' || value.toLowerCase().includes('konec') || value.toLowerCase() === 'end') type = 'END';
+            else type = 'START';
         }
         else if (style.includes('rhombus') || style.includes('hexagon')) type = 'CONDITION';
         else if (style.includes('shape=parallelogram')) {
@@ -49,20 +40,15 @@ export const parseDrawioToPseudocode = (xml) => {
           else if (value.toUpperCase().startsWith('RETURN')) type = 'ACTION';
           else {
               type = 'IO';
-              let oldFormatTokens = value.split(/[,\s\n\t]+/).filter(Boolean);
-              if (oldFormatTokens.length > 0 && oldFormatTokens[0].toLowerCase() === 'vstup') {
-                  const vars = oldFormatTokens.slice(1);
-                  value = 'Vstup ' + vars.join(', ');
-                  vars.forEach(v => variables.add(v.trim()));
-              } else if (/^(INT\s|STRING\s|REAL\s|BOOLEAN\s|DEKLARACE)/i.test(value)) {
-                  value = value.split(/[\n]+/).join(', ');
-              } else {
-                  value = value.split(/[\n]+/).join(', ');
-              }
+              let tokens = value.split(/[,\s\n\t]+/).filter(Boolean);
+              if (tokens.length > 0 && tokens[0].toLowerCase() === 'vstup') value = 'Vstup ' + tokens.slice(1).join(', ');
           }
         }
+        
+        const entityMatch = style.match(/entityType=([^;]+)/);
+        const entityType = entityMatch ? entityMatch[1] : 'FUNCTION';
 
-        nodes[id] = { id, value, type, y, parentId, entityType, next: [], prev: [] };
+        nodes[id] = { id, value, type, y, next: [], prev: [], entityType };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
@@ -79,240 +65,144 @@ export const parseDrawioToPseudocode = (xml) => {
       }
     });
 
-    let bundles = [];
-    let processed = new Set();
+    const startNodes = Object.values(nodes).filter(n => n.type === 'START');
+    if (startNodes.length === 0) return { code: "", errors: ["Diagram neobsahuje počáteční blok."], nodeLineMap: {} };
+
+    let codeLines = [];
+    let nodeLineMap = {};
+    let visited = new Set();
+    let declaredFuncs = new Set();
     let pendingComments = Object.values(nodes).filter(n => n.type === 'COMMENT').sort((a, b) => a.y - b.y);
 
-    const startNodes = Object.values(nodes).filter(n => n.type === 'START_END' && n.prev.length === 0 && !n.value.toLowerCase().includes('konec'));
+    const appendLine = (text, nodeId = null) => {
+        const idx = codeLines.length;
+        codeLines.push(text);
+        if (nodeId) nodeLineMap[nodeId] = idx;
+    };
 
     const printCommentsBeforeY = (currentY, indent) => {
-        let res = "";
-        while (pendingComments.length > 0 && pendingComments[0].y <= currentY + 40) {
+        while (pendingComments.length > 0 && pendingComments[0].y <= currentY + 30) {
             let c = pendingComments.shift();
-            let lines = c.value.split('\n');
-            lines.forEach(line => {
-                let cleanLine = line.replace(/^[\/#\s]+/, '').trim();
-                if (cleanLine) res += `${indent}# ${cleanLine}\n`;
+            c.value.split('\n').forEach(line => {
+                let cl = line.replace(/^[\/#\s]+/, '').trim();
+                if (cl) appendLine(`${indent}# ${cl}`, c.id);
             });
         }
-        return res;
     };
 
     const generateStatement = (node, indent = "") => {
-        let blockCode = printCommentsBeforeY(node.y, indent);
-        let upperVal = node.value.toUpperCase();
-        let hasReturn = upperVal.includes('RETURN');
-
-        if (hasReturn && node.next.length > 0) {
-            errors.push(`Z bloku obsahujícího RETURN ('${node.value}') nesmí vést žádné další šipky.`);
-            blockCode += `${indent}# [CHYBA] Z RETURN nesmí vést šipky!\n`;
-        }
+        printCommentsBeforeY(node.y, indent);
+        if (node.type === 'MERGE' || !node.value) return;
 
         if (node.type === 'ACTION') {
-            if (!node.value) return blockCode;
-            let lines = node.value.split('\n');
-            if (lines.length > 1) blockCode += `${indent}# Pozn.: Každá operace by měla být zapsána ve vlastním bloku.\n`;
-
-            lines.forEach(line => {
+            node.value.split('\n').forEach(line => {
                 let val = line.trim();
                 if (!val) return;
-                
-                if (val.toUpperCase().startsWith('RETURN')) {
-                    blockCode += `${indent}${val}\n`;
-                } else if (val.includes('=')) {
-                    let parts = val.split('=');
-                    let left = parts[0].trim();
-                    if (left.includes('(') || left.includes(')')) {
-                        errors.push(`Neplatná syntaxe přiřazení: '${val}'. Nelze přiřadit hodnotu do funkce.`);
-                        blockCode += `${indent}# [CHYBA] Nelze přiřazovat do funkce!\n${indent}${val}\n`;
-                    } else {
-                        variables.add(left.replace(/^(INT|STRING|REAL|BOOLEAN)\s+/i, '').trim());
-                        blockCode += `${indent}${val}\n`;
-                    }
+                if (val.toUpperCase().startsWith('RETURN') || val.includes('=')) {
+                    appendLine(`${indent}${val}`, node.id);
                 } else {
                     let isFuncFormat = val.includes('(') || val.includes(')');
-                    let rawName = val.replace(/[()]/g, '');
-                    if (!isFuncFormat && variables.has(rawName)) blockCode += `${indent}${val}\n`;
-                    else {
-                        if (!isFuncFormat && !hasReturn && val.toUpperCase() !== 'RETURN') blockCode += `${indent}# Pozn.: '${rawName}' nebylo definováno jako proměnná, volá se jako funkce.\n`;
-                        blockCode += `${indent}${isFuncFormat ? val : val + '()'}\n`;
-                    }
+                    appendLine(`${indent}${isFuncFormat ? val : val + '()'}`, node.id);
                 }
             });
-            return blockCode;
+        } else if (node.type === 'IO') {
+            if (/^(INT\s|STRING\s|REAL\s|BOOLEAN\s|DEKLARACE)/i.test(node.value) || node.value.toUpperCase().startsWith('VSTUP')) {
+                appendLine(`${indent}${node.value}`, node.id);
+            } else if (node.value.toUpperCase().startsWith('PRINT')) {
+                let inner = node.value.substring(5).trim();
+                if (inner.startsWith('(')) inner = inner.substring(1, inner.length - 1).trim();
+                appendLine(`${indent}PRINT(${inner})`, node.id);
+            } else appendLine(`${indent}PRINT(${node.value})`, node.id);
         }
-        
-        if (node.type === 'IO') {
-            if (/^(INT\s|STRING\s|REAL\s|BOOLEAN\s|DEKLARACE)/i.test(node.value) || upperVal.startsWith('VSTUP')) {
-                return blockCode + `${indent}# Deklarace / Vstup\n${indent}${node.value}\n`;
-            }
-            if (upperVal.startsWith('PRINT')) {
-                let innerText = node.value.substring(5).trim();
-                if (innerText.startsWith('(')) innerText = innerText.substring(1).trim();
-                if (innerText.endsWith(')')) innerText = innerText.substring(0, innerText.length - 1).trim();
-                return blockCode + `${indent}PRINT(${innerText})\n`;
-            }
-            return blockCode + `${indent}PRINT(${node.value})\n`;
-        }
-        return blockCode;
     };
 
-    const doesPathLoopBack = (startNodeId, targetNodeId) => {
-        if (startNodeId === targetNodeId) return true;
-        let visited = new Set();
-        let queue = [startNodeId];
-        while(queue.length > 0) {
-            let curr = queue.shift();
-            if (!curr) continue;
-            if (!visited.has(curr)) {
-                visited.add(curr);
-                if (nodes[curr] && nodes[curr].next) {
-                    for (let edge of nodes[curr].next) {
-                        if (edge.target === targetNodeId) return true;
-                        queue.push(edge.target);
-                    }
-                }
-            }
-        }
+    const doesPathLoopBack = (startId, targetId, localVisited = new Set()) => {
+        if (startId === targetId) return true;
+        if (localVisited.has(startId)) return false;
+        localVisited.add(startId);
+        let node = nodes[startId];
+        if (!node || node.type === 'END') return false;
+        for (let edge of node.next) if (doesPathLoopBack(edge.target, targetId, new Set(localVisited))) return true;
         return false;
     };
 
-    const getReachable = (startId) => {
-        let reach = new Set();
-        let queue = [startId];
-        while(queue.length > 0) {
-            let curr = queue.shift();
-            if (curr && !reach.has(curr)) {
-                reach.add(curr);
-                if (nodes[curr]) nodes[curr].next.forEach(e => queue.push(e.target));
-            }
-        }
-        return reach;
-    };
+    let currentEndNodeId = null;
 
-    const getLinearPath = (startId, stopId) => {
-        let path = [];
-        let curr = startId;
-        let safe = 0;
-        while(curr && curr !== stopId && safe < 100) {
-            safe++;
-            if (nodes[curr]) {
-                path.push(nodes[curr]);
-                if (nodes[curr].next.length > 0) curr = nodes[curr].next[0].target;
-                else break;
-            } else break;
-        }
-        return path;
-    };
-
-    startNodes.forEach(start => {
-      let entity = start.entityType || 'FUNCTION';
-      let bundleCode = `${entity} ${start.value}()\n`;
-      let inPath = new Set();
-      
-      const traverse = (nodeId, indent = "    ", stopId = null) => {
-        if (!nodeId || processed.has(nodeId) || nodeId === stopId) return;
+    const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null) => {
+        if (!nodeId || !nodes[nodeId] || nodeId === stopId || visited.has(nodeId)) return;
 
         const node = nodes[nodeId];
-        processed.add(nodeId);
+        visited.add(nodeId);
         inPath.add(nodeId);
 
-        if (node.type === 'MERGE' || (node.type === 'ACTION' && !node.value)) {
-            if (node.next.length > 0) traverse(node.next[0].target, indent, stopId);
-        } else if (node.type === 'ACTION' || node.type === 'IO') {
-            bundleCode += generateStatement(node, indent);
-            if (node.next.length > 0) traverse(node.next[0].target, indent, stopId);
-        } else if (node.type === 'CONDITION') {
-            bundleCode += printCommentsBeforeY(node.y, indent);
+        if (node.type === 'START') {
+            const fName = node.value || 'main';
+            if (declaredFuncs.has(fName)) errors.push(`Chyba v diagramu: Duplicitní název funkce/třídy '${fName}'`);
+            declaredFuncs.add(fName);
+
+            currentEndNodeId = node.id; 
+            appendLine(`${indent}${node.entityType} ${fName}()`, node.id);
+            if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId);
+            printCommentsBeforeY(Infinity, indent + "    ");
+            
+            // Highlight mapuje ENDFUNCTION přímo na zachycený konečný blok!
+            appendLine(`${indent}END${node.entityType}`, currentEndNodeId);
+            appendLine(''); appendLine('# ----------------------'); appendLine('');
+        }
+        else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE') {
+            generateStatement(node, indent);
+            if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
+                traverse(node.next[0].target, indent, new Set(inPath), stopId);
+            }
+        }
+        else if (node.type === 'CONDITION') {
+            printCommentsBeforeY(node.y, indent);
             const trueEdge = node.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes(e.value)) || node.next[0];
             const falseEdge = node.next.find(e => ['ne', 'no', 'false', '0', 'n', '-'].includes(e.value)) || node.next[1];
             
             const tTarget = trueEdge?.target;
             const fTarget = falseEdge?.target;
 
-            const tIsAncestor = tTarget ? inPath.has(tTarget) : false;
-            const fIsAncestor = fTarget ? inPath.has(fTarget) : false;
+            const tLoops = tTarget ? doesPathLoopBack(tTarget, node.id) : false;
+            const fLoops = fTarget ? doesPathLoopBack(fTarget, node.id) : false;
 
-            const tLoopsBack = (tTarget && !tIsAncestor) ? doesPathLoopBack(tTarget, node.id) : false;
-            const fLoopsBack = (fTarget && !fIsAncestor) ? doesPathLoopBack(fTarget, node.id) : false;
-
-            if (tLoopsBack || fLoopsBack) {
-                const isTrueLoop = tLoopsBack;
-                const bodyTarget = isTrueLoop ? tTarget : fTarget;
-                const exitTarget = isTrueLoop ? fTarget : tTarget;
-
-                const isForLoop = node.value.toUpperCase().startsWith('FOR ');
-                const conditionText = isTrueLoop ? node.value : `NOT (${node.value})`;
+            if (tLoops || fLoops) {
+                const isTrueLoop = tLoops;
+                const isFor = node.value.toUpperCase().startsWith('FOR ');
+                const condText = isTrueLoop ? node.value : `NOT (${node.value})`;
                 
-                if (isForLoop) bundleCode += `${indent}${conditionText} DO\n`;
-                else bundleCode += `${indent}WHILE ${conditionText} DO\n`;
-                
-                traverse(bodyTarget, indent + "    ", node.id);
+                appendLine(`${indent}${isFor ? '' : 'WHILE '}${condText} DO`, node.id);
+                if (isTrueLoop && tTarget) traverse(tTarget, indent + "    ", new Set(inPath), node.id);
+                if (!isTrueLoop && fTarget) traverse(fTarget, indent + "    ", new Set(inPath), node.id);
+                appendLine(`${indent}${isFor ? 'ENDFOR' : 'ENDWHILE'}`);
 
-                if (isForLoop) bundleCode += `${indent}ENDFOR\n`;
-                else bundleCode += `${indent}ENDWHILE\n`;
-
-                if (exitTarget) traverse(exitTarget, indent, stopId);
-            } else if (tIsAncestor || fIsAncestor) {
-                const isTrueLoop = tIsAncestor;
-                const loopTarget = isTrueLoop ? tTarget : fTarget;
-                const exitTarget = isTrueLoop ? fTarget : tTarget;
-
-                const isForLoop = node.value.toUpperCase().startsWith('FOR ');
-                const conditionText = isTrueLoop ? node.value : `NOT (${node.value})`;
-                
-                if (isForLoop) bundleCode += `${indent}${conditionText} DO\n`;
-                else bundleCode += `${indent}WHILE ${conditionText} DO\n`;
-                
-                const loopBody = getLinearPath(loopTarget, node.id);
-                loopBody.forEach(bNode => { bundleCode += generateStatement(bNode, indent + "    "); });
-
-                if (isForLoop) bundleCode += `${indent}ENDFOR\n`;
-                else bundleCode += `${indent}ENDWHILE\n`;
-
-                if (exitTarget) traverse(exitTarget, indent, stopId);
+                const exitNode = isTrueLoop ? fTarget : tTarget;
+                if (exitNode && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId);
             } else {
-                let mergeNodeId = null;
-                if (tTarget && fTarget) {
-                    const reachTrue = getReachable(tTarget);
-                    const reachFalse = getReachable(fTarget);
-                    for (let id of reachTrue) {
-                        if (reachFalse.has(id)) { mergeNodeId = id; break; }
-                    }
-                }
-
-                const isForLoop = node.value.toUpperCase().startsWith('FOR ');
+                appendLine(`${indent}IF ${node.value} THEN`, node.id);
+                if (tTarget) traverse(tTarget, indent + "    ", new Set(inPath), stopId);
                 
-                if (isForLoop) {
-                    bundleCode += `${indent}${node.value} DO\n`;
-                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", mergeNodeId || stopId);
-                    bundleCode += `${indent}ENDFOR\n`;
-                    if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'START_END') traverse(fTarget, indent, stopId);
-                } else {
-                    bundleCode += `${indent}IF ${node.value} THEN\n`;
-                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", mergeNodeId || stopId);
-                    
-                    if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'START_END') {
-                        bundleCode += `${indent}ELSE\n`;
-                        traverse(fTarget, indent + "    ", mergeNodeId || stopId);
-                    }
-                    bundleCode += `${indent}ENDIF\n`;
+                if (fTarget && nodes[fTarget] && nodes[fTarget].type !== 'END') {
+                    appendLine(`${indent}ELSE`);
+                    traverse(fTarget, indent + "    ", new Set(inPath), stopId);
                 }
-
-                if (mergeNodeId && !inPath.has(mergeNodeId)) traverse(mergeNodeId, indent, stopId);
+                appendLine(`${indent}ENDIF`);
             }
         }
+        else if (node.type === 'END') {
+            currentEndNodeId = node.id; // Zachytíme ID posledního bloku
+            generateStatement(node, indent);
+        }
         inPath.delete(nodeId);
-      };
+    };
 
-      if (start.next.length > 0) traverse(start.next[0].target);
-      bundleCode += `END${entity}\n`;
-      bundles.push(bundleCode);
-    });
+    startNodes.forEach(start => traverse(start.id));
 
-    if (bundles.length === 0) return { code: "", errors: ["Diagram neobsahuje počáteční blok."] };
-    return { code: bundles.join('\n\n# ----------------------\n\n'), errors };
+    let code = codeLines.join('\n').trim();
+    if (code.endsWith('# ----------------------')) code = code.substring(0, code.length - 24).trim();
+
+    return { code, errors, nodeLineMap };
   } catch (err) {
-    return { bundles: [], code: "", errors: [err.message] };
+    return { code: "", errors: ["Kritická chyba parseru: " + err.message], nodeLineMap: {} };
   }
 };

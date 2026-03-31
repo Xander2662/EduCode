@@ -1,20 +1,39 @@
-export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 'ano-ne') => {
-    let idCounter = 2; 
-    const getNewId = () => (idCounter++).toString();
+export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+-') => {
+    const getNewId = () => 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 11);
     
     const edgeLabels = {
         '+-': { t: '+', f: '-' },
         'ano-ne': { t: 'Ano', f: 'Ne' },
         'yes-no': { t: 'Yes', f: 'No' },
-        'check-cross': { t: '✔', f: '✖' },
         'true-false': { t: 'True', f: 'False' }
     };
-    const EL = edgeLabels[edgeStyle] || edgeLabels['ano-ne'];
+    const EL = edgeLabels[edgeStyle] || edgeLabels['+-'];
     
-    let lines = code.split('\n').map(l => l.trim()).filter(l => l);
-    if (lines.length === 0) return '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>';
+    let errors = [];
+    let declaredFuncs = new Set();
+    
+    const lines = code.split('\n').map(l => l.trim());
+    const blocks = [];
+    let currentBlock = [];
+    
+    for (let line of lines) {
+        if (!line && currentBlock.length === 0) continue;
+        const upper = line.toUpperCase();
+        if (upper.startsWith('FUNCTION ') || upper.startsWith('CLASS ')) {
+            if (currentBlock.length > 0) blocks.push(currentBlock);
+            currentBlock = [line];
+        } else if (upper === 'ENDFUNCTION' || upper === 'ENDCLASS') {
+            currentBlock.push(line);
+            blocks.push(currentBlock);
+            currentBlock = [];
+        } else {
+            if(line) currentBlock.push(line);
+        }
+    }
+    if (currentBlock.length > 0) blocks.push(currentBlock);
 
-    // --- LOGIKA PRO ZACHOVÁNÍ POZIC UZIVATELSKÝCH BLOKŮ ---
+    if (blocks.length === 0) return { xml: '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>', errors: [] };
+
     let existingNodes = [];
     if (existingXml && existingXml.includes('<mxGraphModel')) {
         const parser = new DOMParser();
@@ -25,27 +44,29 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 'a
             const geo = cell.querySelector('mxGeometry');
             if (geo) {
                 let type = 'ACTION';
-                if (style.includes('ellipse')) type = 'START_END';
+                if (style.includes('ellipse') && style.includes('strokeColor=none') && style.includes('fillColor=none')) type = 'MERGE';
+                else if (style.includes('ellipse')) type = 'START_END';
                 else if (style.includes('rhombus')) type = 'CONDITION';
                 else if (style.includes('shape=parallelogram')) type = 'IO';
                 else if (style.includes('shape=note')) type = 'COMMENT';
-                existingNodes.push({ val, type, x: parseFloat(geo.getAttribute('x')), y: parseFloat(geo.getAttribute('y')), used: false });
+                existingNodes.push({ id: cell.getAttribute('id'), val, type, x: parseFloat(geo.getAttribute('x')), y: parseFloat(geo.getAttribute('y')), used: false });
             }
         });
     }
 
-    const getPos = (text, type, defX, defY) => {
+    const getPos = (text, type, defX, currentY) => {
         const match = existingNodes.find(n => !n.used && n.type === type && n.val === text);
         if (match) {
             match.used = true;
-            return { x: match.x, y: match.y };
+            const finalY = Math.max(currentY, match.y);
+            return { x: match.x, y: finalY, matched: true, oldId: match.id };
         }
-        return { x: defX, y: defY };
+        return { x: defX, y: currentY, matched: false, oldId: getNewId() };
     };
-    // --------------------------------------------------------
 
-    let nodes = [];
-    let edges = [];
+    let outNodes = [];
+    let outEdges = [];
+    let globalGroupX = 360;
     
     const STYLES = {
         START_END: "ellipse;whiteSpace=wrap;html=1;",
@@ -53,180 +74,184 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 'a
         IO: "shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;",
         CONDITION: "rhombus;whiteSpace=wrap;html=1;",
         COMMENT: "shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;strokeColor=#d6b656;",
+        MERGE: "ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;resizable=0;movable=0;rotatable=0;",
         EDGE: "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;"
     };
 
-    let funcName = "Start";
-    if (lines[0].toUpperCase().startsWith('FUNCTION ')) {
-        funcName = lines[0].substring(9).replace('()', '').trim();
-        lines.shift();
-    } else if (lines[0].toUpperCase().startsWith('CLASS ')) {
-        funcName = lines[0].substring(6).replace('()', '').trim();
-        lines.shift();
-    }
-    
-    if (lines.length > 0 && (lines[lines.length - 1].toUpperCase() === 'ENDFUNCTION' || lines[lines.length - 1].toUpperCase() === 'ENDCLASS')) {
-        lines.pop();
-    }
-
-    let startId = getNewId();
-    let startPos = getPos(funcName || "main", 'START_END', 360, 40);
-    nodes.push({ id: startId, text: funcName || "main", type: 'START_END', x: startPos.x, y: startPos.y });
-
-    let stack = [];
-    let lastNodeId = startId;
-    let yOffset = 160; // ZVĚTŠENÝ ROZESTUP
-    let pendingExitText = null;
-
-    const addNode = (text, type, defaultX, defaultY) => {
-        const id = getNewId();
-        const pos = getPos(text, type, defaultX, defaultY);
-        nodes.push({ id, text, type, x: pos.x, y: pos.y });
-        return id;
-    };
-
-    const addEdge = (source, target, value = "", sourceHandle = "s-bottom", targetHandle = "t-top") => {
-        edges.push({ id: getNewId(), source, target, value, sourceHandle, targetHandle });
-    };
-
-    const getXPos = () => {
-        let x = 360;
-        for (let i = 0; i < stack.length; i++) {
-            const s = stack[i];
-            if (s.type === 'LOOP') x += 240; // ZVĚTŠENÝ HORIZONTÁLNÍ ROZESTUP
-            if (s.type === 'IF' && s.trueLast !== null) x += 240;
-        }
-        return x;
-    };
-
-    for (let i = 0; i < lines.length; i++) {
-        let line = lines[i];
-        let upper = line.toUpperCase();
+    blocks.forEach(blockLines => {
+        let funcName = "main";
+        let entityType = "FUNCTION";
+        let firstUpper = blockLines[0].toUpperCase();
         
-        if (upper.startsWith('//') || upper.startsWith('#')) {
-            addNode(line, 'COMMENT', getXPos() + 160, yOffset - 20);
-            continue;
+        if (firstUpper.startsWith('FUNCTION ')) {
+            funcName = blockLines[0].substring(9).replace('()', '').trim();
+            blockLines.shift();
+        } else if (firstUpper.startsWith('CLASS ')) {
+            entityType = "CLASS";
+            funcName = blockLines[0].substring(6).replace('()', '').trim();
+            blockLines.shift();
+        }
+        
+        if (declaredFuncs.has(funcName)) errors.push(`Chyba v kódu: Duplicitní název funkce/třídy '${funcName}'`);
+        declaredFuncs.add(funcName);
+
+        if (blockLines.length > 0 && (blockLines[blockLines.length - 1].toUpperCase() === 'ENDFUNCTION' || blockLines[blockLines.length - 1].toUpperCase() === 'ENDCLASS')) {
+            blockLines.pop();
         }
 
-        if (upper.startsWith('IF ')) {
-            const condText = line.substring(3, upper.lastIndexOf(' THEN')).trim();
-            const condId = addNode(condText, 'CONDITION', getXPos(), yOffset);
-            
-            let inText = pendingExitText || "";
-            pendingExitText = null;
-            addEdge(lastNodeId, condId, inText, "s-bottom", "t-top");
-            
-            stack.push({ type: 'IF', id: condId, endY: yOffset, trueLast: null });
-            lastNodeId = condId;
-            yOffset += 140; // ZVĚTŠENÝ ODSKOK
-        } 
-        else if (upper === 'ELSE') {
-            const currentIf = stack[stack.length - 1];
-            currentIf.trueLast = lastNodeId;
-            lastNodeId = currentIf.id; 
-            yOffset = currentIf.endY + 140; 
-        } 
-        else if (upper === 'ENDIF') {
-            const currentIf = stack.pop();
-            const endIfId = addNode("", "ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;", getXPos(), yOffset); 
-            
-            if (currentIf.trueLast) {
-                addEdge(currentIf.trueLast, endIfId, "", "s-bottom", "t-top");
-                addEdge(lastNodeId, endIfId, "", "s-bottom", "t-top");
-            } else {
-                if (lastNodeId === currentIf.id) {
-                    addEdge(currentIf.id, endIfId, EL.t, "s-bottom", "t-top"); 
-                    addEdge(currentIf.id, endIfId, EL.f, "s-right", "t-top"); 
-                } else {
-                    addEdge(lastNodeId, endIfId, "", "s-bottom", "t-top"); 
-                    addEdge(currentIf.id, endIfId, EL.f, "s-right", "t-top"); 
-                }
+        let yOffset = 40;
+        let startPos = getPos(funcName || "main", 'START_END', globalGroupX, yOffset);
+        let startId = startPos.oldId;
+        outNodes.push({ id: startId, text: funcName || "main", type: 'START_END', x: startPos.x, y: startPos.y, mode: 'start', entityType });
+
+        let stack = [];
+        let lastNodeId = startId;
+        yOffset = Math.max(140, startPos.y + 120); 
+        let pendingExitText = null;
+
+        const addNode = (text, type, defaultX) => {
+            const pos = getPos(text, type, defaultX, yOffset);
+            outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y });
+            yOffset = pos.y + (type === 'CONDITION' ? 140 : 100);
+            return pos.oldId;
+        };
+
+        const addEdge = (source, target, value = "", sourceHandle = "s-bottom", targetHandle = "t-top") => {
+            outEdges.push({ id: getNewId(), source, target, value, sourceHandle, targetHandle });
+        };
+
+        const getXPos = () => {
+            let x = globalGroupX;
+            for (let i = 0; i < stack.length; i++) {
+                if (stack[i].type === 'LOOP') x += 240;
+                if (stack[i].type === 'IF' && stack[i].trueLast !== null) x += 240;
             }
+            return x;
+        };
+
+        for (let i = 0; i < blockLines.length; i++) {
+            let line = blockLines[i];
+            let upper = line.toUpperCase();
             
-            lastNodeId = endIfId;
-            yOffset += 100;
-        }
-        else if (upper.startsWith('WHILE ') || upper.startsWith('FOR ')) {
-            const isFor = upper.startsWith('FOR ');
-            const condText = isFor ? line.substring(0, upper.lastIndexOf(' DO')).trim() : line.substring(6, upper.lastIndexOf(' DO')).trim();
-            
-            const loopId = addNode(condText, 'CONDITION', getXPos(), yOffset);
-            let inText = pendingExitText || "";
-            pendingExitText = null;
-            addEdge(lastNodeId, loopId, inText, "s-bottom", "t-top");
-            
-            stack.push({ type: 'LOOP', id: loopId });
-            lastNodeId = loopId;
-            yOffset += 140;
-        }
-        else if (upper === 'ENDWHILE' || upper === 'ENDFOR') {
-            const currentLoop = stack.pop();
-            addEdge(lastNodeId, currentLoop.id, "", "s-bottom", "t-left"); 
-            
-            lastNodeId = currentLoop.id; 
-            pendingExitText = EL.f;
-            yOffset += 100;
-        }
-        else {
-            let isIo = false;
-            let text = line;
-            
-            if (upper.startsWith('PRINT(') && upper.endsWith(')')) {
-                isIo = true;
-                text = line.substring(6, line.length - 1);
-            } else if (upper.startsWith('VSTUP ')) {
-                isIo = true;
-            } else if (upper.startsWith('RETURN')) {
-                isIo = true;
+            if (upper.startsWith('//') || upper.startsWith('#')) {
+                addNode(line, 'COMMENT', getXPos() + 160);
+                continue;
             }
 
-            let xPos = getXPos();
-            if (stack.length > 0 && stack[stack.length - 1].type === 'IF' && stack[stack.length - 1].trueLast) {
-                xPos += 240; 
-            }
-
-            const nodeId = addNode(text, isIo ? 'IO' : 'ACTION', xPos, yOffset);
-            
-            let edgeText = "";
-            let srcHandle = "s-bottom";
-
-            if (pendingExitText) {
-                edgeText = pendingExitText;
+            if (upper.startsWith('IF ')) {
+                const condText = line.substring(3, upper.lastIndexOf(' THEN')).trim();
+                const condId = addNode(condText, 'CONDITION', getXPos());
+                
+                let inText = pendingExitText || "";
                 pendingExitText = null;
-                srcHandle = "s-right";
-            } else if (stack.length > 0) {
-                const parent = stack[stack.length - 1];
-                if (lastNodeId === parent.id) {
-                    edgeText = (parent.type === 'IF' && parent.trueLast) ? EL.f : EL.t;
-                    srcHandle = edgeText === EL.f ? "s-right" : "s-bottom";
+                addEdge(lastNodeId, condId, inText, "s-bottom", "t-top");
+                
+                stack.push({ type: 'IF', id: condId, trueLast: null });
+                lastNodeId = condId;
+            } 
+            else if (upper === 'ELSE') {
+                const currentIf = stack[stack.length - 1];
+                currentIf.trueLast = lastNodeId;
+                lastNodeId = currentIf.id; 
+            } 
+            else if (upper === 'ENDIF') {
+                const currentIf = stack.pop();
+                const endIfId = addNode("", "MERGE", getXPos()); 
+                
+                if (currentIf.trueLast) {
+                    addEdge(currentIf.trueLast, endIfId, "", "s-bottom", "t-top");
+                    addEdge(lastNodeId, endIfId, "", "s-bottom", "t-top");
+                } else {
+                    if (lastNodeId === currentIf.id) {
+                        addEdge(currentIf.id, endIfId, EL.t, "s-bottom", "t-top"); 
+                        addEdge(currentIf.id, endIfId, EL.f, "s-right", "t-top"); 
+                    } else {
+                        addEdge(lastNodeId, endIfId, "", "s-bottom", "t-top"); 
+                        addEdge(currentIf.id, endIfId, EL.f, "s-right", "t-top"); 
+                    }
                 }
+                
+                lastNodeId = endIfId;
             }
-            
-            addEdge(lastNodeId, nodeId, edgeText, srcHandle, "t-top");
-            lastNodeId = nodeId;
-            yOffset += 140;
-        }
-    }
+            else if (upper.startsWith('WHILE ') || upper.startsWith('FOR ')) {
+                const isFor = upper.startsWith('FOR ');
+                const condText = isFor ? line.substring(0, upper.lastIndexOf(' DO')).trim() : line.substring(6, upper.lastIndexOf(' DO')).trim();
+                
+                const loopId = addNode(condText, 'CONDITION', getXPos());
+                let inText = pendingExitText || "";
+                pendingExitText = null;
+                addEdge(lastNodeId, loopId, inText, "s-bottom", "t-top");
+                
+                stack.push({ type: 'LOOP', id: loopId });
+                lastNodeId = loopId;
+            }
+            else if (upper === 'ENDWHILE' || upper === 'ENDFOR') {
+                const currentLoop = stack.pop();
+                addEdge(lastNodeId, currentLoop.id, "", "s-bottom", "t-left"); 
+                
+                lastNodeId = currentLoop.id; 
+                pendingExitText = EL.f;
+            }
+            else {
+                let isIo = false;
+                let text = line;
+                if (upper.startsWith('PRINT(') && upper.endsWith(')')) { isIo = true; text = line.substring(6, line.length - 1); } 
+                else if (upper.startsWith('VSTUP ') || upper.startsWith('RETURN')) isIo = true;
 
-    const endId = addNode("Konec", 'START_END', 360, yOffset);
-    let finalEdgeText = pendingExitText || (stack.length > 0 ? EL.f : "");
-    let finalSrcHandle = pendingExitText ? "s-right" : "s-bottom";
-    addEdge(lastNodeId, endId, finalEdgeText, finalSrcHandle, "t-top");
+                let xPos = getXPos();
+                if (stack.length > 0 && stack[stack.length - 1].type === 'IF' && stack[stack.length - 1].trueLast) xPos += 240; 
+
+                const nodeId = addNode(text, isIo ? 'IO' : 'ACTION', xPos);
+                
+                let edgeText = "";
+                let srcHandle = "s-bottom";
+
+                if (pendingExitText) {
+                    edgeText = pendingExitText;
+                    pendingExitText = null;
+                    srcHandle = "s-right";
+                } else if (stack.length > 0) {
+                    const parent = stack[stack.length - 1];
+                    if (lastNodeId === parent.id) {
+                        edgeText = (parent.type === 'IF' && parent.trueLast) ? EL.f : EL.t;
+                        srcHandle = edgeText === EL.f ? "s-right" : "s-bottom";
+                    }
+                }
+                
+                addEdge(lastNodeId, nodeId, edgeText, srcHandle, "t-top");
+                lastNodeId = nodeId;
+            }
+        }
+
+        const endPos = getPos("Konec", 'START_END', globalGroupX, yOffset);
+        outNodes.push({ id: endPos.oldId, text: "Konec", type: 'START_END', x: endPos.x, y: endPos.y, mode: 'end' });
+        let finalEdgeText = pendingExitText || (stack.length > 0 ? EL.f : "");
+        let finalSrcHandle = pendingExitText ? "s-right" : "s-bottom";
+        addEdge(lastNodeId, endPos.oldId, finalEdgeText, finalSrcHandle, "t-top");
+
+        globalGroupX += 600; 
+    });
 
     let xml = `<mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">\n  <root>\n    <mxCell id="0" />\n    <mxCell id="1" parent="0" />\n`;
 
-    nodes.forEach(n => {
+    outNodes.forEach(n => {
         let w = 120, h = 60;
         if (n.type === 'CONDITION') { w = 80; h = 80; }
         if (n.type === 'START_END') { w = 100; h = 40; }
         if (n.type === 'COMMENT') { w = 140; h = 50; }
-        const safeText = n.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        xml += `    <mxCell id="${n.id}" value="${safeText}" style="${STYLES[n.type] || n.type}" vertex="1" parent="1">\n`;
+        if (n.type === 'MERGE') { w = 10; h = 10; }
+        
+        let style = STYLES[n.type] || n.type;
+        if (n.mode) style += `mode=${n.mode};`;
+        if (n.entityType) style += `entityType=${n.entityType};`;
+
+        const safeText = (n.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}" vertex="1" parent="1">\n`;
         xml += `      <mxGeometry x="${n.x}" y="${n.y}" width="${w}" height="${h}" as="geometry" />\n`;
         xml += `    </mxCell>\n`;
     });
 
-    edges.forEach(e => {
+    outEdges.forEach(e => {
         let style = STYLES.EDGE + `sourceHandle=${e.sourceHandle};targetHandle=${e.targetHandle};`;
         xml += `    <mxCell id="${e.id}" value="${e.value}" style="${style}" edge="1" parent="1" source="${e.source}" target="${e.target}">\n`;
         xml += `      <mxGeometry relative="1" as="geometry" />\n`;
@@ -234,5 +259,5 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 'a
     });
 
     xml += `  </root>\n</mxGraphModel>`;
-    return xml;
+    return { xml, errors };
 };

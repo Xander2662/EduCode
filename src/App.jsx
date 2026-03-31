@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, ExternalLink, Settings } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, ExternalLink } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parsePseudocodeToPython } from './parsers/pseudocodeToPython';
@@ -11,17 +11,19 @@ const PANEL_TYPES = {
   python: { id: 'python', label: 'Python', title: 'Python Kód' }
 };
 
-const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], onExport }) => {
+const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], onExport, highlightLine }) => {
   const lineCount = value?.split('\n').length || 1;
   const textareaRef = useRef(null);
   const lineNumbersRef = useRef(null);
   const overlayRef = useRef(null);
+  const highlightRef = useRef(null);
   const [copied, setCopied] = useState(false);
 
   const handleScroll = (e) => {
     const top = e.target.scrollTop;
     if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = top;
     if (overlayRef.current) overlayRef.current.scrollTop = top;
+    if (highlightRef.current) highlightRef.current.scrollTop = top;
   };
 
   const handleCopy = () => {
@@ -38,6 +40,14 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
 
       <div ref={lineNumbersRef} className="w-12 bg-gray-50 dark:bg-gray-800 text-gray-400 text-right pr-3 py-4 font-mono text-sm overflow-hidden select-none border-r border-gray-200 dark:border-gray-700 z-10">
         {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => <div key={i} className="leading-6">{i + 1}</div>)}
+      </div>
+
+      <div ref={highlightRef} className="absolute inset-y-0 right-0 left-12 overflow-hidden pointer-events-none z-0">
+        <div className="relative w-full" style={{ height: `${Math.max(lineCount * 24 + 32, 100)}px` }}>
+           {highlightLine !== null && highlightLine !== undefined && (
+             <div className="absolute left-0 right-0 bg-indigo-500/20 dark:bg-indigo-400/20 transition-all" style={{ top: `${16 + highlightLine * 24}px`, height: '24px' }}></div>
+           )}
+        </div>
       </div>
 
       <div ref={overlayRef} className="absolute inset-y-0 right-0 left-12 overflow-hidden pointer-events-none z-10">
@@ -58,7 +68,7 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
 
       <textarea
         ref={textareaRef}
-        className={`flex-1 w-full p-4 resize-none focus:outline-none font-mono text-sm bg-transparent leading-6 whitespace-pre relative z-0 ${hasErrors ? 'text-red-700 dark:text-red-300' : 'text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/50'}`}
+        className={`flex-1 w-full p-4 resize-none focus:outline-none font-mono text-sm bg-transparent leading-6 whitespace-pre relative z-10 ${hasErrors ? 'text-red-700 dark:text-red-300' : 'text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/50'}`}
         value={value}
         onChange={onChange}
         onScroll={handleScroll}
@@ -86,7 +96,9 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [dialog, setDialog] = useState(null);
 
-  const [edgeStyle, setEdgeStyle] = useState(localStorage.getItem('edgeStyle') || 'ano-ne');
+  const [edgeStyle, setEdgeStyle] = useState(localStorage.getItem('edgeStyle') || '+-');
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [nodeLineMap, setNodeLineMap] = useState({});
 
   const activeWindow = useRef('pseudocode'); 
 
@@ -105,6 +117,7 @@ export default function App() {
         const result = parseDrawioToPseudocode(diagramXml);
         setPseudocode(result?.code || '');
         setParseErrors(result?.errors || []);
+        setNodeLineMap(result?.nodeLineMap || {});
       } catch (err) {
         setParseErrors([err.message]);
       }
@@ -120,12 +133,11 @@ export default function App() {
     const timeoutId = setTimeout(() => {
       try {
         let fullCode = activeTab === 'Hlavní' ? pseudocode : tabContents[activeTab];
-        // Přidáno posílání current diagramXml a edgeStyle do parseru pro recyklaci pozic a styl
-        const generatedXml = parsePseudocodeToDrawio(fullCode || '', diagramXml, edgeStyle);
+        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(fullCode || '', diagramXml, edgeStyle);
         if (diagramXml !== generatedXml) {
             setDiagramXml(generatedXml);
         }
-        setParseErrors([]);
+        setParseErrors(genErrors || []);
       } catch (err) {
         setParseErrors([err.message]);
       }
@@ -196,7 +208,8 @@ export default function App() {
         >
           <DiagramEditor
             xml={diagramXml}
-            edgeStyle={edgeStyle} // Předání nastavení hran do editoru
+            edgeStyle={edgeStyle}
+            onNodeClick={(id) => setSelectedNodeId(id)}
             onXmlChange={(xml) => {
               if (flow === 'diagram-to-code' || (flow === 'bidirectional' && activeWindow.current === 'drawio')) {
                 setDiagramXml(xml);
@@ -273,6 +286,7 @@ export default function App() {
             readOnly={flow === 'diagram-to-code'}
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}
             blocks={activeTab === 'Hlavní' ? blocksToHighlight : []}
+            highlightLine={selectedNodeId ? nodeLineMap[selectedNodeId] : null}
             onExport={exportToTab}
           />
         </div>
@@ -314,7 +328,6 @@ export default function App() {
                 <span>{PANEL_TYPES[type].title}</span>
                 <div className="flex items-center gap-2">
                   
-                  {/* Select stylů hran je vložený přímo sem */}
                   {type === 'drawio' && (
                     <select
                       value={edgeStyle}
@@ -324,10 +337,9 @@ export default function App() {
                       }}
                       className="text-xs bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none text-gray-600 dark:text-gray-400 cursor-pointer p-1"
                     >
-                      <option value="ano-ne">Ano / Ne</option>
                       <option value="+-">+ / -</option>
+                      <option value="ano-ne">Ano / Ne</option>
                       <option value="yes-no">Yes / No</option>
-                      <option value="check-cross">✔ / ✖</option>
                       <option value="true-false">True / False</option>
                     </select>
                   )}
@@ -403,4 +415,4 @@ export default function App() {
       </main>
     </div>
   );
-};
+}

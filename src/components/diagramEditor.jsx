@@ -8,7 +8,6 @@ const edgeLabels = {
   '+-': { t: '+', f: '-' },
   'ano-ne': { t: 'Ano', f: 'Ne' },
   'yes-no': { t: 'Yes', f: 'No' },
-  'check-cross': { t: '✔', f: '✖' },
   'true-false': { t: 'True', f: 'False' }
 };
 
@@ -25,10 +24,10 @@ const CustomEdge = ({ id, source, sourceX, sourceY, targetX, targetY, sourcePosi
     
     setEdges(eds => {
       const sibling = eds.find(edge => edge.source === source && edge.id !== id);
-      const pref = edgeLabels[data.edgeStyle || 'ano-ne'];
+      const pref = edgeLabels[data.edgeStyle || '+-'];
       
       const toggleLabel = (l) => {
-          return (l === pref.t || l === 'Ano' || l === '+' || l === 'Yes' || l === '✔' || l === 'True') ? pref.f : pref.t;
+          return (l === pref.t || l === 'Ano' || l === '+' || l === 'Yes' || l === 'True') ? pref.f : pref.t;
       };
       
       if (!sibling) return eds;
@@ -40,9 +39,9 @@ const CustomEdge = ({ id, source, sourceX, sourceY, targetX, targetY, sourcePosi
     });
   };
 
-  const labelText = data?.label || 'Ano';
-  const pref = edgeLabels[data.edgeStyle || 'ano-ne'];
-  const isPositive = labelText === pref.t || labelText === 'Ano' || labelText === '+' || labelText === 'Yes' || labelText === '✔' || labelText === 'True';
+  const labelText = data?.label || '+';
+  const pref = edgeLabels[data.edgeStyle || '+-'];
+  const isPositive = labelText === pref.t || labelText === 'Ano' || labelText === '+' || labelText === 'Yes' || labelText === 'True';
 
   return (
     <>
@@ -196,6 +195,7 @@ const ConditionNode = ({ id, data, selected }) => {
         <polygon points="50,2 98,50 50,98 2,50" className={hasWarning ? 'fill-red-50 dark:fill-red-900/20' : 'fill-white dark:fill-gray-800'} stroke="currentColor" strokeWidth={selected ? "4" : "2"} vectorEffect="non-scaling-stroke" />
       </svg>
       <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
+      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
 
       <div className="absolute top-6 z-10"><DragHandle /></div>
       <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-16 text-center outline-none bg-transparent text-xs font-mono nodrag mt-2 z-10 text-gray-800 dark:text-gray-100 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
@@ -229,14 +229,22 @@ const CommentNode = ({ id, data, selected }) => {
   );
 };
 
-const nodeTypes = { ACTION: ActionNode, IO: IONode, CONDITION: ConditionNode, START_END: StartEndNode, COMMENT: CommentNode };
+const MergeNode = () => (
+    <div className="w-2 h-2 bg-transparent pointer-events-none">
+        <Handle type="target" position={Position.Top} id="t-top" className="opacity-0" />
+        <Handle type="source" position={Position.Bottom} id="s-bottom" className="opacity-0" />
+    </div>
+);
+
+const nodeTypes = { ACTION: ActionNode, IO: IONode, CONDITION: ConditionNode, START_END: StartEndNode, COMMENT: CommentNode, MERGE: MergeNode };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle }) {
+function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onNodeClick }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const { screenToFlowPosition } = useReactFlow();
 
   const selectedNodes = nodes.filter(n => n.selected);
   const selectedEdges = edges.filter(e => e.selected);
@@ -352,7 +360,6 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle }) {
     if (xml) {
       const { nodes: parsedNodes, edges: parsedEdges } = drawioToReactFlow(xml);
       setNodes(parsedNodes.map(n => ({ ...n, data: { ...n.data, readOnly, onChange: (e) => updateNodeLabel(n.id, e.target.value) } })));
-      // Predani edgeStyle do dat hrany, aby CustomEdge vedela, jaky preferovany text ma pouzit pro swapnuti
       setEdges(parsedEdges.map(e => ({ ...e, data: { ...e.data, readOnly, edgeStyle }, markerEnd: { type: MarkerType.ArrowClosed } })));
     }
   }, [xml, readOnly, edgeStyle, setNodes, setEdges]);
@@ -375,7 +382,6 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle }) {
     } else {
       if (sourceEdges.length >= 1) return false;
     }
-
     return true;
   }, [nodes, edges]);
 
@@ -384,9 +390,9 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle }) {
     const sourceEdges = edges.filter(e => e.source === params.source);
 
     if (sourceNode?.type === 'CONDITION') {
-      const pref = edgeLabels[edgeStyle || 'ano-ne'];
+      const pref = edgeLabels[edgeStyle || '+-'];
       const firstLabel = sourceEdges[0]?.data?.label;
-      const isPositive = firstLabel === pref.t || firstLabel === 'Ano' || firstLabel === '+' || firstLabel === 'Yes' || firstLabel === '✔' || firstLabel === 'True';
+      const isPositive = firstLabel === pref.t || firstLabel === 'Ano' || firstLabel === '+' || firstLabel === 'Yes' || firstLabel === 'True';
       
       const lbl = sourceEdges.length === 0 ? pref.t : (isPositive ? pref.f : pref.t);
       setEdges((eds) => addEdge({ ...params, type: 'customEdge', data: { label: lbl, edgeStyle }, markerEnd: { type: MarkerType.ArrowClosed } }, eds));
@@ -402,10 +408,18 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle }) {
   const addNode = (type, label) => {
     if (readOnly) return;
     const id = Date.now().toString();
+    
+    // Vložení doprostřed view portu!
+    const reactFlowBounds = document.querySelector('.react-flow').getBoundingClientRect();
+    const position = screenToFlowPosition({
+        x: reactFlowBounds.left + reactFlowBounds.width / 2,
+        y: reactFlowBounds.top + reactFlowBounds.height / 2,
+    });
+
     let extraData = {};
     if (type === 'START_END') extraData = { mode: 'unassigned', entityType: 'FUNCTION' };
     
-    setNodes((nds) => nds.concat({ id, type, position: { x: 250, y: 150 }, selected: false, data: { label, readOnly, ...extraData, onChange: (e) => updateNodeLabel(id, e.target.value) } }));
+    setNodes((nds) => nds.concat({ id, type, position, selected: false, data: { label, readOnly, ...extraData, onChange: (e) => updateNodeLabel(id, e.target.value) } }));
   };
 
   const handleExport = () => {
@@ -471,6 +485,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle }) {
         onNodesChange={readOnly ? undefined : onNodesChange} 
         onEdgesChange={readOnly ? undefined : onEdgesChange} 
         onConnect={readOnly ? undefined : onConnect} 
+        onNodeClick={(e, node) => onNodeClick && onNodeClick(node.id)}
         isValidConnection={isValidConnection} 
         nodeTypes={nodeTypes} edgeTypes={edgeTypes} 
         defaultEdgeOptions={{ type: 'customEdge', markerEnd: { type: MarkerType.ArrowClosed } }}
