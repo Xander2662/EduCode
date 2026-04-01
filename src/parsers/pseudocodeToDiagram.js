@@ -20,9 +20,15 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
         if (!line && currentBlock.length === 0) continue;
         const upper = line.toUpperCase();
         if (upper.startsWith('FUNCTION ') || upper.startsWith('CLASS ')) {
-            if (currentBlock.length > 0) blocks.push(currentBlock);
+            if (currentBlock.length > 0) {
+                const lastLine = currentBlock[currentBlock.length - 1].toUpperCase();
+                if (!lastLine.includes('ENDFUNCTION') && !lastLine.includes('ENDCLASS') && !lastLine.includes('KONEC')) {
+                    errors.push(`Tip: Předchozí funkce/třída nebyla ukončena (chybí např. ENDFUNCTION).`);
+                }
+                blocks.push(currentBlock);
+            }
             currentBlock = [line];
-        } else if (upper === 'ENDFUNCTION' || upper === 'ENDCLASS') {
+        } else if (upper === 'ENDFUNCTION' || upper === 'ENDCLASS' || upper === 'KONEC') {
             currentBlock.push(line);
             blocks.push(currentBlock);
             currentBlock = [];
@@ -30,7 +36,13 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
             if(line) currentBlock.push(line);
         }
     }
-    if (currentBlock.length > 0) blocks.push(currentBlock);
+    if (currentBlock.length > 0) {
+        const lastLine = currentBlock[currentBlock.length - 1].toUpperCase();
+        if (!lastLine.includes('ENDFUNCTION') && !lastLine.includes('ENDCLASS') && !lastLine.includes('KONEC')) {
+            errors.push(`Tip: Kód není na konci správně uzavřen (chybí ENDFUNCTION/ENDCLASS).`);
+        }
+        blocks.push(currentBlock);
+    }
 
     if (blocks.length === 0) return { xml: '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>', errors: [] };
 
@@ -58,8 +70,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
         const match = existingNodes.find(n => !n.used && n.type === type && n.val === text);
         if (match) {
             match.used = true;
-            const finalY = Math.max(currentY, match.y);
-            return { x: match.x, y: finalY, matched: true, oldId: match.id };
+            return { x: match.x, y: match.y, matched: true, oldId: match.id };
         }
         return { x: defX, y: currentY, matched: false, oldId: getNewId() };
     };
@@ -92,11 +103,17 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
             blockLines.shift();
         }
         
-        if (declaredFuncs.has(funcName)) errors.push(`Chyba v kódu: Duplicitní název funkce/třídy '${funcName}'`);
+        if (declaredFuncs.has(funcName)) errors.push(`Chyba: Duplicitní název funkce '${funcName}'`);
         declaredFuncs.add(funcName);
 
-        if (blockLines.length > 0 && (blockLines[blockLines.length - 1].toUpperCase() === 'ENDFUNCTION' || blockLines[blockLines.length - 1].toUpperCase() === 'ENDCLASS')) {
-            blockLines.pop();
+        let hasEnd = false;
+        let endLineText = "Konec";
+        if (blockLines.length > 0) {
+            const lastLine = blockLines[blockLines.length - 1].toUpperCase();
+            if (lastLine === 'ENDFUNCTION' || lastLine === 'ENDCLASS' || lastLine === 'KONEC') {
+                endLineText = blockLines.pop();
+                hasEnd = true;
+            }
         }
 
         let yOffset = 40;
@@ -109,10 +126,10 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
         yOffset = Math.max(140, startPos.y + 120); 
         let pendingExitText = null;
 
-        const addNode = (text, type, defaultX) => {
+        const addNode = (text, type, defaultX, extraProps = {}) => {
             const pos = getPos(text, type, defaultX, yOffset);
-            outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y });
-            yOffset = pos.y + (type === 'CONDITION' ? 140 : 100);
+            outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y, ...extraProps });
+            yOffset = Math.max(yOffset, pos.y) + (type === 'CONDITION' ? 140 : 100);
             return pos.oldId;
         };
 
@@ -223,11 +240,12 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
             }
         }
 
-        const endPos = getPos("Konec", 'START_END', globalGroupX, yOffset);
-        outNodes.push({ id: endPos.oldId, text: "Konec", type: 'START_END', x: endPos.x, y: endPos.y, mode: 'end' });
-        let finalEdgeText = pendingExitText || (stack.length > 0 ? EL.f : "");
-        let finalSrcHandle = pendingExitText ? "s-right" : "s-bottom";
-        addEdge(lastNodeId, endPos.oldId, finalEdgeText, finalSrcHandle, "t-top");
+        if (hasEnd) {
+            const endId = addNode(endLineText, 'START_END', globalGroupX, { mode: 'end' });
+            let finalEdgeText = pendingExitText || (stack.length > 0 ? EL.f : "");
+            let finalSrcHandle = pendingExitText ? "s-right" : "s-bottom";
+            addEdge(lastNodeId, endId, finalEdgeText, finalSrcHandle, "t-top");
+        }
 
         globalGroupX += 600; 
     });

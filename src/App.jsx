@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, ExternalLink } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
@@ -11,7 +11,7 @@ const PANEL_TYPES = {
   python: { id: 'python', label: 'Python', title: 'Python Kód' }
 };
 
-const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], onExport, highlightLine }) => {
+const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], onExport, highlightLines = [] }) => {
   const lineCount = value?.split('\n').length || 1;
   const textareaRef = useRef(null);
   const lineNumbersRef = useRef(null);
@@ -44,9 +44,9 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
 
       <div ref={highlightRef} className="absolute inset-y-0 right-0 left-12 overflow-hidden pointer-events-none z-0">
         <div className="relative w-full" style={{ height: `${Math.max(lineCount * 24 + 32, 100)}px` }}>
-           {highlightLine !== null && highlightLine !== undefined && (
-             <div className="absolute left-0 right-0 bg-indigo-500/20 dark:bg-indigo-400/20 transition-all" style={{ top: `${16 + highlightLine * 24}px`, height: '24px' }}></div>
-           )}
+           {highlightLines.map((line, idx) => (
+             <div key={idx} className="absolute left-0 right-0 bg-indigo-500/20 dark:bg-indigo-400/20 transition-all" style={{ top: `${16 + line * 24}px`, height: '24px' }}></div>
+           ))}
         </div>
       </div>
 
@@ -97,7 +97,7 @@ export default function App() {
   const [dialog, setDialog] = useState(null);
 
   const [edgeStyle, setEdgeStyle] = useState(localStorage.getItem('edgeStyle') || '+-');
-  const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState([]);
   const [nodeLineMap, setNodeLineMap] = useState({});
 
   const activeWindow = useRef('pseudocode'); 
@@ -106,6 +106,18 @@ export default function App() {
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
+
+  const handleSelectionChange = useCallback((ids) => {
+    setSelectedNodeIds(prev => {
+      if (prev.length !== ids.length) return ids;
+      const sortedPrev = [...prev].sort();
+      const sortedIds = [...ids].sort();
+      for (let i = 0; i < sortedPrev.length; i++) {
+        if (sortedPrev[i] !== sortedIds[i]) return ids;
+      }
+      return prev;
+    });
+  }, []);
 
   // Diagram -> Pseudocode Sync
   useEffect(() => {
@@ -183,13 +195,18 @@ export default function App() {
     let currentBlock = null;
 
     lines.forEach((line, index) => {
-      const match = line.match(/^(?:FUNCTION|CLASS)\s+([a-zA-Z0-9_]+)/);
+      const match = line.match(/^\s*(?:FUNCTION|CLASS)\s+([a-zA-Z0-9_]+)/i);
       if (match) {
+        // Pokud předchozí blok neměl ENDFUNCTION, implicitně jej uzavřeme
+        if (currentBlock) currentBlock.endLine = index - 1; 
+        
         if (!tabs.includes(match[1])) {
           currentBlock = { name: match[1], startLine: index, endLine: index };
           blocksToHighlight.push(currentBlock);
+        } else {
+          currentBlock = null; 
         }
-      } else if (currentBlock && /^(?:ENDFUNCTION|ENDCLASS)/.test(line)) {
+      } else if (currentBlock && /^\s*(?:ENDFUNCTION|ENDCLASS)/i.test(line)) {
         currentBlock.endLine = index;
         currentBlock = null;
       } else if (currentBlock) {
@@ -209,7 +226,7 @@ export default function App() {
           <DiagramEditor
             xml={diagramXml}
             edgeStyle={edgeStyle}
-            onNodeClick={(id) => setSelectedNodeId(id)}
+            onSelectionChange={handleSelectionChange}
             onXmlChange={(xml) => {
               if (flow === 'diagram-to-code' || (flow === 'bidirectional' && activeWindow.current === 'drawio')) {
                 setDiagramXml(xml);
@@ -242,7 +259,7 @@ export default function App() {
         >
           {parseErrors.length > 0 && (
             <div className="bg-red-50 dark:bg-red-900/30 border-b border-red-500 p-3 z-10">
-              <h4 className="text-red-700 dark:text-red-400 font-bold text-sm flex items-center gap-2 mb-1"><AlertCircle size={16} /> Detekovány chyby</h4>
+              <h4 className="text-red-700 dark:text-red-400 font-bold text-sm flex items-center gap-2 mb-1"><AlertCircle size={16} /> Upozornění</h4>
               <ul className="text-xs text-red-600 dark:text-red-300 list-disc list-inside space-y-1">
                 {parseErrors.map((e, i) => <li key={i}>{e}</li>)}
               </ul>
@@ -286,7 +303,7 @@ export default function App() {
             readOnly={flow === 'diagram-to-code'}
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}
             blocks={activeTab === 'Hlavní' ? blocksToHighlight : []}
-            highlightLine={selectedNodeId ? nodeLineMap[selectedNodeId] : null}
+            highlightLines={selectedNodeIds.map(id => nodeLineMap[id]).filter(l => l !== undefined && l !== null)}
             onExport={exportToTab}
           />
         </div>

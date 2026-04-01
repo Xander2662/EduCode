@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, Background, Handle, Position, MarkerType, BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useReactFlow, useNodeId, useEdges, useNodes } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Download, Upload, Square, Circle, Diamond, AlignLeft, RefreshCcw, Copy, Trash2, MessageSquare } from 'lucide-react';
@@ -45,7 +45,7 @@ const CustomEdge = ({ id, source, sourceX, sourceY, targetX, targetY, sourcePosi
 
   return (
     <>
-      <BaseEdge path={edgePath} markerEnd={markerEnd} className={selected ? "!stroke-indigo-600" : "!stroke-gray-800 dark:!stroke-gray-400"} style={{ strokeWidth: selected ? 3 : 2 }} />
+      <BaseEdge path={edgePath} markerEnd={markerEnd} className={`react-flow__edge-path custom-edge-${id} ${selected ? "!stroke-indigo-600" : "!stroke-gray-800 dark:!stroke-gray-400"}`} style={{ strokeWidth: selected ? 3 : 2 }} />
       {isCondition && (
         <EdgeLabelRenderer>
           <div style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, pointerEvents: 'all' }}
@@ -72,8 +72,6 @@ const handleInputMouseDown = (e, selected) => {
 
 const StartEndNode = ({ id, data, selected }) => {
   const { setNodes } = useReactFlow();
-  const nodes = useNodes();
-  const edges = useEdges();
   
   let mode = data.mode || 'unassigned';
   let entityType = data.entityType || 'FUNCTION';
@@ -81,9 +79,7 @@ const StartEndNode = ({ id, data, selected }) => {
   const setMode = (newMode) => {
     let newLabel = data.label;
     if (newMode === 'start' && !newLabel) {
-       const existingStarts = nodes.filter(n => n.type === 'START_END' && n.data.mode === 'start');
-       const hasMain = existingStarts.some(n => n.data.label === 'main');
-       newLabel = hasMain ? `function${existingStarts.length}` : 'main';
+       newLabel = 'main';
     }
     setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, mode: newMode, label: newLabel } } : n));
   };
@@ -92,34 +88,6 @@ const StartEndNode = ({ id, data, selected }) => {
     if(data.readOnly) return;
     setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, entityType: entityType === 'FUNCTION' ? 'CLASS' : 'FUNCTION' } } : n));
   };
-
-  const isTarget = edges.some(e => e.target === id);
-  const isSource = edges.some(e => e.source === id);
-
-  if (mode === 'unassigned') {
-    if (isTarget) mode = 'end';
-    else if (isSource) mode = 'start';
-  }
-
-  let startName = 'main';
-  if (mode === 'end') {
-    const findStartNode = (nodeId, visited = new Set()) => {
-        if (visited.has(nodeId)) return null;
-        visited.add(nodeId);
-        const incEdges = edges.filter(e => e.target === nodeId);
-        for (let edge of incEdges) {
-            const srcNode = nodes.find(n => n.id === edge.source);
-            if (srcNode) {
-                if (srcNode.type === 'START_END' && srcNode.data.mode === 'start') return srcNode;
-                const found = findStartNode(srcNode.id, visited);
-                if (found) return found;
-            }
-        }
-        return null;
-    };
-    const startNode = findStartNode(id);
-    if (startNode) startName = startNode.data.label || 'main';
-  }
 
   return (
     <div className={`bg-white dark:bg-gray-800 border-2 rounded-[2rem] min-w-[140px] min-h-[60px] flex flex-col justify-center items-center shadow-sm p-2 transition-all relative ${getSelectClass(selected)}`}>
@@ -136,7 +104,7 @@ const StartEndNode = ({ id, data, selected }) => {
       )}
 
       {mode === 'start' && (
-        <div className="w-full flex flex-col px-2 relative pb-1">
+        <div className="w-full flex-1 flex flex-col px-2 relative pb-1 justify-center">
           <div className="flex justify-between items-center w-full mb-1 px-1">
             <span className="text-[9px] text-gray-400 font-bold w-12 text-left">START</span>
             <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors" title="Chytit a přesunout" />
@@ -149,9 +117,10 @@ const StartEndNode = ({ id, data, selected }) => {
       {mode === 'end' && (
         <>
           <DragHandle />
-          <div className="w-full flex flex-col items-center px-3 pb-1">
-            <span className="text-sm font-bold text-gray-800 dark:text-gray-100">Konec</span>
-            <span className="text-[10px] text-gray-500 dark:text-gray-400 font-mono mt-0.5">{startName}</span>
+          <div className="w-full flex-1 flex flex-col items-center justify-center px-3 pb-1 pointer-events-none select-none">
+            <span className="w-full text-center text-sm font-mono font-bold text-gray-800 dark:text-gray-100 block mt-1">
+              {data.label || `END${entityType}`}
+            </span>
           </div>
         </>
       )}
@@ -239,12 +208,15 @@ const MergeNode = () => (
 const nodeTypes = { ACTION: ActionNode, IO: IONode, CONDITION: ConditionNode, START_END: StartEndNode, COMMENT: CommentNode, MERGE: MergeNode };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onNodeClick }) {
+function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const { screenToFlowPosition } = useReactFlow();
+  
+  const hoveredEdgeRef = useRef(null);
+  const lastXmlRef = useRef(''); 
 
   const selectedNodes = nodes.filter(n => n.selected);
   const selectedEdges = edges.filter(e => e.selected);
@@ -320,6 +292,154 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onNodeClick }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete]);
 
+  const onNodeDrag = useCallback((event, node) => {
+    if (readOnly) return;
+
+    let draggedNodes = nodes.filter(n => n.selected);
+    if (draggedNodes.length === 0) draggedNodes = [node];
+    
+    if (draggedNodes.some(n => n.type === 'COMMENT')) return;
+
+    const draggedIds = new Set(draggedNodes.map(n => n.id));
+    const hasExternal = edges.some(e => 
+        (draggedIds.has(e.source) && !draggedIds.has(e.target)) || 
+        (draggedIds.has(e.target) && !draggedIds.has(e.source))
+    );
+    if (hasExternal) return;
+
+    const nodeEl = document.querySelector(`.react-flow__node[data-id="${node.id}"]`);
+    if (!nodeEl) return;
+    const rect = nodeEl.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const originalEvents = [];
+    draggedNodes.forEach(n => {
+        const el = document.querySelector(`.react-flow__node[data-id="${n.id}"]`);
+        if (el) {
+            originalEvents.push({ el, val: el.style.pointerEvents });
+            el.style.pointerEvents = 'none';
+        }
+    });
+
+    const elemBelow = document.elementFromPoint(centerX, centerY);
+    originalEvents.forEach(({ el, val }) => { el.style.pointerEvents = val; });
+
+    const edgeElem = elemBelow?.closest('.react-flow__edge');
+    
+    if (hoveredEdgeRef.current && hoveredEdgeRef.current !== edgeElem) {
+        hoveredEdgeRef.current.classList.remove('drop-target');
+        hoveredEdgeRef.current = null;
+    }
+
+    if (edgeElem && hoveredEdgeRef.current !== edgeElem) {
+        edgeElem.classList.add('drop-target');
+        hoveredEdgeRef.current = edgeElem;
+    }
+  }, [edges, nodes, readOnly]);
+
+  const onNodeDragStop = useCallback((event, node) => {
+    if (readOnly) return;
+    
+    if (hoveredEdgeRef.current) {
+        hoveredEdgeRef.current.classList.remove('drop-target');
+        hoveredEdgeRef.current = null;
+    }
+
+    let draggedNodes = nodes.filter(n => n.selected);
+    if (draggedNodes.length === 0) draggedNodes = [node];
+    
+    if (draggedNodes.some(n => n.type === 'COMMENT')) return;
+
+    const draggedIds = new Set(draggedNodes.map(n => n.id));
+    const hasExternal = edges.some(e => 
+        (draggedIds.has(e.source) && !draggedIds.has(e.target)) || 
+        (draggedIds.has(e.target) && !draggedIds.has(e.source))
+    );
+    if (hasExternal) return;
+
+    const nodeEl = document.querySelector(`.react-flow__node[data-id="${node.id}"]`);
+    if (!nodeEl) return;
+    const rect = nodeEl.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const originalEvents = [];
+    draggedNodes.forEach(n => {
+        const el = document.querySelector(`.react-flow__node[data-id="${n.id}"]`);
+        if (el) {
+            originalEvents.push({ el, val: el.style.pointerEvents });
+            el.style.pointerEvents = 'none';
+        }
+    });
+    
+    const elemBelow = document.elementFromPoint(centerX, centerY);
+    originalEvents.forEach(({ el, val }) => { el.style.pointerEvents = val; });
+
+    const edgeElem = elemBelow?.closest('.react-flow__edge');
+    if (edgeElem) {
+        const edgeId = edgeElem.getAttribute('data-id');
+        const targetEdge = edges.find(e => e.id === edgeId);
+        
+        if (targetEdge) {
+            draggedNodes.sort((a, b) => a.position.y - b.position.y);
+            const firstNode = draggedNodes[0];
+            const lastNode = draggedNodes[draggedNodes.length - 1];
+
+            setEdges(eds => {
+                const filtered = eds.filter(e => e.id !== targetEdge.id);
+                
+                const newInternalEdges = [];
+                for (let i = 0; i < draggedNodes.length - 1; i++) {
+                    const curr = draggedNodes[i];
+                    const next = draggedNodes[i+1];
+                    const exists = eds.find(e => e.source === curr.id && e.target === next.id);
+                    if (!exists) {
+                        newInternalEdges.push({
+                            id: `e_${Date.now()}_int_${i}`,
+                            source: curr.id,
+                            target: next.id,
+                            sourceHandle: 's-bottom',
+                            targetHandle: 't-top',
+                            type: 'customEdge',
+                            data: { edgeStyle },
+                            markerEnd: { type: MarkerType.ArrowClosed }
+                        });
+                    }
+                }
+
+                const newEdge1 = {
+                    id: `e_${Date.now()}_1`,
+                    source: targetEdge.source,
+                    target: firstNode.id,
+                    sourceHandle: targetEdge.sourceHandle,
+                    targetHandle: 't-top',
+                    type: 'customEdge',
+                    data: targetEdge.data,
+                    markerEnd: { type: MarkerType.ArrowClosed }
+                };
+
+                const pref = edgeLabels[edgeStyle || '+-'];
+                let outLabel = '';
+                if (lastNode.type === 'CONDITION') outLabel = pref.t;
+
+                const newEdge2 = {
+                    id: `e_${Date.now()}_2`,
+                    source: lastNode.id,
+                    target: targetEdge.target,
+                    sourceHandle: 's-bottom',
+                    targetHandle: targetEdge.targetHandle,
+                    type: 'customEdge',
+                    data: { label: outLabel, edgeStyle },
+                    markerEnd: { type: MarkerType.ArrowClosed }
+                };
+
+                return [...filtered, newEdge1, ...newInternalEdges, newEdge2];
+            });
+        }
+    }
+  }, [edges, nodes, setEdges, edgeStyle, readOnly]);
+
   const handleCopy = () => { 
     if (selectedNodes.length > 0) {
       const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
@@ -356,18 +476,48 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onNodeClick }) {
     setEdges(eds => eds.map(e => ({ ...e, selected: false })).concat(newEdges));
   };
 
+  const updateNodeData = useCallback((nodeId, newData) => {
+    setNodes((nds) => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, ...newData } } : n));
+  }, [setNodes]);
+
+  const updateNodeLabel = useCallback((nodeId, newLabel) => {
+    updateNodeData(nodeId, { label: newLabel });
+  }, [updateNodeData]);
+
   useEffect(() => {
-    if (xml) {
+    if (xml && xml !== lastXmlRef.current) {
+      lastXmlRef.current = xml;
       const { nodes: parsedNodes, edges: parsedEdges } = drawioToReactFlow(xml);
-      setNodes(parsedNodes.map(n => ({ ...n, data: { ...n.data, readOnly, onChange: (e) => updateNodeLabel(n.id, e.target.value) } })));
-      setEdges(parsedEdges.map(e => ({ ...e, data: { ...e.data, readOnly, edgeStyle }, markerEnd: { type: MarkerType.ArrowClosed } })));
+      
+      setNodes(prev => parsedNodes.map(n => {
+          const old = prev.find(p => p.id === n.id);
+          return { 
+              ...n, 
+              selected: old ? old.selected : false,
+              data: { ...n.data, readOnly, onChange: (e) => updateNodeLabel(n.id, e.target.value) } 
+          };
+      }));
+      
+      setEdges(prev => parsedEdges.map(e => {
+          const old = prev.find(p => p.id === e.id);
+          return { 
+              ...e, 
+              selected: old ? old.selected : false,
+              data: { ...e.data, readOnly, edgeStyle }, 
+              markerEnd: { type: MarkerType.ArrowClosed } 
+          };
+      }));
     }
-  }, [xml, readOnly, edgeStyle, setNodes, setEdges]);
+  }, [xml, readOnly, edgeStyle, setNodes, setEdges, updateNodeLabel]);
 
   useEffect(() => {
     if (nodes.length > 0 || edges.length > 0) {
       const timer = setTimeout(() => {
-        onXmlChange(reactFlowToDrawio(nodes, edges));
+        const generatedXml = reactFlowToDrawio(nodes, edges);
+        if (generatedXml !== lastXmlRef.current) {
+            lastXmlRef.current = generatedXml;
+            onXmlChange(generatedXml);
+        }
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -375,7 +525,14 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onNodeClick }) {
 
   const isValidConnection = useCallback((connection) => {
     const sourceNode = nodes.find(n => n.id === connection.source);
+    const targetNode = nodes.find(n => n.id === connection.target);
     const sourceEdges = edges.filter(e => e.source === connection.source);
+
+    if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'start') return false;
+    if (sourceNode?.type === 'START_END' && sourceNode.data?.mode === 'end') return false;
+
+    if (sourceNode?.type === 'START_END' && sourceNode.data?.mode === 'start' && connection.targetHandle !== 't-top') return false;
+    if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'end' && connection.sourceHandle !== 's-bottom') return false;
 
     if (sourceNode?.type === 'CONDITION') {
       if (sourceEdges.length >= 2) return false;
@@ -387,7 +544,15 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onNodeClick }) {
 
   const onConnect = useCallback((params) => {
     const sourceNode = nodes.find(n => n.id === params.source);
+    const targetNode = nodes.find(n => n.id === params.target);
     const sourceEdges = edges.filter(e => e.source === params.source);
+
+    if (sourceNode?.type === 'START_END' && sourceNode.data?.mode === 'unassigned') {
+        updateNodeData(params.source, { mode: 'start', label: 'main' });
+    }
+    if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'unassigned') {
+        updateNodeData(params.target, { mode: 'end', label: 'ENDFUNCTION' });
+    }
 
     if (sourceNode?.type === 'CONDITION') {
       const pref = edgeLabels[edgeStyle || '+-'];
@@ -399,17 +564,12 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onNodeClick }) {
     } else {
       setEdges((eds) => addEdge({ ...params, type: 'customEdge', data: { edgeStyle }, markerEnd: { type: MarkerType.ArrowClosed } }, eds));
     }
-  }, [nodes, edges, setEdges, edgeStyle]);
-
-  const updateNodeLabel = (nodeId, newLabel) => {
-    setNodes((nds) => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, label: newLabel } } : n));
-  };
+  }, [nodes, edges, setEdges, edgeStyle, updateNodeData]);
 
   const addNode = (type, label) => {
     if (readOnly) return;
     const id = Date.now().toString();
     
-    // Vložení doprostřed view portu!
     const reactFlowBounds = document.querySelector('.react-flow').getBoundingClientRect();
     const position = screenToFlowPosition({
         x: reactFlowBounds.left + reactFlowBounds.width / 2,
@@ -442,6 +602,14 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onNodeClick }) {
 
   return (
     <div className="w-full h-full relative outline-none" tabIndex={0}>
+      <style>{`
+        .react-flow__edge.drop-target .react-flow__edge-path {
+          stroke: #4f46e5 !important;
+          stroke-width: 4px !important;
+          filter: drop-shadow(0 0 6px rgba(79,70,229,0.5));
+          transition: all 0.2s ease;
+        }
+      `}</style>
       
       {deleteConfirm && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-900/20 backdrop-blur-sm rounded-lg">
@@ -485,7 +653,11 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onNodeClick }) {
         onNodesChange={readOnly ? undefined : onNodesChange} 
         onEdgesChange={readOnly ? undefined : onEdgesChange} 
         onConnect={readOnly ? undefined : onConnect} 
-        onNodeClick={(e, node) => onNodeClick && onNodeClick(node.id)}
+        onNodeDrag={onNodeDrag}
+        onNodeDragStop={onNodeDragStop}
+        onSelectionChange={({ nodes }) => {
+            if (onSelectionChange) onSelectionChange(nodes.map(n => n.id));
+        }}
         isValidConnection={isValidConnection} 
         nodeTypes={nodeTypes} edgeTypes={edgeTypes} 
         defaultEdgeOptions={{ type: 'customEdge', markerEnd: { type: MarkerType.ArrowClosed } }}

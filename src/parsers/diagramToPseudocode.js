@@ -23,6 +23,7 @@ export const parseDrawioToPseudocode = (xml) => {
         let value = cleanTextWithLines(cell.getAttribute('value'));
         const style = cell.getAttribute('style') || '';
         const geo = cell.querySelector('mxGeometry');
+        const x = geo ? parseFloat(geo.getAttribute('x') || 0) : 0;
         const y = geo ? parseFloat(geo.getAttribute('y') || 0) : 0;
 
         let type = 'ACTION';
@@ -31,7 +32,7 @@ export const parseDrawioToPseudocode = (xml) => {
         else if (style.includes('ellipse')) {
             const modeMatch = style.match(/mode=([^;]+)/);
             const mode = modeMatch ? modeMatch[1] : null;
-            if (mode === 'end' || value.toLowerCase().includes('konec') || value.toLowerCase() === 'end') type = 'END';
+            if (mode === 'end' || value.toUpperCase() === 'ENDFUNCTION' || value.toUpperCase() === 'ENDCLASS' || value.toUpperCase() === 'KONEC') type = 'END';
             else type = 'START';
         }
         else if (style.includes('rhombus') || style.includes('hexagon')) type = 'CONDITION';
@@ -48,7 +49,7 @@ export const parseDrawioToPseudocode = (xml) => {
         const entityMatch = style.match(/entityType=([^;]+)/);
         const entityType = entityMatch ? entityMatch[1] : 'FUNCTION';
 
-        nodes[id] = { id, value, type, y, next: [], prev: [], entityType };
+        nodes[id] = { id, value, type, x, y, next: [], prev: [], entityType };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
@@ -66,6 +67,9 @@ export const parseDrawioToPseudocode = (xml) => {
     });
 
     const startNodes = Object.values(nodes).filter(n => n.type === 'START');
+    // Setřídíme funkce zleva doprava (případně shora dolů), aby se v kódu skládaly ve správném pořadí
+    startNodes.sort((a, b) => a.x - b.x || a.y - b.y);
+
     if (startNodes.length === 0) return { code: "", errors: ["Diagram neobsahuje počáteční blok."], nodeLineMap: {} };
 
     let codeLines = [];
@@ -126,81 +130,90 @@ export const parseDrawioToPseudocode = (xml) => {
         return false;
     };
 
-    let currentEndNodeId = null;
+    startNodes.forEach((start, index) => {
+        let reachedEnd = false;
 
-    const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null) => {
-        if (!nodeId || !nodes[nodeId] || nodeId === stopId || visited.has(nodeId)) return;
+        const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null) => {
+            if (!nodeId || !nodes[nodeId] || nodeId === stopId || visited.has(nodeId)) return;
 
-        const node = nodes[nodeId];
-        visited.add(nodeId);
-        inPath.add(nodeId);
+            const node = nodes[nodeId];
+            visited.add(nodeId);
+            inPath.add(nodeId);
 
-        if (node.type === 'START') {
-            const fName = node.value || 'main';
-            if (declaredFuncs.has(fName)) errors.push(`Chyba v diagramu: Duplicitní název funkce/třídy '${fName}'`);
-            declaredFuncs.add(fName);
+            if (node.type === 'START') {
+                const fName = node.value || 'main';
+                if (declaredFuncs.has(fName)) errors.push(`Duplicitní název funkce/třídy '${fName}'`);
+                declaredFuncs.add(fName);
 
-            currentEndNodeId = node.id; 
-            appendLine(`${indent}${node.entityType} ${fName}()`, node.id);
-            if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId);
-            printCommentsBeforeY(Infinity, indent + "    ");
-            
-            // Highlight mapuje ENDFUNCTION přímo na zachycený konečný blok!
-            appendLine(`${indent}END${node.entityType}`, currentEndNodeId);
-            appendLine(''); appendLine('# ----------------------'); appendLine('');
-        }
-        else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE') {
-            generateStatement(node, indent);
-            if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
-                traverse(node.next[0].target, indent, new Set(inPath), stopId);
+                appendLine(`${indent}${node.entityType} ${fName}()`, node.id);
+                if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId);
+                printCommentsBeforeY(Infinity, indent + "    ");
             }
-        }
-        else if (node.type === 'CONDITION') {
-            printCommentsBeforeY(node.y, indent);
-            const trueEdge = node.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes(e.value)) || node.next[0];
-            const falseEdge = node.next.find(e => ['ne', 'no', 'false', '0', 'n', '-'].includes(e.value)) || node.next[1];
-            
-            const tTarget = trueEdge?.target;
-            const fTarget = falseEdge?.target;
-
-            const tLoops = tTarget ? doesPathLoopBack(tTarget, node.id) : false;
-            const fLoops = fTarget ? doesPathLoopBack(fTarget, node.id) : false;
-
-            if (tLoops || fLoops) {
-                const isTrueLoop = tLoops;
-                const isFor = node.value.toUpperCase().startsWith('FOR ');
-                const condText = isTrueLoop ? node.value : `NOT (${node.value})`;
-                
-                appendLine(`${indent}${isFor ? '' : 'WHILE '}${condText} DO`, node.id);
-                if (isTrueLoop && tTarget) traverse(tTarget, indent + "    ", new Set(inPath), node.id);
-                if (!isTrueLoop && fTarget) traverse(fTarget, indent + "    ", new Set(inPath), node.id);
-                appendLine(`${indent}${isFor ? 'ENDFOR' : 'ENDWHILE'}`);
-
-                const exitNode = isTrueLoop ? fTarget : tTarget;
-                if (exitNode && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId);
-            } else {
-                appendLine(`${indent}IF ${node.value} THEN`, node.id);
-                if (tTarget) traverse(tTarget, indent + "    ", new Set(inPath), stopId);
-                
-                if (fTarget && nodes[fTarget] && nodes[fTarget].type !== 'END') {
-                    appendLine(`${indent}ELSE`);
-                    traverse(fTarget, indent + "    ", new Set(inPath), stopId);
+            else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE') {
+                generateStatement(node, indent);
+                if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
+                    traverse(node.next[0].target, indent, new Set(inPath), stopId);
                 }
-                appendLine(`${indent}ENDIF`);
             }
-        }
-        else if (node.type === 'END') {
-            currentEndNodeId = node.id; // Zachytíme ID posledního bloku
-            generateStatement(node, indent);
-        }
-        inPath.delete(nodeId);
-    };
+            else if (node.type === 'CONDITION') {
+                printCommentsBeforeY(node.y, indent);
+                const trueEdge = node.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes(e.value)) || node.next[0];
+                const falseEdge = node.next.find(e => ['ne', 'no', 'false', '0', 'n', '-'].includes(e.value)) || node.next[1];
+                
+                const tTarget = trueEdge?.target;
+                const fTarget = falseEdge?.target;
 
-    startNodes.forEach(start => traverse(start.id));
+                const tLoops = tTarget ? doesPathLoopBack(tTarget, node.id) : false;
+                const fLoops = fTarget ? doesPathLoopBack(fTarget, node.id) : false;
+
+                if (tLoops || fLoops) {
+                    const isTrueLoop = tLoops;
+                    const isFor = node.value.toUpperCase().startsWith('FOR ');
+                    const condText = isTrueLoop ? node.value : `NOT (${node.value})`;
+                    
+                    appendLine(`${indent}${isFor ? '' : 'WHILE '}${condText} DO`, node.id);
+                    if (isTrueLoop && tTarget) traverse(tTarget, indent + "    ", new Set(inPath), node.id);
+                    if (!isTrueLoop && fTarget) traverse(fTarget, indent + "    ", new Set(inPath), node.id);
+                    appendLine(`${indent}${isFor ? 'ENDFOR' : 'ENDWHILE'}`);
+
+                    const exitNode = isTrueLoop ? fTarget : tTarget;
+                    if (exitNode && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId);
+                } else {
+                    appendLine(`${indent}IF ${node.value} THEN`, node.id);
+                    if (tTarget) traverse(tTarget, indent + "    ", new Set(inPath), stopId);
+                    
+                    if (fTarget && nodes[fTarget] && nodes[fTarget].type !== 'END') {
+                        appendLine(`${indent}ELSE`);
+                        traverse(fTarget, indent + "    ", new Set(inPath), stopId);
+                    }
+                    appendLine(`${indent}ENDIF`);
+                }
+            }
+            else if (node.type === 'END') {
+                reachedEnd = true;
+                let val = node.value.trim();
+                if (!val || val.toUpperCase() === 'KONEC' || val.toUpperCase() === 'END') {
+                    val = `END${node.entityType || 'FUNCTION'}`;
+                }
+                let outIndent = indent.length >= 4 ? indent.substring(4) : indent;
+                appendLine(`${outIndent}${val}`, node.id);
+            }
+            inPath.delete(nodeId);
+        };
+
+        traverse(start.id);
+
+        if (!reachedEnd) {
+            const fName = start.value || 'main';
+            errors.push(`Tip: Funkce '${fName}' není v diagramu napojena na koncový blok.`);
+        }
+
+        if (index < startNodes.length - 1) {
+            appendLine('');
+        }
+    });
 
     let code = codeLines.join('\n').trim();
-    if (code.endsWith('# ----------------------')) code = code.substring(0, code.length - 24).trim();
-
     return { code, errors, nodeLineMap };
   } catch (err) {
     return { code: "", errors: ["Kritická chyba parseru: " + err.message], nodeLineMap: {} };
