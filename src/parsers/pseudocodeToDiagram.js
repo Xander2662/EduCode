@@ -67,13 +67,23 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
     }
 
     const getPos = (text, type, defX, currentY) => {
-        const match = existingNodes.find(n => !n.used && n.type === type && n.val === text);
+        const normalize = (t) => t.replace(/\(\)$/g, '').replace(/\s+/g, ' ').trim();
+        const normalizedTarget = normalize(text);
+
+        const match = existingNodes.find(n => !n.used && n.type === type && normalize(n.val) === normalizedTarget);
         if (match) {
             match.used = true;
             return { x: match.x, y: match.y, matched: true, oldId: match.id };
         }
         return { x: defX, y: currentY, matched: false, oldId: getNewId() };
     };
+
+    const getConditionPorts = (isNot) => ({
+        tText: isNot ? EL.f : EL.t,
+        fText: isNot ? EL.t : EL.f,
+        tHandle: isNot ? "s-right" : "s-bottom",
+        fHandle: isNot ? "s-bottom" : "s-right"
+    });
 
     let outNodes = [];
     let outEdges = [];
@@ -124,7 +134,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
         let stack = [];
         let lastNodeId = startId;
         yOffset = Math.max(140, startPos.y + 120); 
-        let pendingExitText = null;
+        let pendingExit = null;
 
         const addNode = (text, type, defaultX, extraProps = {}) => {
             const pos = getPos(text, type, defaultX, yOffset);
@@ -156,14 +166,23 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
             }
 
             if (upper.startsWith('IF ')) {
-                const condText = line.substring(3, upper.lastIndexOf(' THEN')).trim();
+                let condText = line.substring(3, upper.lastIndexOf(' THEN')).trim();
+                let isNot = false;
+                
+                // Oprava detekce "NOT (...)" a inverze boolean logiky pro diagram
+                let notMatch = condText.match(/^NOT\s*\((.*)\)$/i);
+                if (!notMatch) notMatch = condText.match(/^NOT\s+(.*)$/i);
+                if (notMatch) {
+                    condText = notMatch[1].trim();
+                    isNot = true;
+                    errors.push(`Tip: Obal 'NOT' u podmínky '${condText}' byl převeden jako prohození větví (+/-) v diagramu.`);
+                }
+
                 const condId = addNode(condText, 'CONDITION', getXPos());
+                addEdge(lastNodeId, condId, pendingExit ? pendingExit.text : "", pendingExit ? pendingExit.handle : "s-bottom", "t-top");
+                pendingExit = null;
                 
-                let inText = pendingExitText || "";
-                pendingExitText = null;
-                addEdge(lastNodeId, condId, inText, "s-bottom", "t-top");
-                
-                stack.push({ type: 'IF', id: condId, trueLast: null });
+                stack.push({ type: 'IF', id: condId, trueLast: null, isNot });
                 lastNodeId = condId;
             } 
             else if (upper === 'ELSE') {
@@ -173,6 +192,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
             } 
             else if (upper === 'ENDIF') {
                 const currentIf = stack.pop();
+                const ports = getConditionPorts(currentIf.isNot);
                 const endIfId = addNode("", "MERGE", getXPos()); 
                 
                 if (currentIf.trueLast) {
@@ -180,11 +200,11 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
                     addEdge(lastNodeId, endIfId, "", "s-bottom", "t-top");
                 } else {
                     if (lastNodeId === currentIf.id) {
-                        addEdge(currentIf.id, endIfId, EL.t, "s-bottom", "t-top"); 
-                        addEdge(currentIf.id, endIfId, EL.f, "s-right", "t-top"); 
+                        addEdge(currentIf.id, endIfId, ports.tText, ports.tHandle, "t-top"); 
+                        addEdge(currentIf.id, endIfId, ports.fText, ports.fHandle, "t-top"); 
                     } else {
                         addEdge(lastNodeId, endIfId, "", "s-bottom", "t-top"); 
-                        addEdge(currentIf.id, endIfId, EL.f, "s-right", "t-top"); 
+                        addEdge(currentIf.id, endIfId, ports.fText, ports.fHandle, "t-top"); 
                     }
                 }
                 
@@ -192,22 +212,31 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
             }
             else if (upper.startsWith('WHILE ') || upper.startsWith('FOR ')) {
                 const isFor = upper.startsWith('FOR ');
-                const condText = isFor ? line.substring(0, upper.lastIndexOf(' DO')).trim() : line.substring(6, upper.lastIndexOf(' DO')).trim();
+                let condText = isFor ? line.substring(0, upper.lastIndexOf(' DO')).trim() : line.substring(6, upper.lastIndexOf(' DO')).trim();
                 
+                let isNot = false;
+                let notMatch = condText.match(/^NOT\s*\((.*)\)$/i);
+                if (!notMatch) notMatch = condText.match(/^NOT\s+(.*)$/i);
+                if (notMatch) {
+                    condText = notMatch[1].trim();
+                    isNot = true;
+                    errors.push(`Tip: Obal 'NOT' u smyčky '${condText}' byl převeden jako prohození větví (+/-) v diagramu.`);
+                }
+
                 const loopId = addNode(condText, 'CONDITION', getXPos());
-                let inText = pendingExitText || "";
-                pendingExitText = null;
-                addEdge(lastNodeId, loopId, inText, "s-bottom", "t-top");
+                addEdge(lastNodeId, loopId, pendingExit ? pendingExit.text : "", pendingExit ? pendingExit.handle : "s-bottom", "t-top");
+                pendingExit = null;
                 
-                stack.push({ type: 'LOOP', id: loopId });
+                stack.push({ type: 'LOOP', id: loopId, isNot });
                 lastNodeId = loopId;
             }
             else if (upper === 'ENDWHILE' || upper === 'ENDFOR') {
                 const currentLoop = stack.pop();
                 addEdge(lastNodeId, currentLoop.id, "", "s-bottom", "t-left"); 
-                
                 lastNodeId = currentLoop.id; 
-                pendingExitText = EL.f;
+                
+                const ports = getConditionPorts(currentLoop.isNot);
+                pendingExit = { text: ports.fText, handle: ports.fHandle };
             }
             else {
                 let isIo = false;
@@ -223,15 +252,21 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
                 let edgeText = "";
                 let srcHandle = "s-bottom";
 
-                if (pendingExitText) {
-                    edgeText = pendingExitText;
-                    pendingExitText = null;
-                    srcHandle = "s-right";
+                if (pendingExit) {
+                    edgeText = pendingExit.text;
+                    srcHandle = pendingExit.handle;
+                    pendingExit = null;
                 } else if (stack.length > 0) {
                     const parent = stack[stack.length - 1];
+                    const ports = getConditionPorts(parent.isNot);
                     if (lastNodeId === parent.id) {
-                        edgeText = (parent.type === 'IF' && parent.trueLast) ? EL.f : EL.t;
-                        srcHandle = edgeText === EL.f ? "s-right" : "s-bottom";
+                        if (parent.type === 'IF' && parent.trueLast) {
+                            edgeText = ports.fText;
+                            srcHandle = ports.fHandle;
+                        } else {
+                            edgeText = ports.tText;
+                            srcHandle = ports.tHandle;
+                        }
                     }
                 }
                 
@@ -242,8 +277,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
 
         if (hasEnd) {
             const endId = addNode(endLineText, 'START_END', globalGroupX, { mode: 'end' });
-            let finalEdgeText = pendingExitText || (stack.length > 0 ? EL.f : "");
-            let finalSrcHandle = pendingExitText ? "s-right" : "s-bottom";
+            let finalEdgeText = pendingExit ? pendingExit.text : (stack.length > 0 ? getConditionPorts(stack[stack.length - 1].isNot).fText : "");
+            let finalSrcHandle = pendingExit ? pendingExit.handle : (stack.length > 0 ? getConditionPorts(stack[stack.length - 1].isNot).fHandle : "s-bottom");
             addEdge(lastNodeId, endId, finalEdgeText, finalSrcHandle, "t-top");
         }
 

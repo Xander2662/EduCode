@@ -10,7 +10,23 @@ export const parseDrawioToPseudocode = (xml) => {
 
     const cleanTextWithLines = (html) => {
       if (!html) return '';
-      let t = html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/div>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]*>?/gm, '').replace(/&nbsp;/gi, ' ').replace(/\u00A0/g, ' ').replace(/&gt;/gi, '>').replace(/&lt;/gi, '<').replace(/&amp;/gi, '&');
+      let t = html.replace(/<br\s*\/?>/gi, '\n')
+                  .replace(/<\/div>/gi, '\n')
+                  .replace(/<\/p>/gi, '\n');
+                  
+      const tagsToRemove = ['b', 'i', 'u', 'span', 'font', 'div', 'p', 'strong', 'em', 'strike', 's', 'sub', 'sup', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+      tagsToRemove.forEach(tag => {
+          const openReg = new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'gi');
+          const closeReg = new RegExp(`</${tag}>`, 'gi');
+          t = t.replace(openReg, '').replace(closeReg, '');
+      });
+      
+      t = t.replace(/&nbsp;/gi, ' ')
+           .replace(/&gt;/gi, '>')
+           .replace(/&lt;/gi, '<')
+           .replace(/&amp;/gi, '&')
+           .replace(/\u00A0/g, ' ');
+           
       return t.split('\n').map(l => l.trim()).filter(Boolean).join('\n');
     };
 
@@ -67,7 +83,6 @@ export const parseDrawioToPseudocode = (xml) => {
     });
 
     const startNodes = Object.values(nodes).filter(n => n.type === 'START');
-    // Setřídíme funkce zleva doprava (případně shora dolů), aby se v kódu skládaly ve správném pořadí
     startNodes.sort((a, b) => a.x - b.x || a.y - b.y);
 
     if (startNodes.length === 0) return { code: "", errors: ["Diagram neobsahuje počáteční blok."], nodeLineMap: {} };
@@ -131,7 +146,8 @@ export const parseDrawioToPseudocode = (xml) => {
     };
 
     startNodes.forEach((start, index) => {
-        let reachedEnd = false;
+        let endNodeId = null;
+        let endNodeVal = `END${start.entityType || 'FUNCTION'}`;
 
         const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null) => {
             if (!nodeId || !nodes[nodeId] || nodeId === stopId || visited.has(nodeId)) return;
@@ -172,8 +188,25 @@ export const parseDrawioToPseudocode = (xml) => {
                     const condText = isTrueLoop ? node.value : `NOT (${node.value})`;
                     
                     appendLine(`${indent}${isFor ? '' : 'WHILE '}${condText} DO`, node.id);
-                    if (isTrueLoop && tTarget) traverse(tTarget, indent + "    ", new Set(inPath), node.id);
-                    if (!isTrueLoop && fTarget) traverse(fTarget, indent + "    ", new Set(inPath), node.id);
+                    
+                    const loopStartTarget = isTrueLoop ? tTarget : fTarget;
+                    if (loopStartTarget) {
+                        const temporarilyUnvisited = new Set();
+                        const unvisitLoopBody = (currId) => {
+                            if (!currId || currId === node.id) return;
+                            if (visited.has(currId)) {
+                                visited.delete(currId);
+                                temporarilyUnvisited.add(currId);
+                                nodes[currId]?.next.forEach(e => unvisitLoopBody(e.target));
+                            }
+                        };
+                        unvisitLoopBody(loopStartTarget);
+                        
+                        traverse(loopStartTarget, indent + "    ", new Set(inPath), node.id);
+                        
+                        temporarilyUnvisited.forEach(id => visited.add(id));
+                    }
+
                     appendLine(`${indent}${isFor ? 'ENDFOR' : 'ENDWHILE'}`);
 
                     const exitNode = isTrueLoop ? fTarget : tTarget;
@@ -190,23 +223,27 @@ export const parseDrawioToPseudocode = (xml) => {
                 }
             }
             else if (node.type === 'END') {
-                reachedEnd = true;
+                // Koncový blok už se nevypisuje přímo vnořený. Jen si ho zapamatujeme!
+                endNodeId = node.id;
                 let val = node.value.trim();
-                if (!val || val.toUpperCase() === 'KONEC' || val.toUpperCase() === 'END') {
-                    val = `END${node.entityType || 'FUNCTION'}`;
+                if (val && val.toUpperCase() !== 'KONEC' && val.toUpperCase() !== 'END') {
+                    endNodeVal = val;
                 }
-                let outIndent = indent.length >= 4 ? indent.substring(4) : indent;
-                appendLine(`${outIndent}${val}`, node.id);
             }
             inPath.delete(nodeId);
         };
 
         traverse(start.id);
 
-        if (!reachedEnd) {
-            const fName = start.value || 'main';
-            errors.push(`Tip: Funkce '${fName}' není v diagramu napojena na koncový blok.`);
+        // Až po skončení celé funkce (včetně všech IFů a WHILEů) se vypíše ENDFUNCTION a flushnou zbylé komentáře
+        if (endNodeId) {
+            printCommentsBeforeY(nodes[endNodeId].y, "");
+            appendLine(endNodeVal, endNodeId);
+        } else {
+            errors.push(`Tip: Funkce '${start.value || 'main'}' není v diagramu napojena na koncový blok.`);
         }
+        
+        printCommentsBeforeY(Infinity, "");
 
         if (index < startNodes.length - 1) {
             appendLine('');

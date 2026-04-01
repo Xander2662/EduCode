@@ -45,6 +45,8 @@ const CustomEdge = ({ id, source, sourceX, sourceY, targetX, targetY, sourcePosi
 
   return (
     <>
+      {/* Skrytá, extra široká cesta pro mnohem snazší trefování blokem a myší */}
+      <path d={edgePath} fill="none" strokeOpacity={0} strokeWidth={30} className="react-flow__edge-interaction cursor-crosshair" />
       <BaseEdge path={edgePath} markerEnd={markerEnd} className={`react-flow__edge-path custom-edge-${id} ${selected ? "!stroke-indigo-600" : "!stroke-gray-800 dark:!stroke-gray-400"}`} style={{ strokeWidth: selected ? 3 : 2 }} />
       {isCondition && (
         <EdgeLabelRenderer>
@@ -96,7 +98,7 @@ const StartEndNode = ({ id, data, selected }) => {
       {mode === 'unassigned' && (
         <>
           <DragHandle />
-          <div className="flex gap-2 w-full px-2 mt-1 z-10">
+          <div className="flex gap-2 w-full px-2 mt-1 z-10 flex-1 items-center justify-center">
             <button onClick={() => setMode('start')} className="flex-1 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-800 rounded py-1 font-bold pointer-events-auto">Start</button>
             <button onClick={() => setMode('end')} className="flex-1 text-xs bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-800 rounded py-1 font-bold pointer-events-auto">Konec</button>
           </div>
@@ -104,13 +106,13 @@ const StartEndNode = ({ id, data, selected }) => {
       )}
 
       {mode === 'start' && (
-        <div className="w-full flex-1 flex flex-col px-2 relative pb-1 justify-center">
+        <div className="w-full flex-1 flex flex-col px-2 relative pb-1">
           <div className="flex justify-between items-center w-full mb-1 px-1">
             <span className="text-[9px] text-gray-400 font-bold w-12 text-left">START</span>
             <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors" title="Chytit a přesunout" />
             <span onClick={toggleEntity} className={`text-[9px] text-gray-400 font-bold w-12 text-right cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`}>{entityType}</span>
           </div>
-          <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full text-center outline-none bg-transparent text-sm font-mono font-bold nodrag text-gray-800 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+          <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono font-bold nodrag text-gray-800 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
         </div>
       )}
 
@@ -292,6 +294,52 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete]);
 
+  const getHitEdge = (event, node, draggedNodes) => {
+    const clientX = event.clientX || (event.touches && event.touches[0].clientX);
+    const clientY = event.clientY || (event.touches && event.touches[0].clientY);
+    if (!clientX || !clientY) return null;
+
+    const nodeEl = document.querySelector(`.react-flow__node[data-id="${node.id}"]`);
+    if (!nodeEl) return null;
+
+    const rect = nodeEl.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    
+    // Multi-Point detekce: Zkontrolujeme myš i klíčové body samotného bloku
+    const checkPoints = [
+        { x: clientX, y: clientY },
+        { x: centerX, y: centerY },
+        { x: centerX, y: rect.top - 10 },
+        { x: centerX, y: rect.bottom + 10 }
+    ];
+
+    // Musíme na moment schovat táhnuté bloky, abychom skrz ně viděli případné šipky pod nimi
+    const originalStyles = [];
+    draggedNodes.forEach(n => {
+        const el = document.querySelector(`.react-flow__node[data-id="${n.id}"]`);
+        if (el) {
+            originalStyles.push({ el, val: el.style.visibility });
+            el.style.visibility = 'hidden';
+        }
+    });
+
+    let foundEdge = null;
+    for (let pt of checkPoints) {
+        if (pt.x && pt.y) {
+            const elemBelow = document.elementFromPoint(pt.x, pt.y);
+            const closestEdge = elemBelow?.closest('.react-flow__edge');
+            if (closestEdge) {
+                foundEdge = closestEdge;
+                break;
+            }
+        }
+    }
+
+    originalStyles.forEach(({ el, val }) => { el.style.visibility = val; });
+    return foundEdge;
+  };
+
   const onNodeDrag = useCallback((event, node) => {
     if (readOnly) return;
 
@@ -307,25 +355,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
     );
     if (hasExternal) return;
 
-    const nodeEl = document.querySelector(`.react-flow__node[data-id="${node.id}"]`);
-    if (!nodeEl) return;
-    const rect = nodeEl.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-
-    const originalEvents = [];
-    draggedNodes.forEach(n => {
-        const el = document.querySelector(`.react-flow__node[data-id="${n.id}"]`);
-        if (el) {
-            originalEvents.push({ el, val: el.style.pointerEvents });
-            el.style.pointerEvents = 'none';
-        }
-    });
-
-    const elemBelow = document.elementFromPoint(centerX, centerY);
-    originalEvents.forEach(({ el, val }) => { el.style.pointerEvents = val; });
-
-    const edgeElem = elemBelow?.closest('.react-flow__edge');
+    const edgeElem = getHitEdge(event, node, draggedNodes);
     
     if (hoveredEdgeRef.current && hoveredEdgeRef.current !== edgeElem) {
         hoveredEdgeRef.current.classList.remove('drop-target');
@@ -358,25 +388,8 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
     );
     if (hasExternal) return;
 
-    const nodeEl = document.querySelector(`.react-flow__node[data-id="${node.id}"]`);
-    if (!nodeEl) return;
-    const rect = nodeEl.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
+    const edgeElem = getHitEdge(event, node, draggedNodes);
 
-    const originalEvents = [];
-    draggedNodes.forEach(n => {
-        const el = document.querySelector(`.react-flow__node[data-id="${n.id}"]`);
-        if (el) {
-            originalEvents.push({ el, val: el.style.pointerEvents });
-            el.style.pointerEvents = 'none';
-        }
-    });
-    
-    const elemBelow = document.elementFromPoint(centerX, centerY);
-    originalEvents.forEach(({ el, val }) => { el.style.pointerEvents = val; });
-
-    const edgeElem = elemBelow?.closest('.react-flow__edge');
     if (edgeElem) {
         const edgeId = edgeElem.getAttribute('data-id');
         const targetEdge = edges.find(e => e.id === edgeId);
