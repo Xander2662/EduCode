@@ -95,7 +95,6 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
         IO: "shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;",
         CONDITION: "rhombus;whiteSpace=wrap;html=1;",
         COMMENT: "shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;strokeColor=#d6b656;",
-        MERGE: "ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;resizable=0;movable=0;rotatable=0;",
         EDGE: "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;"
     };
 
@@ -132,9 +131,11 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
         outNodes.push({ id: startId, text: funcName || "main", type: 'START_END', x: startPos.x, y: startPos.y, mode: 'start', entityType });
 
         let stack = [];
-        let lastNodeId = startId;
         yOffset = Math.max(140, startPos.y + 120); 
-        let pendingExit = null;
+        
+        // PENDING EXITS: Zde si ukládáme všechny větve, které čekají na další blok.
+        // Tím naprosto eliminujeme jakékoliv neviditelné "MERGE" uzly.
+        let pendingExits = [{ id: startId, text: "", handle: "s-bottom" }];
 
         const addNode = (text, type, defaultX, extraProps = {}) => {
             const pos = getPos(text, type, defaultX, yOffset);
@@ -151,7 +152,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
             let x = globalGroupX;
             for (let i = 0; i < stack.length; i++) {
                 if (stack[i].type === 'LOOP') x += 240;
-                if (stack[i].type === 'IF' && stack[i].trueLast !== null) x += 240;
+                if (stack[i].type === 'IF' && stack[i].trueExits !== null) x += 240;
             }
             return x;
         };
@@ -169,7 +170,6 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
                 let condText = line.substring(3, upper.lastIndexOf(' THEN')).trim();
                 let isNot = false;
                 
-                // Oprava detekce "NOT (...)" a inverze boolean logiky pro diagram
                 let notMatch = condText.match(/^NOT\s*\((.*)\)$/i);
                 if (!notMatch) notMatch = condText.match(/^NOT\s+(.*)$/i);
                 if (notMatch) {
@@ -179,36 +179,35 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
                 }
 
                 const condId = addNode(condText, 'CONDITION', getXPos());
-                addEdge(lastNodeId, condId, pendingExit ? pendingExit.text : "", pendingExit ? pendingExit.handle : "s-bottom", "t-top");
-                pendingExit = null;
+                pendingExits.forEach(exit => addEdge(exit.id, condId, exit.text, exit.handle, "t-top"));
                 
-                stack.push({ type: 'IF', id: condId, trueLast: null, isNot });
-                lastNodeId = condId;
+                const ports = getConditionPorts(isNot);
+                stack.push({ type: 'IF', id: condId, trueExits: null, isNot });
+                
+                // Nyní se budeme napojovat do TRUE větve
+                pendingExits = [{ id: condId, text: ports.tText, handle: ports.tHandle }];
             } 
             else if (upper === 'ELSE') {
                 const currentIf = stack[stack.length - 1];
-                currentIf.trueLast = lastNodeId;
-                lastNodeId = currentIf.id; 
+                // Uložíme hrany z TRUE větve do paměti IFu
+                currentIf.trueExits = [...pendingExits]; 
+                
+                // Přepneme pendingExits na začátek FALSE větve
+                const ports = getConditionPorts(currentIf.isNot);
+                pendingExits = [{ id: currentIf.id, text: ports.fText, handle: ports.fHandle }];
             } 
             else if (upper === 'ENDIF') {
                 const currentIf = stack.pop();
-                const ports = getConditionPorts(currentIf.isNot);
-                const endIfId = addNode("", "MERGE", getXPos()); 
-                
-                if (currentIf.trueLast) {
-                    addEdge(currentIf.trueLast, endIfId, "", "s-bottom", "t-top");
-                    addEdge(lastNodeId, endIfId, "", "s-bottom", "t-top");
-                } else {
-                    if (lastNodeId === currentIf.id) {
-                        addEdge(currentIf.id, endIfId, ports.tText, ports.tHandle, "t-top"); 
-                        addEdge(currentIf.id, endIfId, ports.fText, ports.fHandle, "t-top"); 
-                    } else {
-                        addEdge(lastNodeId, endIfId, "", "s-bottom", "t-top"); 
-                        addEdge(currentIf.id, endIfId, ports.fText, ports.fHandle, "t-top"); 
-                    }
+                if (currentIf.trueExits === null) {
+                    // Neměli jsme ELSE, takže aktuální obsah pendingExits je z TRUE větve
+                    currentIf.trueExits = [...pendingExits];
+                    // False větev vystupuje přímo z IF bloku
+                    const ports = getConditionPorts(currentIf.isNot);
+                    pendingExits = [{ id: currentIf.id, text: ports.fText, handle: ports.fHandle }];
                 }
                 
-                lastNodeId = endIfId;
+                // Sloučíme konce z obou větví, obě budou namířeny do dalšího bloku (bez MERGE uzlu)
+                pendingExits = [...currentIf.trueExits, ...pendingExits];
             }
             else if (upper.startsWith('WHILE ') || upper.startsWith('FOR ')) {
                 const isFor = upper.startsWith('FOR ');
@@ -224,62 +223,49 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
                 }
 
                 const loopId = addNode(condText, 'CONDITION', getXPos());
-                addEdge(lastNodeId, loopId, pendingExit ? pendingExit.text : "", pendingExit ? pendingExit.handle : "s-bottom", "t-top");
-                pendingExit = null;
+                pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
                 
+                const ports = getConditionPorts(isNot);
                 stack.push({ type: 'LOOP', id: loopId, isNot });
-                lastNodeId = loopId;
+                pendingExits = [{ id: loopId, text: ports.tText, handle: ports.tHandle }];
             }
             else if (upper === 'ENDWHILE' || upper === 'ENDFOR') {
                 const currentLoop = stack.pop();
-                addEdge(lastNodeId, currentLoop.id, "", "s-bottom", "t-left"); 
-                lastNodeId = currentLoop.id; 
                 
+                // Všechny hrany zevnitř cyklu se vrací do podmínky
+                pendingExits.forEach(exit => {
+                    let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.isNot).tHandle : exit.handle;
+                    addEdge(exit.id, currentLoop.id, exit.text, returnHandle, "t-left"); 
+                });
+                
+                // A smyčka pokračuje FALSE větví
                 const ports = getConditionPorts(currentLoop.isNot);
-                pendingExit = { text: ports.fText, handle: ports.fHandle };
+                pendingExits = [{ id: currentLoop.id, text: ports.fText, handle: ports.fHandle }];
             }
             else {
                 let isIo = false;
                 let text = line;
-                if (upper.startsWith('PRINT(') && upper.endsWith(')')) { isIo = true; text = line.substring(6, line.length - 1); } 
-                else if (upper.startsWith('VSTUP ') || upper.startsWith('RETURN')) isIo = true;
+                
+                if (upper.startsWith('PRINT(') && upper.endsWith(')')) { 
+                    isIo = true; 
+                } 
+                else if (upper.startsWith('VSTUP ') || upper.startsWith('RETURN')) {
+                    isIo = true;
+                }
 
                 let xPos = getXPos();
-                if (stack.length > 0 && stack[stack.length - 1].type === 'IF' && stack[stack.length - 1].trueLast) xPos += 240; 
-
                 const nodeId = addNode(text, isIo ? 'IO' : 'ACTION', xPos);
                 
-                let edgeText = "";
-                let srcHandle = "s-bottom";
-
-                if (pendingExit) {
-                    edgeText = pendingExit.text;
-                    srcHandle = pendingExit.handle;
-                    pendingExit = null;
-                } else if (stack.length > 0) {
-                    const parent = stack[stack.length - 1];
-                    const ports = getConditionPorts(parent.isNot);
-                    if (lastNodeId === parent.id) {
-                        if (parent.type === 'IF' && parent.trueLast) {
-                            edgeText = ports.fText;
-                            srcHandle = ports.fHandle;
-                        } else {
-                            edgeText = ports.tText;
-                            srcHandle = ports.tHandle;
-                        }
-                    }
-                }
-                
-                addEdge(lastNodeId, nodeId, edgeText, srcHandle, "t-top");
-                lastNodeId = nodeId;
+                // Připojíme všechny "čekající" hrany
+                pendingExits.forEach(exit => addEdge(exit.id, nodeId, exit.text, exit.handle, "t-top"));
+                pendingExits = [{ id: nodeId, text: "", handle: "s-bottom" }];
             }
         }
 
         if (hasEnd) {
             const endId = addNode(endLineText, 'START_END', globalGroupX, { mode: 'end' });
-            let finalEdgeText = pendingExit ? pendingExit.text : (stack.length > 0 ? getConditionPorts(stack[stack.length - 1].isNot).fText : "");
-            let finalSrcHandle = pendingExit ? pendingExit.handle : (stack.length > 0 ? getConditionPorts(stack[stack.length - 1].isNot).fHandle : "s-bottom");
-            addEdge(lastNodeId, endId, finalEdgeText, finalSrcHandle, "t-top");
+            pendingExits.forEach(exit => addEdge(exit.id, endId, exit.text, exit.handle, "t-top"));
+            pendingExits = [];
         }
 
         globalGroupX += 600; 
@@ -292,7 +278,6 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
         if (n.type === 'CONDITION') { w = 80; h = 80; }
         if (n.type === 'START_END') { w = 100; h = 40; }
         if (n.type === 'COMMENT') { w = 140; h = 50; }
-        if (n.type === 'MERGE') { w = 10; h = 10; }
         
         let style = STYLES[n.type] || n.type;
         if (n.mode) style += `mode=${n.mode};`;
@@ -306,6 +291,15 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
 
     outEdges.forEach(e => {
         let style = STYLES.EDGE + `sourceHandle=${e.sourceHandle};targetHandle=${e.targetHandle};`;
+        
+        if (e.targetHandle === 't-right') style += "entryX=1;entryY=0.5;entryDx=0;entryDy=0;";
+        else if (e.targetHandle === 't-left') style += "entryX=0;entryY=0.5;entryDx=0;entryDy=0;";
+        else if (e.targetHandle === 't-top') style += "entryX=0.5;entryY=0;entryDx=0;entryDy=0;";
+
+        if (e.sourceHandle === 's-right') style += "exitX=1;exitY=0.5;exitDx=0;exitDy=0;";
+        else if (e.sourceHandle === 's-left') style += "exitX=0;exitY=0.5;exitDx=0;exitDy=0;";
+        else if (e.sourceHandle === 's-bottom') style += "exitX=0.5;exitY=1;exitDx=0;exitDy=0;";
+
         xml += `    <mxCell id="${e.id}" value="${e.value}" style="${style}" edge="1" parent="1" source="${e.source}" target="${e.target}">\n`;
         xml += `      <mxGeometry relative="1" as="geometry" />\n`;
         xml += `    </mxCell>\n`;

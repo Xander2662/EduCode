@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, ExternalLink } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parsePseudocodeToPython } from './parsers/pseudocodeToPython';
@@ -11,7 +11,7 @@ const PANEL_TYPES = {
   python: { id: 'python', label: 'Python', title: 'Python Kód' }
 };
 
-const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], onExport, highlightLines = [] }) => {
+const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [] }) => {
   const lineCount = value?.split('\n').length || 1;
   const textareaRef = useRef(null);
   const lineNumbersRef = useRef(null);
@@ -55,12 +55,6 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
           {blocks.map((b, i) => (
             <div key={i} className="absolute left-0 right-0 bg-indigo-500/10 dark:bg-indigo-400/10 border-y border-indigo-300/50 dark:border-indigo-700/50 pointer-events-none transition-colors"
               style={{ top: `${16 + b.startLine * 24}px`, height: `${(b.endLine - b.startLine + 1) * 24}px` }}>
-              <button
-                onClick={() => onExport(b.name, b.startLine, b.endLine)}
-                className="absolute top-2 right-14 p-1.5 bg-indigo-600 text-white rounded text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-indigo-700 transition-colors pointer-events-auto"
-              >
-                <ExternalLink size={14} /> Do záložky
-              </button>
             </div>
           ))}
         </div>
@@ -86,10 +80,6 @@ export default function App() {
   const [diagramXml, setDiagramXml] = useState('<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>');
   const [pseudocode, setPseudocode] = useState('');
   const [pythonCode, setPythonCode] = useState('');
-
-  const [tabs, setTabs] = useState(['Hlavní']);
-  const [activeTab, setActiveTab] = useState('Hlavní');
-  const [tabContents, setTabContents] = useState({});
 
   const [parseErrors, setParseErrors] = useState([]);
   const [activeDropdown, setActiveDropdown] = useState(null);
@@ -144,8 +134,7 @@ export default function App() {
 
     const timeoutId = setTimeout(() => {
       try {
-        let fullCode = activeTab === 'Hlavní' ? pseudocode : tabContents[activeTab];
-        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(fullCode || '', diagramXml, edgeStyle);
+        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode || '', diagramXml, edgeStyle);
         if (diagramXml !== generatedXml) {
             setDiagramXml(generatedXml);
         }
@@ -155,15 +144,14 @@ export default function App() {
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [pseudocode, tabContents, activeTab, flow, edgeStyle]);
+  }, [pseudocode, flow, edgeStyle]);
 
   // Pseudocode -> Python Sync
   useEffect(() => {
     if (panels.includes('python')) {
       const timeoutId = setTimeout(() => {
         try {
-          let fullCode = activeTab === 'Hlavní' ? pseudocode : tabContents[activeTab];
-          const pyCode = parsePseudocodeToPython(fullCode || '');
+          const pyCode = parsePseudocodeToPython(pseudocode || '');
           setPythonCode(pyCode);
         } catch (err) {
           console.error("Python parsing error:", err);
@@ -171,7 +159,7 @@ export default function App() {
       }, 400);
       return () => clearTimeout(timeoutId);
     }
-  }, [pseudocode, tabContents, activeTab, panels]);
+  }, [pseudocode, panels]);
 
   const requestFlowChange = (e) => {
     e.stopPropagation();
@@ -179,41 +167,23 @@ export default function App() {
     setFlow(nextFlow);
   };
 
-  const exportToTab = (funcName, startLine, endLine) => {
-    if (!tabs.includes(funcName)) {
-      setTabs([...tabs, funcName]);
-      const lines = pseudocode.split('\n');
-      const targetBlock = lines.slice(startLine, endLine + 1).join('\n');
-      setTabContents(prev => ({ ...prev, [funcName]: targetBlock.trim() }));
-    }
-    setActiveTab(funcName);
-  };
-
   const blocksToHighlight = [];
-  if (activeTab === 'Hlavní') {
-    const lines = pseudocode.split('\n');
-    let currentBlock = null;
+  const lines = pseudocode.split('\n');
+  let currentBlock = null;
 
-    lines.forEach((line, index) => {
-      const match = line.match(/^\s*(?:FUNCTION|CLASS)\s+([a-zA-Z0-9_]+)/i);
-      if (match) {
-        // Pokud předchozí blok neměl ENDFUNCTION, implicitně jej uzavřeme
-        if (currentBlock) currentBlock.endLine = index - 1; 
-        
-        if (!tabs.includes(match[1])) {
-          currentBlock = { name: match[1], startLine: index, endLine: index };
-          blocksToHighlight.push(currentBlock);
-        } else {
-          currentBlock = null; 
-        }
-      } else if (currentBlock && /^\s*(?:ENDFUNCTION|ENDCLASS)/i.test(line)) {
-        currentBlock.endLine = index;
-        currentBlock = null;
-      } else if (currentBlock) {
-        currentBlock.endLine = index;
-      }
-    });
-  }
+  lines.forEach((line, index) => {
+    const match = line.match(/^\s*(?:FUNCTION|CLASS)\s+([a-zA-Z0-9_]+)/i);
+    if (match) {
+      if (currentBlock) currentBlock.endLine = index - 1; 
+      currentBlock = { name: match[1], startLine: index, endLine: index };
+      blocksToHighlight.push(currentBlock);
+    } else if (currentBlock && /^\s*(?:ENDFUNCTION|ENDCLASS)/i.test(line)) {
+      currentBlock.endLine = index;
+      currentBlock = null;
+    } else if (currentBlock) {
+      currentBlock.endLine = index;
+    }
+  });
 
   const renderPanelContent = (type) => {
     if (type === 'drawio') {
@@ -266,45 +236,13 @@ export default function App() {
             </div>
           )}
 
-          {tabs.length > 1 && (
-            <div className="flex bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-2 pt-2 gap-1 overflow-x-auto shrink-0 z-10">
-              {tabs.map(tab => (
-                <div key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 text-sm font-bold cursor-pointer rounded-t-lg border border-b-0 transition-colors flex items-center gap-2 ${activeTab === tab ? 'bg-white dark:bg-gray-900 text-indigo-600 border-gray-200 dark:border-gray-700' : 'bg-transparent text-gray-500 border-transparent hover:bg-gray-200 dark:hover:bg-gray-700'}`}>
-                  {tab}
-                  {tab !== 'Hlavní' && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setTabs(tabs.filter(t => t !== tab));
-                        if (activeTab === tab) setActiveTab('Hlavní');
-                      }}
-                      className="hover:bg-gray-200 dark:hover:bg-gray-800 rounded-full p-0.5"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
           <LineNumberedTextarea
-            value={activeTab === 'Hlavní' ? pseudocode : (tabContents[activeTab] || '')}
-            onChange={(e) => {
-              const newVal = e.target.value;
-              if (activeTab === 'Hlavní') {
-                setPseudocode(newVal);
-              } else {
-                setTabContents(prev => ({ ...prev, [activeTab]: newVal }));
-                const regex = new RegExp(`(?:FUNCTION|CLASS)\\s+${activeTab}\\b[\\s\\S]*?(?:ENDFUNCTION|ENDCLASS)`, 'g');
-                setPseudocode(prev => prev.replace(regex, newVal));
-              }
-            }}
+            value={pseudocode}
+            onChange={(e) => setPseudocode(e.target.value)}
             readOnly={flow === 'diagram-to-code'}
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}
-            blocks={activeTab === 'Hlavní' ? blocksToHighlight : []}
+            blocks={blocksToHighlight}
             highlightLines={selectedNodeIds.map(id => nodeLineMap[id]).filter(l => l !== undefined && l !== null)}
-            onExport={exportToTab}
           />
         </div>
       );

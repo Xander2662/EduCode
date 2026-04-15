@@ -11,10 +11,11 @@ const edgeLabels = {
   'true-false': { t: 'True', f: 'False' }
 };
 
-const CustomEdge = ({ id, source, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data, selected }) => {
+const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data, selected }) => {
   const { setEdges } = useReactFlow();
   const nodes = useNodes();
   const isCondition = nodes.find(n => n.id === source)?.type === 'CONDITION';
+  const isTargetMerge = nodes.find(n => n.id === target)?.type === 'MERGE';
   
   const [edgePath, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
 
@@ -45,9 +46,9 @@ const CustomEdge = ({ id, source, sourceX, sourceY, targetX, targetY, sourcePosi
 
   return (
     <>
-      {/* Skrytá, extra široká cesta pro mnohem snazší trefování blokem a myší */}
       <path d={edgePath} fill="none" strokeOpacity={0} strokeWidth={30} className="react-flow__edge-interaction cursor-crosshair" />
-      <BaseEdge path={edgePath} markerEnd={markerEnd} className={`react-flow__edge-path custom-edge-${id} ${selected ? "!stroke-indigo-600" : "!stroke-gray-800 dark:!stroke-gray-400"}`} style={{ strokeWidth: selected ? 3 : 2 }} />
+      {/* Pokud míří do MERGE, schováme šipku, aby se nepřeplácávala (jako v Draw.io) */}
+      <BaseEdge path={edgePath} markerEnd={isTargetMerge ? undefined : markerEnd} className={`react-flow__edge-path custom-edge-${id} ${selected ? "!stroke-indigo-600" : "!stroke-gray-800 dark:!stroke-gray-400"}`} style={{ strokeWidth: selected ? 3 : 2 }} />
       {isCondition && (
         <EdgeLabelRenderer>
           <div style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, pointerEvents: 'all' }}
@@ -167,6 +168,7 @@ const ConditionNode = ({ id, data, selected }) => {
       </svg>
       <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
       <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
 
       <div className="absolute top-6 z-10"><DragHandle /></div>
       <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-16 text-center outline-none bg-transparent text-xs font-mono nodrag mt-2 z-10 text-gray-800 dark:text-gray-100 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
@@ -203,6 +205,8 @@ const CommentNode = ({ id, data, selected }) => {
 const MergeNode = () => (
     <div className="w-2 h-2 bg-transparent pointer-events-none">
         <Handle type="target" position={Position.Top} id="t-top" className="opacity-0" />
+        <Handle type="target" position={Position.Right} id="t-right" className="opacity-0" />
+        <Handle type="target" position={Position.Left} id="t-left" className="opacity-0" />
         <Handle type="source" position={Position.Bottom} id="s-bottom" className="opacity-0" />
     </div>
 );
@@ -222,6 +226,23 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
 
   const selectedNodes = nodes.filter(n => n.selected);
   const selectedEdges = edges.filter(e => e.selected);
+
+  useEffect(() => {
+    setEdges(eds => eds.map(e => {
+      const isPositive = ['+', 'Ano', 'Yes', 'True'].includes(e.data?.label);
+      const isNegative = ['-', 'Ne', 'No', 'False'].includes(e.data?.label);
+      if (isPositive || isNegative) {
+          const pref = edgeLabels[edgeStyle || '+-'];
+          const newLabel = isPositive ? pref.t : pref.f;
+          if (e.data?.label !== newLabel || e.data?.edgeStyle !== edgeStyle) {
+              return { ...e, data: { ...e.data, label: newLabel, edgeStyle } };
+          }
+      } else if (e.data?.edgeStyle !== edgeStyle) {
+          return { ...e, data: { ...e.data, edgeStyle } };
+      }
+      return e;
+    }));
+  }, [edgeStyle, setEdges]);
 
   const executeDelete = useCallback(() => {
     const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
@@ -306,7 +327,6 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
     
-    // Multi-Point detekce: Zkontrolujeme myš i klíčové body samotného bloku
     const checkPoints = [
         { x: clientX, y: clientY },
         { x: centerX, y: centerY },
@@ -314,7 +334,6 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
         { x: centerX, y: rect.bottom + 10 }
     ];
 
-    // Musíme na moment schovat táhnuté bloky, abychom skrz ně viděli případné šipky pod nimi
     const originalStyles = [];
     draggedNodes.forEach(n => {
         const el = document.querySelector(`.react-flow__node[data-id="${n.id}"]`);
@@ -543,9 +562,6 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
 
     if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'start') return false;
     if (sourceNode?.type === 'START_END' && sourceNode.data?.mode === 'end') return false;
-
-    if (sourceNode?.type === 'START_END' && sourceNode.data?.mode === 'start' && connection.targetHandle !== 't-top') return false;
-    if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'end' && connection.sourceHandle !== 's-bottom') return false;
 
     if (sourceNode?.type === 'CONDITION') {
       if (sourceEdges.length >= 2) return false;

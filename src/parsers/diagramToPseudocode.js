@@ -223,7 +223,6 @@ export const parseDrawioToPseudocode = (xml) => {
                 }
             }
             else if (node.type === 'END') {
-                // Koncový blok už se nevypisuje přímo vnořený. Jen si ho zapamatujeme!
                 endNodeId = node.id;
                 let val = node.value.trim();
                 if (val && val.toUpperCase() !== 'KONEC' && val.toUpperCase() !== 'END') {
@@ -235,7 +234,6 @@ export const parseDrawioToPseudocode = (xml) => {
 
         traverse(start.id);
 
-        // Až po skončení celé funkce (včetně všech IFů a WHILEů) se vypíše ENDFUNCTION a flushnou zbylé komentáře
         if (endNodeId) {
             printCommentsBeforeY(nodes[endNodeId].y, "");
             appendLine(endNodeVal, endNodeId);
