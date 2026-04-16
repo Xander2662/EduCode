@@ -8,18 +8,14 @@ export const parseDrawioToPseudocode = (xml) => {
     let edges = [];
     let errors = [];
 
+    // Chytřejší čistič textu: Nesmaže matematické < a >, ale bezpečně odstraní HTML tagy
     const cleanTextWithLines = (html) => {
       if (!html) return '';
       let t = html.replace(/<br\s*\/?>/gi, '\n')
                   .replace(/<\/div>/gi, '\n')
                   .replace(/<\/p>/gi, '\n');
                   
-      const tagsToRemove = ['b', 'i', 'u', 'span', 'font', 'div', 'p', 'strong', 'em', 'strike', 's', 'sub', 'sup', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
-      tagsToRemove.forEach(tag => {
-          const openReg = new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'gi');
-          const closeReg = new RegExp(`</${tag}>`, 'gi');
-          t = t.replace(openReg, '').replace(closeReg, '');
-      });
+      t = t.replace(/<\/?(?:b|i|u|span|font|div|p|strong|em|strike|s|sub|sup|h[1-6])(?:\s+[^>]*?)?>/gi, '');
       
       t = t.replace(/&nbsp;/gi, ' ')
            .replace(/&gt;/gi, '>')
@@ -145,6 +141,28 @@ export const parseDrawioToPseudocode = (xml) => {
         return false;
     };
 
+    const findConvergence = (tId, fId) => {
+        if (!tId && !fId) return null;
+        if (!tId) return fId;
+        if (!fId) return tId;
+        
+        const pathT = [];
+        let curr = tId;
+        let safe = 100;
+        while(curr && nodes[curr] && safe-- > 0) {
+            pathT.push(curr);
+            curr = nodes[curr].next.length > 0 ? nodes[curr].next[0].target : null;
+        }
+        
+        curr = fId;
+        safe = 100;
+        while(curr && nodes[curr] && safe-- > 0) {
+            if (pathT.includes(curr)) return curr;
+            curr = nodes[curr].next.length > 0 ? nodes[curr].next[0].target : null;
+        }
+        return null;
+    };
+
     startNodes.forEach((start, index) => {
         let endNodeId = null;
         let endNodeVal = `END${start.entityType || 'FUNCTION'}`;
@@ -182,10 +200,12 @@ export const parseDrawioToPseudocode = (xml) => {
                 const tLoops = tTarget ? doesPathLoopBack(tTarget, node.id) : false;
                 const fLoops = fTarget ? doesPathLoopBack(fTarget, node.id) : false;
 
+                let cleanCond = node.value.replace(/^(?:WHILE|IF)\s+/i, '').trim();
+
                 if (tLoops || fLoops) {
                     const isTrueLoop = tLoops;
                     const isFor = node.value.toUpperCase().startsWith('FOR ');
-                    const condText = isTrueLoop ? node.value : `NOT (${node.value})`;
+                    const condText = isTrueLoop ? cleanCond : `NOT (${cleanCond})`;
                     
                     appendLine(`${indent}${isFor ? '' : 'WHILE '}${condText} DO`, node.id);
                     
@@ -210,16 +230,22 @@ export const parseDrawioToPseudocode = (xml) => {
                     appendLine(`${indent}${isFor ? 'ENDFOR' : 'ENDWHILE'}`);
 
                     const exitNode = isTrueLoop ? fTarget : tTarget;
-                    if (exitNode && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId);
+                    if (exitNode && exitNode !== stopId && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId);
                 } else {
-                    appendLine(`${indent}IF ${node.value} THEN`, node.id);
-                    if (tTarget) traverse(tTarget, indent + "    ", new Set(inPath), stopId);
+                    let mergeNodeId = findConvergence(tTarget, fTarget);
                     
-                    if (fTarget && nodes[fTarget] && nodes[fTarget].type !== 'END') {
+                    appendLine(`${indent}IF ${cleanCond} THEN`, node.id);
+                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId);
+                    
+                    if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'END') {
                         appendLine(`${indent}ELSE`);
-                        traverse(fTarget, indent + "    ", new Set(inPath), stopId);
+                        traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId);
                     }
                     appendLine(`${indent}ENDIF`);
+                    
+                    if (mergeNodeId && mergeNodeId !== stopId) {
+                        traverse(mergeNodeId, indent, new Set(inPath), stopId);
+                    }
                 }
             }
             else if (node.type === 'END') {

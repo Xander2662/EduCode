@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Move, ArrowUpCircle } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parsePseudocodeToPython } from './parsers/pseudocodeToPython';
@@ -73,6 +73,78 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
   );
 };
 
+const TutorialDialog = ({ onClose }) => {
+  const [tab, setTab] = useState('zaklady');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-800">
+          <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2"><HelpCircle size={20} className="text-indigo-500"/> Nápověda k editoru diagramů</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 p-1"><X size={20} /></button>
+        </div>
+        <div className="flex border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+          <button onClick={() => setTab('zaklady')} className={`flex-1 py-3 text-sm font-semibold transition-colors ${tab === 'zaklady' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-300'}`}>Základy & Spojování</button>
+          <button onClick={() => setTab('cykly')} className={`flex-1 py-3 text-sm font-semibold transition-colors ${tab === 'cykly' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-300'}`}>Cykly a Podmínky</button>
+          <button onClick={() => setTab('klavesy')} className={`flex-1 py-3 text-sm font-semibold transition-colors ${tab === 'klavesy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-300'}`}>Klávesové zkratky</button>
+        </div>
+        <div className="p-6 overflow-y-auto max-h-[60vh] text-gray-700 dark:text-gray-300 text-sm leading-relaxed space-y-6">
+          {tab === 'zaklady' && (
+            <>
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base">Vkládání bloků (Drag & Drop)</h3>
+                <p className="mb-4">Nemusíte složitě mazat a znovu tvořit šipky. Jakýkoliv blok z horního menu můžete kliknutím vložit, a nebo jej přesunout <strong>přímo nad existující šipku</strong>. Šipka se fialově rozsvítí a blok se do ní sám vklíní.</p>
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 flex items-center justify-center gap-4 border border-gray-200 dark:border-gray-700">
+                  <div className="w-16 h-10 border-2 border-gray-400 rounded flex items-center justify-center text-xs">Akce 1</div>
+                  <div className="flex flex-col items-center gap-1 text-indigo-500">
+                    <Move size={20} className="animate-bounce" />
+                    <div className="w-16 h-8 bg-indigo-100 dark:bg-indigo-900/50 border-2 border-indigo-400 border-dashed rounded flex items-center justify-center text-xs">Nový</div>
+                  </div>
+                  <div className="w-16 h-10 border-2 border-gray-400 rounded flex items-center justify-center text-xs">Akce 2</div>
+                </div>
+              </div>
+            </>
+          )}
+          {tab === 'cykly' && (
+            <>
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base">Tvorba cyklu (WHILE / FOR)</h3>
+                <p className="mb-4">Do kosočtverce <strong>nemusíte psát slovo WHILE</strong> (ale můžete, systém to pochopí). Stačí napsat pouze samotnou podmínku (např. <code>x &lt; 10</code>).</p>
+                <p className="mb-4">Systém automaticky pozná, že jde o cyklus, jakmile vezmete šipku z konce akce a <strong>propojíte ji zpět nahoru</strong> nad kosočtverec.</p>
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-6 flex flex-col items-center justify-center gap-4 border border-gray-200 dark:border-gray-700 relative">
+                  <div className="w-20 h-20 border-2 border-gray-400 rotate-45 flex items-center justify-center bg-white dark:bg-gray-900"><span className="-rotate-45 text-xs font-bold">x &lt; 10</span></div>
+                  <div className="w-24 h-10 border-2 border-gray-400 rounded flex items-center justify-center text-xs bg-white dark:bg-gray-900 relative">Akce
+                     <ArrowUpCircle size={24} className="absolute -right-10 text-indigo-500" />
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+          {tab === 'klavesy' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">Delete</kbd> nebo <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">Backspace</kbd>
+                <p className="mt-2 text-xs">Smaže vybraný blok nebo hranu.</p>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">Ctrl + C</kbd> a <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">Ctrl + V</kbd>
+                <p className="mt-2 text-xs">Zkopíruje a vloží vybrané bloky (včetně jejich propojení).</p>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">F2</kbd>
+                <p className="mt-2 text-xs">Okamžitě začne upravovat text vybraného bloku.</p>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">Ctrl + A</kbd>
+                <p className="mt-2 text-xs">Vybere všechny bloky a hrany v diagramu.</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [flow, setFlow] = useState('bidirectional');
   const [panels, setPanels] = useState(['drawio', 'pseudocode']);
@@ -85,6 +157,7 @@ export default function App() {
   const [activeDropdown, setActiveDropdown] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [dialog, setDialog] = useState(null);
+  const [showTutorial, setShowTutorial] = useState(false);
 
   const [edgeStyle, setEdgeStyle] = useState(localStorage.getItem('edgeStyle') || '+-');
   const [selectedNodeIds, setSelectedNodeIds] = useState([]);
@@ -109,7 +182,6 @@ export default function App() {
     });
   }, []);
 
-  // Diagram -> Pseudocode Sync
   useEffect(() => {
     if (flow === 'code-to-diagram') return;
     if (flow === 'bidirectional' && activeWindow.current !== 'drawio') return;
@@ -127,7 +199,6 @@ export default function App() {
     return () => clearTimeout(timeoutId);
   }, [diagramXml, flow]);
 
-  // Pseudocode -> Diagram Sync
   useEffect(() => {
     if (flow === 'diagram-to-code') return;
     if (flow === 'bidirectional' && activeWindow.current !== 'pseudocode') return;
@@ -146,7 +217,6 @@ export default function App() {
     return () => clearTimeout(timeoutId);
   }, [pseudocode, flow, edgeStyle]);
 
-  // Pseudocode -> Python Sync
   useEffect(() => {
     if (panels.includes('python')) {
       const timeoutId = setTimeout(() => {
@@ -252,6 +322,8 @@ export default function App() {
   return (
     <div className="h-screen bg-gray-100 dark:bg-gray-950 flex flex-col font-sans overflow-hidden transition-colors" onClick={() => setActiveDropdown(null)}>
 
+      {showTutorial && <TutorialDialog onClose={() => setShowTutorial(false)} />}
+
       {dialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 max-w-sm w-full mx-4">
@@ -280,7 +352,14 @@ export default function App() {
           <React.Fragment key={type}>
             <div className={`flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 relative transition-all ${activeDropdown === index ? 'z-50 overflow-visible' : 'z-10 overflow-hidden'}`}>
               <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 flex justify-between items-center relative z-50">
-                <span>{PANEL_TYPES[type].title}</span>
+                <div className="flex items-center gap-2">
+                  <span>{PANEL_TYPES[type].title}</span>
+                  {type === 'drawio' && (
+                    <button onClick={(e) => { e.stopPropagation(); setShowTutorial(true); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-1 ml-1" title="Nápověda k editoru">
+                      <HelpCircle size={16} />
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
                   
                   {type === 'drawio' && (

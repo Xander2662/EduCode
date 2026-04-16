@@ -47,7 +47,6 @@ const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, so
   return (
     <>
       <path d={edgePath} fill="none" strokeOpacity={0} strokeWidth={30} className="react-flow__edge-interaction cursor-crosshair" />
-      {/* Pokud míří do MERGE, schováme šipku, aby se nepřeplácávala (jako v Draw.io) */}
       <BaseEdge path={edgePath} markerEnd={isTargetMerge ? undefined : markerEnd} className={`react-flow__edge-path custom-edge-${id} ${selected ? "!stroke-indigo-600" : "!stroke-gray-800 dark:!stroke-gray-400"}`} style={{ strokeWidth: selected ? 3 : 2 }} />
       {isCondition && (
         <EdgeLabelRenderer>
@@ -162,16 +161,15 @@ const ConditionNode = ({ id, data, selected }) => {
   if (hasWarning && !selected) textColor = 'text-red-500';
 
   return (
-    <div className="relative w-28 h-28 flex flex-col items-center justify-center shadow-sm">
+    <div className="relative w-32 h-32 flex flex-col items-center justify-center shadow-sm">
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${textColor}`} preserveAspectRatio="none" viewBox="0 0 100 100">
         <polygon points="50,2 98,50 50,98 2,50" className={hasWarning ? 'fill-red-50 dark:fill-red-900/20' : 'fill-white dark:fill-gray-800'} stroke="currentColor" strokeWidth={selected ? "4" : "2"} vectorEffect="non-scaling-stroke" />
       </svg>
       <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-indigo-600" />
       <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-      <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
 
       <div className="absolute top-6 z-10"><DragHandle /></div>
-      <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-16 text-center outline-none bg-transparent text-xs font-mono nodrag mt-2 z-10 text-gray-800 dark:text-gray-100 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      <input id={`input-${id}`} defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-24 text-center outline-none bg-transparent text-sm font-mono nodrag mt-2 z-10 text-gray-800 dark:text-gray-100 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       
       <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-indigo-600" />
       <Handle type="source" position={Position.Right} id="s-right" className="!w-2 !h-2 !bg-indigo-600" />
@@ -186,7 +184,7 @@ const CommentNode = ({ id, data, selected }) => {
   };
 
   return (
-    <div className={`bg-yellow-50 dark:bg-yellow-900/30 border-2 border-yellow-300 dark:border-yellow-700 p-2 min-w-[140px] flex flex-col shadow-sm rounded-md relative transition-all ${selected ? 'ring-4 ring-yellow-400 dark:ring-yellow-600' : ''}`}>
+    <div className={`bg-yellow-50 dark:bg-yellow-900/30 border-2 border-yellow-300 dark:border-yellow-700 p-2 min-w-[200px] flex flex-col shadow-sm rounded-md relative transition-all ${selected ? 'ring-4 ring-yellow-400 dark:ring-yellow-600' : ''}`}>
       <DragHandle />
       <textarea 
         id={`input-${id}`} 
@@ -205,8 +203,6 @@ const CommentNode = ({ id, data, selected }) => {
 const MergeNode = () => (
     <div className="w-2 h-2 bg-transparent pointer-events-none">
         <Handle type="target" position={Position.Top} id="t-top" className="opacity-0" />
-        <Handle type="target" position={Position.Right} id="t-right" className="opacity-0" />
-        <Handle type="target" position={Position.Left} id="t-left" className="opacity-0" />
         <Handle type="source" position={Position.Bottom} id="s-bottom" className="opacity-0" />
     </div>
 );
