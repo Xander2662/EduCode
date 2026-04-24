@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Move, ArrowUpCircle } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Move, ArrowUpCircle, Square, Circle, AlignLeft, Diamond, MessageSquare, MousePointerClick } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parsePseudocodeToPython } from './parsers/pseudocodeToPython';
@@ -11,7 +11,7 @@ const PANEL_TYPES = {
   python: { id: 'python', label: 'Python', title: 'Python Kód' }
 };
 
-const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [] }) => {
+const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], onCursorChange }) => {
   const lineCount = value?.split('\n').length || 1;
   const textareaRef = useRef(null);
   const lineNumbersRef = useRef(null);
@@ -30,6 +30,14 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
     navigator.clipboard.writeText(value);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleInteraction = (e) => {
+    if (onCursorChange) {
+      const pos = e.target.selectionStart;
+      const linesUntilCursor = value.substring(0, pos).split('\n').length - 1;
+      onCursorChange(linesUntilCursor);
+    }
   };
 
   return (
@@ -66,6 +74,8 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
         value={value}
         onChange={onChange}
         onScroll={handleScroll}
+        onClick={handleInteraction}
+        onKeyUp={handleInteraction}
         readOnly={readOnly}
         placeholder={placeholder}
       />
@@ -77,65 +87,91 @@ const TutorialDialog = ({ onClose }) => {
   const [tab, setTab] = useState('zaklady');
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-800">
-          <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2"><HelpCircle size={20} className="text-indigo-500"/> Nápověda k editoru diagramů</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 p-1"><X size={20} /></button>
+          <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2"><HelpCircle size={20} className="text-indigo-500"/> Nápověda k editoru</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 p-1"><X size={20} /></button>
         </div>
-        <div className="flex border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-          <button onClick={() => setTab('zaklady')} className={`flex-1 py-3 text-sm font-semibold transition-colors ${tab === 'zaklady' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-300'}`}>Základy & Spojování</button>
-          <button onClick={() => setTab('cykly')} className={`flex-1 py-3 text-sm font-semibold transition-colors ${tab === 'cykly' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-300'}`}>Cykly a Podmínky</button>
-          <button onClick={() => setTab('klavesy')} className={`flex-1 py-3 text-sm font-semibold transition-colors ${tab === 'klavesy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-300'}`}>Klávesové zkratky</button>
+        <div className="flex border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 overflow-x-auto">
+          <button onClick={() => setTab('zaklady')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'zaklady' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>Základní bloky</button>
+          <button onClick={() => setTab('spojovani')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'spojovani' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>Spojování & Cykly</button>
+          <button onClick={() => setTab('klavesy')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'klavesy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>Klávesové zkratky</button>
         </div>
         <div className="p-6 overflow-y-auto max-h-[60vh] text-gray-700 dark:text-gray-300 text-sm leading-relaxed space-y-6">
+          
           {tab === 'zaklady' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="border border-fuchsia-200 bg-fuchsia-50 dark:bg-fuchsia-900/20 p-4 rounded-lg flex items-start gap-3">
+                <Circle size={24} className="text-fuchsia-600 mt-1 shrink-0" />
+                <div>
+                  <h4 className="font-bold text-fuchsia-800 dark:text-fuchsia-400">Start / Konec</h4>
+                  <p className="text-xs mt-1">Povinné bloky. Označují začátek a konec vaší funkce.</p>
+                </div>
+              </div>
+              <div className="border border-blue-200 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg flex items-start gap-3">
+                <Square size={24} className="text-blue-600 mt-1 shrink-0" />
+                <div>
+                  <h4 className="font-bold text-blue-800 dark:text-blue-400">Akce (Operace)</h4>
+                  <p className="text-xs mt-1">Matematické operace (<code>x = x + 1</code>) nebo volání funkcí. Pokud napíšete <code>"Text"</code>, vygeneruje se PRINT.</p>
+                </div>
+              </div>
+              <div className="border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-lg flex items-start gap-3">
+                <AlignLeft size={24} className="text-emerald-600 mt-1 shrink-0" style={{transform: 'skew(-15deg)'}} />
+                <div>
+                  <h4 className="font-bold text-emerald-800 dark:text-emerald-400">Vstup / Výstup (IO)</h4>
+                  <p className="text-xs mt-1">Příkazy jako <code>Vstup x</code>. Stačí napsat <code>x</code> a systém automaticky přiřadí vstup od uživatele.</p>
+                </div>
+              </div>
+              <div className="border border-orange-200 bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg flex items-start gap-3">
+                <Diamond size={24} className="text-orange-600 mt-1 shrink-0" />
+                <div>
+                  <h4 className="font-bold text-orange-800 dark:text-orange-400">Podmínka (IF / WHILE)</h4>
+                  <p className="text-xs mt-1">Obsahuje logický test (např. <code>x &gt; 0</code>). Vychází z ní vždy dvě cesty (Pravda / Nepravda).</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {tab === 'spojovani' && (
             <>
               <div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base">Vkládání bloků (Drag & Drop)</h3>
-                <p className="mb-4">Nemusíte složitě mazat a znovu tvořit šipky. Jakýkoliv blok z horního menu můžete kliknutím vložit, a nebo jej přesunout <strong>přímo nad existující šipku</strong>. Šipka se fialově rozsvítí a blok se do ní sám vklíní.</p>
-                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 flex items-center justify-center gap-4 border border-gray-200 dark:border-gray-700">
-                  <div className="w-16 h-10 border-2 border-gray-400 rounded flex items-center justify-center text-xs">Akce 1</div>
-                  <div className="flex flex-col items-center gap-1 text-indigo-500">
-                    <Move size={20} className="animate-bounce" />
-                    <div className="w-16 h-8 bg-indigo-100 dark:bg-indigo-900/50 border-2 border-indigo-400 border-dashed rounded flex items-center justify-center text-xs">Nový</div>
-                  </div>
-                  <div className="w-16 h-10 border-2 border-gray-400 rounded flex items-center justify-center text-xs">Akce 2</div>
-                </div>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><Move size={18}/> Vkládání bloků do šipky (Drag & Drop)</h3>
+                <p className="mb-4 text-gray-600 dark:text-gray-400">Nemusíte složitě mazat a znovu tvořit spojení. Pokud přesunete nový nebo existující blok <strong>přímo nad existující šipku</strong>, šipka se zbarví modře a blok se do ní sám vklíní a automaticky se propojí.</p>
+              </div>
+              <hr className="border-gray-200 dark:border-gray-700" />
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><MousePointerClick size={18}/> Rychlé menu (Pravé tlačítko myši)</h3>
+                <p className="mb-4 text-gray-600 dark:text-gray-400">Pro urychlení práce stačí kliknout <strong>pravým tlačítkem myši</strong> do prázdného prostoru. Objeví se kontextové menu a vybraný blok se vytvoří přesně na místě vašeho kurzoru.</p>
+              </div>
+              <hr className="border-gray-200 dark:border-gray-700" />
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><ArrowUpCircle size={18}/> Tvorba cyklu (WHILE / FOR)</h3>
+                <p className="mb-4 text-gray-600 dark:text-gray-400">Do oranžového kosočtverce <strong>nemusíte psát slovo WHILE</strong>. Stačí napsat pouze samotnou podmínku. Systém automaticky pozná, že jde o cyklus, jakmile vezmete šipku z konce akce a <strong>propojíte ji zpět</strong> do stejného kosočtverce.</p>
               </div>
             </>
           )}
-          {tab === 'cykly' && (
-            <>
-              <div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base">Tvorba cyklu (WHILE / FOR)</h3>
-                <p className="mb-4">Do kosočtverce <strong>nemusíte psát slovo WHILE</strong> (ale můžete, systém to pochopí). Stačí napsat pouze samotnou podmínku (např. <code>x &lt; 10</code>).</p>
-                <p className="mb-4">Systém automaticky pozná, že jde o cyklus, jakmile vezmete šipku z konce akce a <strong>propojíte ji zpět nahoru</strong> nad kosočtverec.</p>
-                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-6 flex flex-col items-center justify-center gap-4 border border-gray-200 dark:border-gray-700 relative">
-                  <div className="w-20 h-20 border-2 border-gray-400 rotate-45 flex items-center justify-center bg-white dark:bg-gray-900"><span className="-rotate-45 text-xs font-bold">x &lt; 10</span></div>
-                  <div className="w-24 h-10 border-2 border-gray-400 rounded flex items-center justify-center text-xs bg-white dark:bg-gray-900 relative">Akce
-                     <ArrowUpCircle size={24} className="absolute -right-10 text-indigo-500" />
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
+
           {tab === 'klavesy' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">Delete</kbd> nebo <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">Backspace</kbd>
+              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Del</kbd>
                 <p className="mt-2 text-xs">Smaže vybraný blok nebo hranu.</p>
               </div>
-              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">Ctrl + C</kbd> a <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">Ctrl + V</kbd>
-                <p className="mt-2 text-xs">Zkopíruje a vloží vybrané bloky (včetně jejich propojení).</p>
+              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Ctrl+C</kbd> / <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Ctrl+V</kbd>
+                <p className="mt-2 text-xs">Kopírování a vložení bloků vč. vazeb.</p>
               </div>
-              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">F2</kbd>
-                <p className="mt-2 text-xs">Okamžitě začne upravovat text vybraného bloku.</p>
+              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">F2</kbd>
+                <p className="mt-2 text-xs">Okamžitě edituje text vybraného bloku.</p>
               </div>
-              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono text-gray-800 dark:text-gray-200">Ctrl + A</kbd>
-                <p className="mt-2 text-xs">Vybere všechny bloky a hrany v diagramu.</p>
+              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Shift + Tažení</kbd>
+                <p className="mt-2 text-xs">Hromadný výběr pomocí obdélníku.</p>
+              </div>
+              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Ctrl + Klik</kbd>
+                <p className="mt-2 text-xs">Postupné přidávání bloků do výběru.</p>
               </div>
             </div>
           )}
@@ -159,11 +195,20 @@ export default function App() {
   const [dialog, setDialog] = useState(null);
   const [showTutorial, setShowTutorial] = useState(false);
 
-  const [edgeStyle, setEdgeStyle] = useState(localStorage.getItem('edgeStyle') || '+-');
+  const [edgeStyle, setEdgeStyle] = useState(localStorage.getItem('edgeStyle') || 'true-false');
   const [selectedNodeIds, setSelectedNodeIds] = useState([]);
+  const [externalSelectedIds, setExternalSelectedIds] = useState([]);
   const [nodeLineMap, setNodeLineMap] = useState({});
 
   const activeWindow = useRef('pseudocode'); 
+
+  useEffect(() => {
+    const seen = localStorage.getItem('eduCodeTutorialSeen');
+    if (!seen) {
+      setShowTutorial(true);
+      localStorage.setItem('eduCodeTutorialSeen', 'true');
+    }
+  }, []);
 
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
@@ -181,6 +226,12 @@ export default function App() {
       return prev;
     });
   }, []);
+
+  const handleCodeCursorChange = (lineIdx) => {
+    const nodeId = Object.keys(nodeLineMap).find(id => nodeLineMap[id] === lineIdx);
+    if (nodeId) setExternalSelectedIds([nodeId]);
+    else setExternalSelectedIds([]);
+  };
 
   useEffect(() => {
     if (flow === 'code-to-diagram') return;
@@ -205,6 +256,11 @@ export default function App() {
 
     const timeoutId = setTimeout(() => {
       try {
+        if (!pseudocode || pseudocode.trim() === '') {
+            setParseErrors(["Kód je prázdný. Diagram nebyl přepsán, aby nedošlo ke ztrátě dat."]);
+            return;
+        }
+
         const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode || '', diagramXml, edgeStyle);
         if (diagramXml !== generatedXml) {
             setDiagramXml(generatedXml);
@@ -267,6 +323,7 @@ export default function App() {
             xml={diagramXml}
             edgeStyle={edgeStyle}
             onSelectionChange={handleSelectionChange}
+            externalSelectedIds={externalSelectedIds}
             onXmlChange={(xml) => {
               if (flow === 'diagram-to-code' || (flow === 'bidirectional' && activeWindow.current === 'drawio')) {
                 setDiagramXml(xml);
@@ -309,6 +366,7 @@ export default function App() {
           <LineNumberedTextarea
             value={pseudocode}
             onChange={(e) => setPseudocode(e.target.value)}
+            onCursorChange={handleCodeCursorChange}
             readOnly={flow === 'diagram-to-code'}
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}
             blocks={blocksToHighlight}
@@ -371,10 +429,10 @@ export default function App() {
                       }}
                       className="text-xs bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none text-gray-600 dark:text-gray-400 cursor-pointer p-1"
                     >
-                      <option value="+-">+ / -</option>
+                      <option value="true-false">True / False</option>
                       <option value="ano-ne">Ano / Ne</option>
                       <option value="yes-no">Yes / No</option>
-                      <option value="true-false">True / False</option>
+                      <option value="+-">+ / -</option>
                     </select>
                   )}
 

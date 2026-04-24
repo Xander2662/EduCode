@@ -1,4 +1,4 @@
-export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+-') => {
+export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 'true-false') => {
     const getNewId = () => 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 11);
     
     const edgeLabels = {
@@ -7,7 +7,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
         'yes-no': { t: 'Yes', f: 'No' },
         'true-false': { t: 'True', f: 'False' }
     };
-    const EL = edgeLabels[edgeStyle] || edgeLabels['+-'];
+    const EL = edgeLabels[edgeStyle] || edgeLabels['true-false'];
     
     let errors = [];
     let declaredFuncs = new Set();
@@ -68,7 +68,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
                 let type = 'ACTION';
                 if (style.includes('ellipse') && style.includes('strokeColor=none') && style.includes('fillColor=none')) type = 'MERGE';
                 else if (style.includes('ellipse')) type = 'START_END';
-                else if (style.includes('rhombus')) type = 'CONDITION';
+                else if (style.includes('rhombus') || style.includes('hexagon')) type = 'CONDITION';
                 else if (style.includes('shape=parallelogram')) type = 'IO';
                 else if (style.includes('shape=note')) type = 'COMMENT';
                 existingNodes.push({ id: cell.getAttribute('id'), val, type, x: parseFloat(geo.getAttribute('x')), y: parseFloat(geo.getAttribute('y')), used: false });
@@ -83,7 +83,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
         const match = existingNodes.find(n => !n.used && n.type === type && normalize(n.val) === normalizedTarget);
         if (match) {
             match.used = true;
-            return { x: match.x, y: match.y, matched: true, oldId: match.id };
+            // Dynamické Y (Auto-Layout osy Y)
+            return { x: match.x, y: currentY, matched: true, oldId: match.id };
         }
         return { x: defX, y: currentY, matched: false, oldId: getNewId() };
     };
@@ -113,11 +114,12 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
     let globalGroupX = 360;
     
     const STYLES = {
-        START_END: "ellipse;whiteSpace=wrap;html=1;",
-        ACTION: "whiteSpace=wrap;html=1;",
-        IO: "shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;",
-        CONDITION: "rhombus;whiteSpace=wrap;html=1;",
+        START_END: "ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;",
+        ACTION: "whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;",
+        IO: "shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#d5e8d4;strokeColor=#82b366;",
+        CONDITION: "shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;size=0.15;fillColor=#ffe6cc;strokeColor=#d79b00;",
         COMMENT: "shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;strokeColor=#d6b656;",
+        MERGE: "ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;resizable=0;movable=0;rotatable=0;",
         EDGE: "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;"
     };
 
@@ -287,10 +289,9 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
                     stack.push({ type: 'DO_WHILE', id: loopId, isNot });
                     pendingExits = [{ id: loopId, text: ports.fText, handle: ports.fHandle }];
                 } else {
-                    // ŽÁDNÝ MERGE UZEL! Vše se napojí přímo na vrchol kosočtverce (loopId)
                     pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
                     const ports = getConditionPorts(isNot);
-                    stack.push({ type: 'LOOP', id: loopId, isNot });
+                    stack.push({ type: 'LOOP', id: loopId, mergeId: null, isNot });
                     pendingExits = [{ id: loopId, text: ports.tText, handle: ports.tHandle }];
                 }
             }
@@ -300,7 +301,6 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
                 if (currentLoop.type === 'DO_WHILE') {
                     // empty
                 } else {
-                    // Standardní cyklus se vrací přímo do svého podmínkového kosočtverce zboku (t-left)
                     pendingExits.forEach(exit => {
                         let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.isNot).tHandle : exit.handle;
                         addEdge(exit.id, currentLoop.id, exit.text, returnHandle, "t-left"); 
@@ -313,8 +313,23 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
                 let isIo = false;
                 let text = line;
                 
-                if (upper.startsWith('PRINT(') && upper.endsWith(')')) isIo = true; 
-                else if (upper.startsWith('VSTUP ') || upper.startsWith('RETURN')) isIo = true;
+                if (upper.startsWith('PRINT(') && upper.endsWith(')')) { 
+                    isIo = false; 
+                    let inner = line.substring(6, line.length - 1).trim();
+                    if (inner.startsWith('"') && inner.endsWith('"')) {
+                        text = inner;
+                    } else {
+                        isIo = true; 
+                        text = line;
+                    }
+                } 
+                else if (upper.includes('= INPUT()') || upper.includes('=INPUT()')) {
+                    isIo = true;
+                    text = line.replace(/\s*=\s*INPUT\(\)/i, '').trim();
+                }
+                else if (upper.startsWith('VSTUP ') || upper === 'VSTUP' || upper.startsWith('RETURN')) {
+                    isIo = true;
+                }
 
                 let xPos = getXPos();
                 const nodeId = addNode(text, isIo ? 'IO' : 'ACTION', xPos);
@@ -338,10 +353,10 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
 
     outNodes.forEach(n => {
         let w = 120, h = 60;
-        if (n.type === 'CONDITION') { w = 100; h = 100; }
+        if (n.type === 'CONDITION') { w = 140; h = 70; }
         if (n.type === 'START_END') { w = 100; h = 40; }
         if (n.type === 'COMMENT') { w = 180; h = 50; }
-        // Merge uzel jsme odstranili z generátoru, ale pro zpětnou kompatibilitu jej necháme ve stylech
+        if (n.type === 'MERGE') { w = 10; h = 10; }
         
         let style = STYLES[n.type] || n.type;
         if (n.mode) style += `mode=${n.mode};`;
@@ -364,7 +379,6 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = '+
         else if (e.sourceHandle === 's-left') style += "exitX=0;exitY=0.5;exitDx=0;exitDy=0;";
         else if (e.sourceHandle === 's-bottom') style += "exitX=0.5;exitY=1;exitDx=0;exitDy=0;";
 
-        // Jelikož MERGE uzly už negenerujeme, tohle je zde jen jako pojistka, kdyby tam v budoucnu nějaký byl
         const targetNode = outNodes.find(n => n.id === e.target);
         if (targetNode && targetNode.type === 'MERGE') style += "endArrow=none;";
 

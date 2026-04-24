@@ -8,7 +8,6 @@ export const parseDrawioToPseudocode = (xml) => {
     let edges = [];
     let errors = [];
 
-    // Chytřejší čistič textu: Nesmaže matematické < a >, ale bezpečně odstraní HTML tagy
     const cleanTextWithLines = (html) => {
       if (!html) return '';
       let t = html.replace(/<br\s*\/?>/gi, '\n')
@@ -54,7 +53,9 @@ export const parseDrawioToPseudocode = (xml) => {
           else {
               type = 'IO';
               let tokens = value.split(/[,\s\n\t]+/).filter(Boolean);
-              if (tokens.length > 0 && tokens[0].toLowerCase() === 'vstup') value = 'Vstup ' + tokens.slice(1).join(', ');
+              if (tokens.length > 0 && tokens[0].toLowerCase() === 'vstup') {
+                  value = tokens.length > 1 ? 'Vstup ' + tokens.slice(1).join(', ') : 'Vstup';
+              }
           }
         }
         
@@ -81,7 +82,21 @@ export const parseDrawioToPseudocode = (xml) => {
     const startNodes = Object.values(nodes).filter(n => n.type === 'START');
     startNodes.sort((a, b) => a.x - b.x || a.y - b.y);
 
-    if (startNodes.length === 0) return { code: "", errors: ["Diagram neobsahuje počáteční blok."], nodeLineMap: {} };
+    if (startNodes.length === 0) {
+        errors.push("Diagram neobsahuje počáteční blok START (byl vygenerován automaticky pro zachování kódu).");
+        const roots = Object.values(nodes).filter(n => n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END');
+        if (roots.length > 0) {
+            roots.sort((a, b) => a.y - b.y);
+            const ghostId = 'ghost_start';
+            nodes[ghostId] = { id: ghostId, value: 'main', type: 'START', x: 360, y: 0, next: [], prev: [], entityType: 'FUNCTION' };
+            edges.push({ source: ghostId, target: roots[0].id, value: '' });
+            nodes[ghostId].next.push({ target: roots[0].id, value: '' });
+            roots[0].prev.push({ source: ghostId, value: '' });
+            startNodes.push(nodes[ghostId]);
+        } else {
+            return { code: "", errors: ["Diagram neobsahuje počáteční blok."], nodeLineMap: {} };
+        }
+    }
 
     let codeLines = [];
     let nodeLineMap = {};
@@ -113,7 +128,10 @@ export const parseDrawioToPseudocode = (xml) => {
             node.value.split('\n').forEach(line => {
                 let val = line.trim();
                 if (!val) return;
-                if (val.toUpperCase().startsWith('RETURN') || val.includes('=')) {
+                
+                if (val.startsWith('"') && val.endsWith('"')) {
+                    appendLine(`${indent}PRINT(${val})`, node.id);
+                } else if (val.toUpperCase().startsWith('RETURN') || val.includes('=')) {
                     appendLine(`${indent}${val}`, node.id);
                 } else {
                     let isFuncFormat = val.includes('(') || val.includes(')');
@@ -121,13 +139,19 @@ export const parseDrawioToPseudocode = (xml) => {
                 }
             });
         } else if (node.type === 'IO') {
-            if (/^(INT\s|STRING\s|REAL\s|BOOLEAN\s|DEKLARACE)/i.test(node.value) || node.value.toUpperCase().startsWith('VSTUP')) {
+            if (/^(INT\s|STRING\s|REAL\s|BOOLEAN\s|DEKLARACE)/i.test(node.value)) {
                 appendLine(`${indent}${node.value}`, node.id);
             } else if (node.value.toUpperCase().startsWith('PRINT')) {
                 let inner = node.value.substring(5).trim();
                 if (inner.startsWith('(')) inner = inner.substring(1, inner.length - 1).trim();
                 appendLine(`${indent}PRINT(${inner})`, node.id);
-            } else appendLine(`${indent}PRINT(${node.value})`, node.id);
+            } else if (node.value.toUpperCase().startsWith('VSTUP') || node.value.toUpperCase() === 'VSTUP') {
+                appendLine(`${indent}${node.value}`, node.id);
+            } else if (!node.value.includes('=')) {
+                appendLine(`${indent}${node.value} = INPUT()`, node.id);
+            } else {
+                appendLine(`${indent}${node.value}`, node.id);
+            }
         }
     };
 
@@ -168,7 +192,8 @@ export const parseDrawioToPseudocode = (xml) => {
         let endNodeVal = `END${start.entityType || 'FUNCTION'}`;
 
         const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null) => {
-            if (!nodeId || !nodes[nodeId] || nodeId === stopId || visited.has(nodeId)) return;
+            if (!nodeId || !nodes[nodeId] || visited.has(nodeId)) return;
+            if (nodeId === stopId) return;
 
             const node = nodes[nodeId];
             visited.add(nodeId);
@@ -264,7 +289,8 @@ export const parseDrawioToPseudocode = (xml) => {
             printCommentsBeforeY(nodes[endNodeId].y, "");
             appendLine(endNodeVal, endNodeId);
         } else {
-            errors.push(`Tip: Funkce '${start.value || 'main'}' není v diagramu napojena na koncový blok.`);
+            appendLine("ENDFUNCTION");
+            errors.push(`Tip: Funkce '${start.value || 'main'}' neměla koncový blok. Byl automaticky vygenerován do kódu.`);
         }
         
         printCommentsBeforeY(Infinity, "");
