@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, Background, Handle, Position, MarkerType, BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useReactFlow, useNodes, useEdges } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Download, Upload, Square, Circle, Diamond, AlignLeft, RefreshCcw, Copy, Trash2, MessageSquare } from 'lucide-react';
@@ -17,7 +17,29 @@ const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, so
   const isCondition = nodes.find(n => n.id === source)?.type === 'CONDITION';
   const isTargetMerge = nodes.find(n => n.id === target)?.type === 'MERGE';
   
-  const [edgePath, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const [edgePath, labelX, labelY] = (() => {
+    const isBackEdge = sourceY > targetY;
+    if (isBackEdge) {
+        let maxX = Math.max(sourceX, targetX);
+        nodes.forEach(n => {
+            if (n.position.y >= targetY - 30 && n.position.y <= sourceY + 30) {
+                const nodeMaxX = n.position.x + (n.measured?.width || 150);
+                if (nodeMaxX > maxX) maxX = nodeMaxX;
+            }
+        });
+        
+        const rightEdgeX = maxX + 40; 
+        const bottomY = sourceY + 30; 
+        const topY = targetY - 30;    
+        const r = 10;                 
+        
+        const path = `M ${sourceX} ${sourceY} L ${sourceX} ${bottomY - r} A ${r} ${r} 0 0 0 ${sourceX + r} ${bottomY} L ${rightEdgeX - r} ${bottomY} A ${r} ${r} 0 0 0 ${rightEdgeX} ${bottomY - r} L ${rightEdgeX} ${topY + r} A ${r} ${r} 0 0 0 ${rightEdgeX - r} ${topY} L ${targetX + r} ${topY} A ${r} ${r} 0 0 0 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
+        
+        return [path, rightEdgeX, (bottomY + topY) / 2];
+    } else {
+        return getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+    }
+  })();
 
   const onSwap = (e) => {
     e.stopPropagation();
@@ -47,14 +69,14 @@ const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, so
   return (
     <>
       <path d={edgePath} fill="none" strokeOpacity={0} strokeWidth={30} className="react-flow__edge-interaction cursor-crosshair" />
-      <BaseEdge path={edgePath} markerEnd={isTargetMerge ? undefined : markerEnd} className={`react-flow__edge-path custom-edge-${id} ${selected ? "!stroke-sky-500" : "!stroke-gray-800 dark:!stroke-gray-400"}`} style={{ strokeWidth: selected ? 3 : 2 }} />
+      <BaseEdge path={edgePath} markerEnd={isTargetMerge ? undefined : markerEnd} className={`react-flow__edge-path custom-edge-${id} ${selected ? "!stroke-indigo-500" : "!stroke-gray-800 dark:!stroke-gray-400"}`} style={{ strokeWidth: selected ? 3 : 2 }} />
       {isCondition && (
         <EdgeLabelRenderer>
           <div style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, pointerEvents: 'all' }}
-               className={`group bg-white dark:bg-gray-800 border ${selected ? 'border-sky-500 ring-2 ring-sky-200 dark:ring-sky-900' : 'border-gray-300 dark:border-gray-600'} rounded px-2 py-1 text-xs font-bold shadow-sm flex items-center gap-1 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700`}>
+               className={`group bg-white dark:bg-gray-800 border ${selected ? 'border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900' : 'border-gray-300 dark:border-gray-600'} rounded px-2 py-1 text-xs font-bold shadow-sm flex items-center gap-1 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700`}>
             <span className={isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>{labelText}</span>
             {!data?.readOnly && (
-              <button onClick={onSwap} className="hidden group-hover:block text-gray-500 hover:text-sky-600 dark:text-gray-400 dark:hover:text-sky-400"><RefreshCcw size={12} /></button>
+              <button onClick={onSwap} className="hidden group-hover:block text-gray-500 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400"><RefreshCcw size={12} /></button>
             )}
           </div>
         </EdgeLabelRenderer>
@@ -64,9 +86,6 @@ const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, so
 };
 
 const DragHandle = () => <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors mx-auto mb-1" title="Chytit a přesunout" />;
-
-const getSelectClass = (selected, defaultBorder) => selected ? 'ring-4 ring-sky-300 border-sky-500 dark:border-sky-400 !shadow-lg' : defaultBorder;
-const extHighlightClass = 'ring-4 ring-emerald-300 border-emerald-500 dark:border-emerald-400 !shadow-lg';
 
 const handleInputMouseDown = (e, selected) => {
   if (!selected && document.activeElement !== e.target) e.preventDefault();
@@ -78,6 +97,11 @@ const handleInputResize = (e) => {
   e.target.style.width = 'auto';
   e.target.style.width = Math.max(100, e.target.scrollWidth) + 'px';
 };
+
+// Komponenta pro barevné obalení skupin (rendering na pozadí)
+const GroupBgNode = ({ data }) => (
+    <div className={`w-full h-full rounded-2xl border-2 border-dashed ${data.colorClass} pointer-events-none opacity-40`} />
+);
 
 const StartEndNode = ({ id, data, selected }) => {
   const { setNodes } = useReactFlow();
@@ -95,9 +119,18 @@ const StartEndNode = ({ id, data, selected }) => {
     setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, entityType: entityType === 'FUNCTION' ? 'CLASS' : 'FUNCTION' } } : n));
   };
 
+  const isGray = data.colorMode === false;
+  const bgClass = isGray ? 'bg-gray-100 dark:bg-gray-800' : 'bg-fuchsia-50 dark:bg-fuchsia-900/30';
+  const borderClass = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-fuchsia-300 dark:border-fuchsia-700';
+  const titleColor = isGray ? 'text-gray-500' : 'text-fuchsia-500';
+  const handleClass = isGray ? '!bg-gray-400' : '!bg-fuchsia-600';
+  
+  // Původní ring-4 obdelníkový highlight pro klasické bloky
+  const highlightClass = data.externalHighlight ? 'ring-4 ring-emerald-300 border-emerald-500 dark:border-emerald-500 !shadow-lg' : (selected ? 'ring-4 ring-indigo-300 border-indigo-500 dark:border-indigo-400 !shadow-lg' : borderClass);
+
   return (
-    <div className={`bg-fuchsia-50 dark:bg-fuchsia-900/30 border-2 rounded-[2rem] min-w-[100px] min-h-[40px] flex flex-col justify-center items-center shadow-sm p-2 transition-all relative ${data.externalHighlight ? extHighlightClass : getSelectClass(selected, 'border-fuchsia-300 dark:border-fuchsia-700')}`}>
-      {mode !== 'start' && <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-fuchsia-600" />}
+    <div className={`${bgClass} border-2 rounded-[2rem] min-w-[140px] min-h-[40px] flex flex-col justify-center items-center p-2 transition-all relative ${highlightClass}`}>
+      {mode !== 'start' && <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />}
       
       {mode === 'unassigned' && (
         <>
@@ -112,9 +145,9 @@ const StartEndNode = ({ id, data, selected }) => {
       {mode === 'start' && (
         <div className="w-full flex-1 flex flex-col px-2 relative pb-1">
           <div className="flex justify-between items-center w-full mb-1 px-1">
-            <span className="text-[9px] text-fuchsia-500 font-bold w-12 text-left">START</span>
-            <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-fuchsia-200 dark:bg-fuchsia-800 rounded-full transition-colors" />
-            <span onClick={toggleEntity} className={`text-[9px] text-fuchsia-500 font-bold w-12 text-right cursor-pointer hover:text-fuchsia-700 ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`}>{entityType}</span>
+            <span className={`text-[9px] font-bold w-12 text-left ${titleColor}`}>START</span>
+            <div className={`custom-drag-handle w-8 h-1.5 cursor-grab rounded-full transition-colors ${isGray ? 'bg-gray-300 dark:bg-gray-600' : 'bg-fuchsia-200 dark:bg-fuchsia-800'}`} />
+            <span onClick={toggleEntity} className={`text-[9px] font-bold w-12 text-right cursor-pointer hover:opacity-75 ${titleColor} ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`}>{entityType}</span>
           </div>
           <input defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono font-bold nodrag text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
         </div>
@@ -129,47 +162,80 @@ const StartEndNode = ({ id, data, selected }) => {
         </div>
       )}
 
-      {/* DŮLEŽITÁ OPRAVA: Handle přesunut ven, je přímým potomkem hlavního wrapperu */}
-      {mode !== 'end' && <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-fuchsia-600" />}
+      {mode !== 'end' && <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />}
     </div>
   );
 };
 
-const ActionNode = ({ id, data, selected }) => (
-  <div className={`bg-blue-50 dark:bg-blue-900/30 border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col shadow-sm rounded-md relative transition-all ${data.externalHighlight ? extHighlightClass : getSelectClass(selected, 'border-blue-300 dark:border-blue-700')}`}>
-    <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-blue-600" />
-    <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-    <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-    <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-    <DragHandle />
-    <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
-    <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-blue-600" />
-  </div>
-);
+const ActionNode = ({ id, data, selected }) => {
+  const isGray = data.colorMode === false;
+  const bgClass = isGray ? 'bg-gray-50 dark:bg-gray-800' : 'bg-blue-50 dark:bg-blue-900/30';
+  const baseBorder = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-blue-300 dark:border-blue-700';
+  const handleClass = isGray ? '!bg-gray-400' : '!bg-blue-600';
+  
+  const highlightClass = data.externalHighlight ? 'ring-4 ring-emerald-300 border-emerald-500 dark:border-emerald-500 !shadow-lg' : (selected ? 'ring-4 ring-indigo-300 border-indigo-500 dark:border-indigo-400 !shadow-lg' : baseBorder);
 
-const IONode = ({ id, data, selected }) => (
-  <div className={`relative min-w-[120px] min-h-[50px] flex flex-col shadow-sm transition-all ${data.externalHighlight ? 'drop-shadow-[0_0_12px_rgba(16,185,129,0.6)]' : ''}`}>
-    <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${data.externalHighlight ? 'text-emerald-500' : (selected ? 'text-sky-500' : 'text-emerald-400 dark:text-emerald-700')}`} preserveAspectRatio="none" viewBox="0 0 100 100">
-      <polygon points="15,2 98,2 85,98 2,98" className="fill-emerald-50 dark:fill-emerald-900/30" stroke="currentColor" strokeWidth={selected || data.externalHighlight ? "4" : "2"} vectorEffect="non-scaling-stroke" />
-    </svg>
-    <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-emerald-600" />
-    <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-    <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-    <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-    
-    <div className="pt-2 z-10"><DragHandle /></div>
-    <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
-    <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-emerald-600" />
-  </div>
-);
+  return (
+    <div className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass}`}>
+      <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
+      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <DragHandle />
+      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
+    </div>
+  );
+};
+
+const IONode = ({ id, data, selected }) => {
+  const isExt = data.externalHighlight;
+  const isSel = selected;
+  const isGray = data.colorMode === false;
+
+  const fillClass = isGray ? 'fill-gray-50 dark:fill-gray-800' : 'fill-emerald-50 dark:fill-emerald-900/30';
+  const defaultStroke = isGray ? 'text-gray-400 dark:text-gray-600' : 'text-emerald-400 dark:text-emerald-700';
+  const handleClass = isGray ? '!bg-gray-400' : '!bg-emerald-600';
+  const strokeClass = isExt ? 'text-emerald-500' : (isSel ? 'text-indigo-500 dark:text-indigo-400' : defaultStroke);
+  
+  // Přesný highlight stín kopírující tvar (jako ostatní)
+  const shadowClass = isExt ? 'drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]' : (isSel ? 'drop-shadow-[0_0_8px_rgba(79,70,229,0.8)]' : '');
+
+  return (
+    <div className={`relative min-w-[120px] min-h-[50px] flex flex-col transition-all`}>
+      <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
+        <polygon points="15,2 98,2 85,98 2,98" className={fillClass} stroke="currentColor" strokeWidth={isSel || isExt ? "4" : "2"} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      </svg>
+      <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
+      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      
+      <div className="pt-2 z-10"><DragHandle /></div>
+      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
+    </div>
+  );
+};
 
 const ConditionNode = ({ id, data, selected }) => {
   const edges = useEdges();
   const outEdges = edges.filter(e => e.source === id).length;
   const hasWarning = outEdges === 1;
 
-  let textColor = data.externalHighlight ? 'text-emerald-500' : (selected ? 'text-sky-500' : 'text-orange-400 dark:text-orange-700');
+  const isExt = data.externalHighlight;
+  const isSel = selected;
+  const isGray = data.colorMode === false;
+
+  const fillClass = isGray ? 'fill-gray-50 dark:fill-gray-800' : (hasWarning ? 'fill-red-50 dark:fill-red-900/20' : 'fill-orange-50 dark:fill-orange-900/30');
+  const defaultStroke = isGray ? 'text-gray-400 dark:text-gray-600' : 'text-orange-400 dark:text-orange-700';
+  const handleClass = isGray ? '!bg-gray-400' : '!bg-orange-600';
+  const strokeClass = isExt ? 'text-emerald-500' : (isSel ? 'text-indigo-500 dark:text-indigo-400' : defaultStroke);
+  const shadowClass = isExt ? 'drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]' : (isSel ? 'drop-shadow-[0_0_8px_rgba(79,70,229,0.8)]' : '');
+  
   const pref = edgeLabels[data.edgeStyle || 'true-false'];
+  const tChar = pref.t.charAt(0).toUpperCase();
+  const fChar = pref.f.charAt(0).toUpperCase();
 
   const bottomEdge = edges.find(e => e.source === id && e.sourceHandle === 's-bottom');
   const rightEdge = edges.find(e => e.source === id && e.sourceHandle === 's-right');
@@ -186,12 +252,15 @@ const ConditionNode = ({ id, data, selected }) => {
       isRightTrue = (lbl === pref.t || lbl === 'Ano' || lbl === '+' || lbl === 'Yes' || lbl === 'True');
   }
 
+  const bottomChar = isBottomTrue ? tChar : fChar;
+  const rightChar = isRightTrue ? tChar : fChar;
+
   return (
-    <div className={`relative flex flex-col items-center justify-center shadow-sm min-w-[120px] min-h-[60px] transition-all ${data.externalHighlight ? 'drop-shadow-[0_0_12px_rgba(16,185,129,0.6)]' : ''}`}>
-      <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${textColor}`} preserveAspectRatio="none" viewBox="0 0 100 100">
-        <polygon points="15,2 85,2 98,50 85,98 15,98 2,50" className={hasWarning ? 'fill-red-50 dark:fill-red-900/20' : 'fill-orange-50 dark:fill-orange-900/30'} stroke="currentColor" strokeWidth={selected || data.externalHighlight ? "4" : "2"} vectorEffect="non-scaling-stroke" />
+    <div className={`relative flex flex-col items-center justify-center min-w-[120px] min-h-[60px] transition-all`}>
+      <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
+        <polygon points="15,2 85,2 98,50 85,98 15,98 2,50" className={fillClass} stroke="currentColor" strokeWidth={isSel || isExt ? "4" : "2"} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
-      <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-orange-600" />
+      <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
       <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
       <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
       <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
@@ -199,18 +268,26 @@ const ConditionNode = ({ id, data, selected }) => {
       <div className="absolute top-1 z-10"><DragHandle /></div>
       <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`min-w-[70px] max-w-[100px] text-center outline-none bg-transparent text-sm font-mono nodrag mt-2 z-10 resize-none overflow-hidden text-gray-900 dark:text-gray-100 px-1 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!min-w-[20px] !h-[20px] !bg-white dark:!bg-gray-800 !border-2 ${isBottomTrue ? '!border-green-500 !text-green-600' : '!border-red-500 !text-red-600'} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair px-1`}>{isBottomTrue ? 'T' : 'F'}</Handle>
-      <Handle type="source" position={Position.Right} id="s-right" className={`!min-w-[20px] !h-[20px] !bg-white dark:!bg-gray-800 !border-2 ${isRightTrue ? '!border-green-500 !text-green-600' : '!border-red-500 !text-red-600'} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair px-1`}>{isRightTrue ? 'T' : 'F'}</Handle>
+      {/* Redukce T/F boxů na min-w-[14px], zrušení zbytečného prostoru */}
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${isBottomTrue ? '!border-green-500 !text-green-600' : '!border-red-500 !text-red-600'} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair leading-none p-0`}>{bottomChar}</Handle>
+      <Handle type="source" position={Position.Right} id="s-right" className={`!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${isRightTrue ? '!border-green-500 !text-green-600' : '!border-red-500 !text-red-600'} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair leading-none p-0`}>{rightChar}</Handle>
     </div>
   );
 };
 
-const CommentNode = ({ id, data, selected }) => (
-  <div className={`bg-yellow-50 dark:bg-yellow-900/30 border-2 p-2 min-w-[160px] flex flex-col shadow-sm rounded-md relative transition-all ${data.externalHighlight ? extHighlightClass : getSelectClass(selected, 'border-yellow-300 dark:border-yellow-700')}`}>
-    <DragHandle />
-    <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-700 dark:text-yellow-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} style={{ minHeight: '30px' }} />
-  </div>
-);
+const CommentNode = ({ id, data, selected }) => {
+  const isGray = data.colorMode === false;
+  const bgClass = isGray ? 'bg-gray-50 dark:bg-gray-800' : 'bg-yellow-50 dark:bg-yellow-900/30';
+  const borderClass = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-yellow-300 dark:border-yellow-700';
+  const highlightClass = data.externalHighlight ? 'ring-4 ring-emerald-300 border-emerald-500 dark:border-emerald-500 !shadow-lg' : (selected ? 'ring-4 ring-indigo-300 border-indigo-500 dark:border-indigo-400 !shadow-lg' : borderClass);
+
+  return (
+    <div className={`${bgClass} border-2 p-2 min-w-[160px] flex flex-col rounded-md relative transition-all ${highlightClass}`}>
+      <DragHandle />
+      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-700 dark:text-yellow-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} style={{ minHeight: '30px' }} />
+    </div>
+  );
+};
 
 const MergeNode = () => (
     <div className="w-2 h-2 bg-transparent pointer-events-none">
@@ -221,10 +298,10 @@ const MergeNode = () => (
     </div>
 );
 
-const nodeTypes = { ACTION: ActionNode, IO: IONode, CONDITION: ConditionNode, START_END: StartEndNode, COMMENT: CommentNode, MERGE: MergeNode };
+const nodeTypes = { ACTION: ActionNode, IO: IONode, CONDITION: ConditionNode, START_END: StartEndNode, COMMENT: CommentNode, MERGE: MergeNode, GROUP_BG: GroupBgNode };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange, externalSelectedIds, onPaneClick }) {
+function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupColoring, onSelectionChange, externalSelectedIds, onPaneClick }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
@@ -238,12 +315,92 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
   const selectedNodes = nodes.filter(n => n.selected);
   const selectedEdges = edges.filter(e => e.selected);
 
-  useEffect(() => {
-      setNodes(nds => nds.map(n => ({
-          ...n,
-          data: { ...n.data, externalHighlight: externalSelectedIds?.includes(n.id) }
-      })));
-  }, [externalSelectedIds, setNodes]);
+  const mappedNodes = useMemo(() => {
+    return nodes.map(n => ({
+        ...n,
+        data: { 
+            ...n.data, 
+            colorMode, 
+            externalHighlight: externalSelectedIds?.includes(n.id) 
+        }
+    }));
+  }, [nodes, colorMode, externalSelectedIds]);
+
+  const bgNodes = useMemo(() => {
+    if (!groupColoring) return [];
+    
+    const groupDefs = [];
+    let gId = 0;
+    const visited = new Set();
+    
+    nodes.forEach(n => {
+        if ((n.type === 'ACTION' || n.type === 'IO') && !visited.has(n.id)) {
+            const grp = [n.id];
+            visited.add(n.id);
+            let curr = n.id;
+            while(true) {
+                const edge = edges.find(e => e.source === curr && e.targetHandle === 't-top');
+                if (!edge) break;
+                const tgt = nodes.find(x => x.id === edge.target);
+                if (tgt && tgt.type === n.type && !visited.has(tgt.id)) {
+                    visited.add(tgt.id);
+                    grp.push(tgt.id);
+                    curr = tgt.id;
+                } else break;
+            }
+            if (grp.length > 1) groupDefs.push({ id: `bg-${gId++}`, type: n.type, nodes: grp });
+        }
+    });
+
+    edges.forEach(e => {
+        const src = nodes.find(n => n.id === e.source);
+        const tgt = nodes.find(n => n.id === e.target);
+        if (src && tgt && tgt.position.y <= src.position.y && tgt.type === 'CONDITION') {
+            const lGrp = [];
+            nodes.forEach(n => {
+                if (n.position.y >= tgt.position.y && n.position.y <= src.position.y && n.type !== 'COMMENT') {
+                    lGrp.push(n.id);
+                }
+            });
+            if (lGrp.length > 0) groupDefs.push({ id: `bg-${gId++}`, type: 'LOOP', nodes: lGrp });
+        }
+    });
+
+    return groupDefs.map(g => {
+         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+         g.nodes.forEach(nid => {
+             const n = nodes.find(x => x.id === nid);
+             if (n) {
+                 const w = n.measured?.width || (n.type === 'CONDITION' ? 140 : 120);
+                 const h = n.measured?.height || 60;
+                 minX = Math.min(minX, n.position.x);
+                 minY = Math.min(minY, n.position.y);
+                 maxX = Math.max(maxX, n.position.x + w);
+                 maxY = Math.max(maxY, n.position.y + h);
+             }
+         });
+         if (minX === Infinity) return null;
+         const pad = 25;
+         
+         let colorClass = '';
+         if (g.type === 'ACTION') colorClass = 'bg-indigo-500/20 border-indigo-400 dark:border-indigo-600/50';
+         if (g.type === 'IO') colorClass = 'bg-teal-500/20 border-teal-400 dark:border-teal-600/50';
+         if (g.type === 'LOOP') colorClass = 'bg-amber-500/20 border-amber-400 dark:border-amber-600/50';
+
+         return {
+             id: g.id,
+             type: 'GROUP_BG',
+             position: { x: minX - pad, y: minY - pad },
+             data: { colorClass },
+             style: { width: maxX - minX + 2*pad, height: maxY - minY + 2*pad },
+             selectable: false,
+             draggable: false,
+             zIndex: -10
+         };
+    }).filter(Boolean);
+  }, [nodes, edges, groupColoring]);
+
+  const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
 
   useEffect(() => {
     setNodes(nds => nds.map(n => {
@@ -700,15 +857,16 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
     reader.readAsText(file);
   };
 
-  const btnClass = "p-2 rounded transition-opacity disabled:opacity-25 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300";
+  const btnColor = colorMode ? "text-gray-700 dark:text-gray-300" : "text-gray-500 dark:text-gray-400";
+  const btnClass = `p-2 rounded transition-opacity disabled:opacity-25 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 ${btnColor}`;
 
   return (
     <div className="w-full h-full relative outline-none" tabIndex={0}>
       <style>{`
         .react-flow__edge.drop-target .react-flow__edge-path {
-          stroke: #0ea5e9 !important;
+          stroke: #4f46e5 !important;
           stroke-width: 4px !important;
-          filter: drop-shadow(0 0 6px rgba(14,165,233,0.5));
+          filter: drop-shadow(0 0 6px rgba(79,70,229,0.5));
           transition: all 0.2s ease;
         }
       `}</style>
@@ -731,27 +889,27 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
             <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} onContextMenu={(e) => e.preventDefault()} />
             <div className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl flex flex-col py-1 min-w-[160px]" style={{ top: contextMenu.mouseY, left: contextMenu.mouseX }}>
                 <div className="px-3 py-1.5 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700 mb-1">Přidat blok</div>
-                <button onClick={() => { addNodeAt('START_END', '', contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><Circle size={14} className="text-fuchsia-500"/> Start/End</button>
-                <button onClick={() => { addNodeAt('ACTION', 'Operace', contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><Square size={14} className="text-blue-500"/> Akce</button>
-                <button onClick={() => { addNodeAt('IO', 'Vstup', contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><AlignLeft size={14} className="text-emerald-500" style={{transform:'skew(-15deg)'}}/> Vstup/Výstup</button>
-                <button onClick={() => { addNodeAt('CONDITION', 'x > 0', contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><Diamond size={14} className="text-orange-500"/> Podmínka</button>
-                <button onClick={() => { addNodeAt('COMMENT', '# Komentář', contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><MessageSquare size={14} className="text-yellow-500"/> Komentář</button>
+                <button onClick={() => { addNodeAt('START_END', '', contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><Circle size={14} className={colorMode ? "text-fuchsia-500" : "text-gray-500"}/> Start/End</button>
+                <button onClick={() => { addNodeAt('ACTION', 'Operace', contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><Square size={14} className={colorMode ? "text-blue-500" : "text-gray-500"}/> Akce</button>
+                <button onClick={() => { addNodeAt('IO', 'Vstup', contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><AlignLeft size={14} className={colorMode ? "text-emerald-500" : "text-gray-500"} style={{transform:'skew(-15deg)'}}/> Vstup/Výstup</button>
+                <button onClick={() => { addNodeAt('CONDITION', 'x > 0', contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><Diamond size={14} className={colorMode ? "text-orange-500" : "text-gray-500"}/> Podmínka</button>
+                <button onClick={() => { addNodeAt('COMMENT', '# Komentář', contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><MessageSquare size={14} className={colorMode ? "text-yellow-500" : "text-gray-500"}/> Komentář</button>
             </div>
         </>
       )}
 
       <div className="absolute top-4 left-4 z-10 flex gap-2 bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700">
-        <button onClick={() => addNodeAt('START_END', '')} disabled={readOnly} className={btnClass} title="Start / Konec (kolečko)"><Circle size={18} className="text-fuchsia-600" /></button>
-        <button onClick={() => addNodeAt('ACTION', 'Operace')} disabled={readOnly} className={btnClass} title="Akce / Operace (čtverec)"><Square size={18} className="text-blue-600" /></button>
-        <button onClick={() => addNodeAt('IO', 'Vstup')} disabled={readOnly} className={btnClass} title="Vstup / Výstup (kosodélník)"><AlignLeft size={18} className="text-emerald-600" style={{transform: 'skew(-15deg)'}} /></button>
-        <button onClick={() => addNodeAt('CONDITION', 'x > 0')} disabled={readOnly} className={btnClass} title="Podmínka / Cyklus (hexagon)"><Diamond size={18} className="text-orange-600" /></button>
-        <button onClick={() => addNodeAt('COMMENT', '# Komentář')} disabled={readOnly} className={`p-2 rounded transition-opacity disabled:opacity-25 disabled:cursor-not-allowed hover:bg-yellow-100 text-yellow-600`} title="Komentář"><MessageSquare size={18} /></button>
+        <button onClick={() => addNodeAt('START_END', '')} disabled={readOnly} className={btnClass} title="Start / Konec (kolečko)"><Circle size={18} className={colorMode ? "text-fuchsia-600" : ""} /></button>
+        <button onClick={() => addNodeAt('ACTION', 'Operace')} disabled={readOnly} className={btnClass} title="Akce / Operace (čtverec)"><Square size={18} className={colorMode ? "text-blue-600" : ""} /></button>
+        <button onClick={() => addNodeAt('IO', 'Vstup')} disabled={readOnly} className={btnClass} title="Vstup / Výstup (kosodélník)"><AlignLeft size={18} className={colorMode ? "text-emerald-600" : ""} style={{transform: 'skew(-15deg)'}} /></button>
+        <button onClick={() => addNodeAt('CONDITION', 'x > 0')} disabled={readOnly} className={btnClass} title="Podmínka / Cyklus (hexagon)"><Diamond size={18} className={colorMode ? "text-orange-600" : ""} /></button>
+        <button onClick={() => addNodeAt('COMMENT', '# Komentář')} disabled={readOnly} className={btnClass} title="Komentář"><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
       </div>
 
       {(selectedNodes.length > 0 || selectedEdges.length > 0) && !readOnly && (
-        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 flex gap-2 bg-sky-600 p-1.5 rounded-lg shadow-lg">
-           <button onClick={handleDuplicate} className="flex items-center gap-1 text-white hover:bg-sky-500 px-3 py-1.5 rounded text-sm font-medium"><Copy size={16}/> Duplikovat</button>
-           <div className="w-px bg-sky-400 mx-1"></div>
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 flex gap-2 bg-indigo-600 p-1.5 rounded-lg shadow-lg">
+           <button onClick={handleDuplicate} className="flex items-center gap-1 text-white hover:bg-indigo-500 px-3 py-1.5 rounded text-sm font-medium"><Copy size={16}/> Duplikovat</button>
+           <div className="w-px bg-indigo-400 mx-1"></div>
            <button onClick={() => setDeleteConfirm(true)} className="flex items-center gap-1 text-red-100 hover:bg-red-500 hover:text-white px-3 py-1.5 rounded text-sm font-medium"><Trash2 size={16}/> Smazat</button>
         </div>
       )}
@@ -766,7 +924,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
 
       <div className="w-full h-full" onContextMenu={handlePaneContextMenu}>
         <ReactFlow 
-          nodes={nodes} edges={edges} 
+          nodes={allNodes} edges={edges} 
           onNodesChange={readOnly ? undefined : onNodesChange} 
           onEdgesChange={readOnly ? undefined : onEdgesChange} 
           onConnect={readOnly ? undefined : onConnect} 
@@ -774,7 +932,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, onSelectionChange
           onNodeDragStop={onNodeDragStop}
           onPaneClick={() => { setContextMenu(null); if (onPaneClick) onPaneClick(); }}
           onSelectionChange={({ nodes }) => {
-              if (onSelectionChange) onSelectionChange(nodes.map(n => n.id));
+              if (onSelectionChange) onSelectionChange(nodes.filter(n => n.type !== 'GROUP_BG').map(n => n.id));
           }}
           isValidConnection={isValidConnection} 
           nodeTypes={nodeTypes} edgeTypes={edgeTypes} 

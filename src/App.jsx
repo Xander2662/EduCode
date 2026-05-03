@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Move, ArrowUpCircle, Square, Circle, AlignLeft, Diamond, MessageSquare, MousePointerClick } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Move, RefreshCcw, Square, Circle, AlignLeft, Diamond, MessageSquare, MousePointer, Settings, Play, StepForward, Square as StopSquare } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parsePseudocodeToPython } from './parsers/pseudocodeToPython';
@@ -140,13 +140,13 @@ const TutorialDialog = ({ onClose }) => {
               </div>
               <hr className="border-gray-200 dark:border-gray-700" />
               <div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><MousePointerClick size={18}/> Rychlé menu (Pravé tlačítko myši)</h3>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><MousePointer size={18}/> Rychlé menu (Pravé tlačítko myši)</h3>
                 <p className="mb-4 text-gray-600 dark:text-gray-400">Pro urychlení práce stačí kliknout <strong>pravým tlačítkem myši</strong> do prázdného prostoru. Objeví se kontextové menu a vybraný blok se vytvoří přesně na místě vašeho kurzoru.</p>
               </div>
               <hr className="border-gray-200 dark:border-gray-700" />
               <div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><ArrowUpCircle size={18}/> Tvorba cyklu (WHILE / FOR)</h3>
-                <p className="mb-4 text-gray-600 dark:text-gray-400">Do oranžového kosočtverce <strong>nemusíte psát slovo WHILE</strong>. Stačí napsat pouze samotnou podmínku. Systém automaticky pozná, že jde o cyklus, jakmile vezmete šipku z konce akce a <strong>propojíte ji zpět</strong> do stejného kosočtverce.</p>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><RefreshCcw size={18}/> Tvorba cyklu (WHILE / FOR)</h3>
+                <p className="mb-4 text-gray-600 dark:text-gray-400">Do oranžového kosočtverce <strong>nemusíte psát slovo WHILE</strong>. Stačí napsat pouze samotnou podmínku. Systém automaticky pozná, že jde o cyklus, jakmile vezmete šipku z konce akce a <strong>propojíte ji zpět</strong> do stejného kosočtverce. Modul inteligentního obchvatu se postará o vykreslení trasy mimo bloky.</p>
               </div>
             </>
           )}
@@ -191,11 +191,16 @@ export default function App() {
 
   const [parseErrors, setParseErrors] = useState([]);
   const [activeDropdown, setActiveDropdown] = useState(null);
+  const [settingsDropdown, setSettingsDropdown] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [dialog, setDialog] = useState(null);
   const [showTutorial, setShowTutorial] = useState(false);
 
   const [edgeStyle, setEdgeStyle] = useState(localStorage.getItem('edgeStyle') || 'true-false');
+  const [colorMode, setColorMode] = useState(localStorage.getItem('colorMode') !== 'false');
+  const [groupColoring, setGroupColoring] = useState(localStorage.getItem('groupColoring') === 'true');
+  const [showDebugger, setShowDebugger] = useState(localStorage.getItem('showDebugger') === 'true');
+
   const [selectedNodeIds, setSelectedNodeIds] = useState([]);
   const [externalSelectedIds, setExternalSelectedIds] = useState([]);
   const [nodeLineMap, setNodeLineMap] = useState({});
@@ -322,6 +327,8 @@ export default function App() {
           <DiagramEditor
             xml={diagramXml}
             edgeStyle={edgeStyle}
+            colorMode={colorMode}
+            groupColoring={groupColoring}
             onSelectionChange={handleSelectionChange}
             externalSelectedIds={externalSelectedIds}
             onXmlChange={(xml) => {
@@ -331,6 +338,29 @@ export default function App() {
             }}
             readOnly={flow === 'code-to-diagram'}
           />
+          
+          {showDebugger && (
+            <div className="absolute top-20 left-4 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-30 flex flex-col overflow-hidden">
+                <div className="bg-gray-100 dark:bg-gray-900 px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                    <span>Debugger</span>
+                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" title="Neaktivní"></div>
+                </div>
+                <div className="p-3 text-sm text-gray-700 dark:text-gray-300 min-h-[100px]">
+                    <div className="flex justify-between font-mono text-xs border-b border-gray-200 dark:border-gray-700 pb-1 mb-2">
+                        <span className="font-semibold text-gray-500">Proměnná</span>
+                        <span className="font-semibold text-gray-500">Hodnota</span>
+                    </div>
+                    <div className="flex justify-center items-center h-full text-xs text-gray-400 italic mt-6">
+                        Watch list je prázdný
+                    </div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-900 p-2 flex gap-3 justify-center border-t border-gray-200 dark:border-gray-700">
+                    <button className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors"><StepForward size={16} /></button>
+                    <button className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-green-600 dark:text-green-500 transition-colors"><Play size={16} /></button>
+                    <button className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-red-600 dark:text-red-500 transition-colors"><StopSquare size={16} /></button>
+                </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -378,7 +408,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen bg-gray-100 dark:bg-gray-950 flex flex-col font-sans overflow-hidden transition-colors" onClick={() => setActiveDropdown(null)}>
+    <div className="h-screen bg-gray-100 dark:bg-gray-950 flex flex-col font-sans overflow-hidden transition-colors" onClick={() => { setActiveDropdown(null); setSettingsDropdown(null); }}>
 
       {showTutorial && <TutorialDialog onClose={() => setShowTutorial(false)} />}
 
@@ -408,7 +438,7 @@ export default function App() {
       <main className="flex-1 flex p-4 gap-4" style={{ overflow: 'hidden' }}>
         {panels.map((type, index) => (
           <React.Fragment key={type}>
-            <div className={`flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 relative transition-all ${activeDropdown === index ? 'z-50 overflow-visible' : 'z-10 overflow-hidden'}`}>
+            <div className={`flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 relative transition-all ${activeDropdown === index || settingsDropdown === index ? 'z-50 overflow-visible' : 'z-10 overflow-hidden'}`}>
               <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 flex justify-between items-center relative z-50">
                 <div className="flex items-center gap-2">
                   <span>{PANEL_TYPES[type].title}</span>
@@ -421,23 +451,49 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   
                   {type === 'drawio' && (
-                    <select
-                      value={edgeStyle}
-                      onChange={(e) => {
-                        setEdgeStyle(e.target.value);
-                        localStorage.setItem('edgeStyle', e.target.value);
-                      }}
-                      className="text-xs bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none text-gray-600 dark:text-gray-400 cursor-pointer p-1"
-                    >
-                      <option value="true-false">True / False</option>
-                      <option value="ano-ne">Ano / Ne</option>
-                      <option value="yes-no">Yes / No</option>
-                      <option value="+-">+ / -</option>
-                    </select>
+                    <div className="relative mr-1">
+                      <button onClick={(e) => { e.stopPropagation(); setSettingsDropdown(settingsDropdown === index ? null : index); setActiveDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors" title="Nastavení diagramu">
+                        <Settings size={16} />
+                      </button>
+                      {settingsDropdown === index && (
+                        <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 p-3" onClick={e => e.stopPropagation()}>
+                          
+                          <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">Pravda / Nepravda alias</label>
+                          <select
+                            value={edgeStyle}
+                            onChange={(e) => {
+                              setEdgeStyle(e.target.value);
+                              localStorage.setItem('edgeStyle', e.target.value);
+                            }}
+                            className="w-full text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none p-1.5 cursor-pointer text-gray-700 dark:text-gray-300 mb-4"
+                          >
+                            <option value="true-false">True / False</option>
+                            <option value="ano-ne">Ano / Ne</option>
+                            <option value="yes-no">Yes / No</option>
+                            <option value="+-">+ / -</option>
+                          </select>
+
+                          <div className="space-y-3">
+                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                                <input type="checkbox" checked={colorMode} onChange={e => { setColorMode(e.target.checked); localStorage.setItem('colorMode', e.target.checked); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                                Barevné bloky
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                                <input type="checkbox" checked={groupColoring} onChange={e => { setGroupColoring(e.target.checked); localStorage.setItem('groupColoring', e.target.checked); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                                Zbarvení skupin
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                                <input type="checkbox" checked={showDebugger} onChange={e => { setShowDebugger(e.target.checked); localStorage.setItem('showDebugger', e.target.checked); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                                Debugger (Watch list)
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   <div className="relative ml-1">
-                    <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === index ? null : index); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors">
+                    <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === index ? null : index); setSettingsDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors" title="Změnit okno">
                       <ChevronDown size={16} />
                     </button>
                     {activeDropdown === index && (
