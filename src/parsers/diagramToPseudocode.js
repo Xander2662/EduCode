@@ -82,8 +82,6 @@ export const parseDrawioToPseudocode = (xml) => {
     const startNodes = Object.values(nodes).filter(n => n.type === 'START');
     startNodes.sort((a, b) => a.x - b.x || a.y - b.y);
 
-    // ZÁCHRANA ODPOJENÝCH BLOKŮ (GHOST STARTS)
-    // Pokud na plátně nejsou STARTy nebo zbyly bloky bez návaznosti, zachováme je.
     if (startNodes.length === 0) {
         let roots = Object.values(nodes).filter(n => n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END');
         let clusterId = 1;
@@ -111,7 +109,6 @@ export const parseDrawioToPseudocode = (xml) => {
             errors.push(`Diagram neobsahuje počáteční blok. Bylo automaticky vygenerováno ${roots.length} funkcí (fragmentů) pro zachování vašich bloků.`);
         }
 
-        // Záchrana úplně odtržených zacyklených struktur (nemají ani Root)
         Object.values(nodes).forEach(n => {
             if (!assigned.has(n.id) && n.type !== 'COMMENT' && n.type !== 'START' && n.type !== 'END' && n.type !== 'MERGE') {
                 const ghostId = `ghost_start_${clusterId}`;
@@ -134,7 +131,8 @@ export const parseDrawioToPseudocode = (xml) => {
         });
 
         if (startNodes.length === 0) {
-            return { code: "", errors: ["Diagram je prázdný."], nodeLineMap: {} };
+            errors.push("Diagram je prázdný nebo neobsahuje počáteční blok.");
+            return { code: "", errors, nodeLineMap: {} };
         }
     }
 

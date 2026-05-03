@@ -1,4 +1,3 @@
-// Počítá a generuje obalové uzly (Color Groups) v pozadí
 export const calculateGroupNodes = (nodes, edges, groupColoring) => {
     if (!groupColoring) return [];
     
@@ -68,19 +67,27 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
          });
          
          if (minX === Infinity) return null;
-         const pad = 30; // Padding okolo obalu
+         const pad = 25; // Prostor okolo obalu
          
-         let colorClass = '';
-         if (g.type === 'ACTION') colorClass = 'bg-blue-400/20 border-blue-500/50';
-         if (g.type === 'IO') colorClass = 'bg-emerald-400/20 border-emerald-500/50';
-         if (g.type === 'LOOP') colorClass = 'bg-amber-400/20 border-amber-500/50';
+         // Sytější inline barvy
+         let bgColor = '', borderColor = '';
+         if (g.type === 'ACTION') { bgColor = 'rgba(96, 165, 250, 0.25)'; borderColor = 'rgba(59, 130, 246, 0.6)'; }
+         if (g.type === 'IO') { bgColor = 'rgba(52, 211, 153, 0.25)'; borderColor = 'rgba(16, 185, 129, 0.6)'; }
+         if (g.type === 'LOOP') { bgColor = 'rgba(251, 191, 36, 0.25)'; borderColor = 'rgba(245, 158, 11, 0.6)'; }
+
+         const groupW = maxX - minX + 2*pad;
+         const groupH = maxY - minY + 2*pad;
 
          return {
              id: g.id,
              type: 'GROUP_BG',
              position: { x: minX - pad, y: minY - pad },
-             data: { colorClass, width: maxX - minX + 2*pad, height: maxY - minY + 2*pad },
-             style: { width: maxX - minX + 2*pad, height: maxY - minY + 2*pad, zIndex: -1, pointerEvents: 'none' },
+             width: groupW,  // Nativní vynucení šířky (React Flow už node neschová)
+             height: groupH, // Nativní vynucení výšky
+             data: { bgColor, borderColor },
+             // Nucená opacity: 1 eliminuje inicializační schovávání
+             style: { width: groupW, height: groupH, pointerEvents: 'none', opacity: 1 },
+             zIndex: -1,
              selectable: false,
              draggable: false,
              focusable: false,

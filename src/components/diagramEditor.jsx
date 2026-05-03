@@ -12,7 +12,6 @@ const edgeLabels = {
   'true-false': { t: 'True', f: 'False' }
 };
 
-// Vykresluje hrany mezi bloky. Pro zpětné vazby v cyklu počítá obchvat zprava.
 const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data, selected }) => {
   const { setEdges } = useReactFlow();
   const nodes = useNodes();
@@ -103,9 +102,9 @@ const handleInputResize = (e) => {
   e.target.style.width = Math.max(100, e.target.scrollWidth) + 'px';
 };
 
-// Zodpovídá za barevné obalení logických skupin (Cyklus, Akce, IO)
+// Čistý div pro pozadí s roztažením w-full h-full na velikost dodanou React Flow stylem
 const GroupBgNode = ({ data }) => (
-    <div className={`w-full h-full rounded-[2rem] border-[3px] border-dashed ${data.colorClass}`} />
+    <div style={{ backgroundColor: data.bgColor, borderColor: data.borderColor }} className="w-full h-full rounded-2xl border-[3px] border-dashed pointer-events-none" />
 );
 
 const StartEndNode = ({ id, data, selected }) => {
@@ -320,6 +319,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
   const mappedNodes = useMemo(() => {
     return nodes.map(n => ({
         ...n,
+        zIndex: 10,
         data: { 
             ...n.data, 
             colorMode, 
@@ -329,7 +329,6 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
   }, [nodes, colorMode, externalSelectedIds]);
 
   const bgNodes = useMemo(() => calculateGroupNodes(nodes, edges, groupColoring), [nodes, edges, groupColoring]);
-
   const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
 
   useEffect(() => {

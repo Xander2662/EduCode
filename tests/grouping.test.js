@@ -17,7 +17,8 @@ describe('Color Grouping Logic', () => {
         // Očekáváme 1 skupinu pro ACTION (n1 a n2)
         expect(result).toHaveLength(1);
         expect(result[0].type).toBe('GROUP_BG');
-        expect(result[0].data.colorClass).toContain('bg-blue');
+        // Testujeme novou bezpečnou 'bgColor' s rgba namísto staré Tailwind třídy
+        expect(result[0].data.bgColor).toContain('rgba(96'); 
     });
 
     it('Měl by vytvořit GROUP_BG uzel pro cyklus', () => {
@@ -34,7 +35,7 @@ describe('Color Grouping Logic', () => {
 
         // Očekáváme 1 skupinu pro LOOP (body uvnitř cond)
         expect(result).toHaveLength(1);
-        expect(result[0].data.colorClass).toContain('bg-amber');
+        expect(result[0].data.bgColor).toContain('rgba(251');
     });
 
     it('Neměl by vrátit žádný obal, pokud je volba groupColoring vypnuta', () => {
