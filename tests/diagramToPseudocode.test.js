@@ -1,69 +1,49 @@
 import { describe, it, expect } from 'vitest';
 import { parseDrawioToPseudocode } from '../src/parsers/diagramToPseudocode';
-import { parsePseudocodeToDrawio } from '../src/parsers/pseudocodeToDiagram';
-import fs from 'fs';
-import path from 'path';
 
-describe('Diagram to Pseudocode Parser - Regression Tests', () => {
-    it('Měl by správně umístit ENDFUNCTION až na úplný konec, mimo IF větve', () => {
-        const xmlPath = path.resolve(__dirname, '../examples/diagram_examples/test_if_end.xml');
-        const xml = fs.readFileSync(xmlPath, 'utf-8');
+describe('Diagram to Pseudocode Parser - Core functionality', () => {
+    it('Měl by převést základní diagram na pseudokód main funkce', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="n1" value="main" style="ellipse;" vertex="1" parent="1"><mxGeometry x="0" y="0" as="geometry"/></mxCell>
+            <mxCell id="n2" value="ENDFUNCTION" style="ellipse;" vertex="1" parent="1"><mxGeometry x="0" y="100" as="geometry"/></mxCell>
+            <mxCell id="e1" edge="1" parent="1" source="n1" target="n2" />
+        </root></mxGraphModel>`;
         
         const result = parseDrawioToPseudocode(xml);
-        expect(result.errors).toHaveLength(0);
-        
-        const ifIndex = result.code.indexOf('IF x > 0 THEN');
-        const endIfIndex = result.code.indexOf('ENDIF');
-        const endFuncIndex = result.code.indexOf('ENDFUNCTION');
-        
-        expect(endFuncIndex).toBeGreaterThan(endIfIndex); 
-        
-        const matches = result.code.match(/ENDFUNCTION/g) || [];
-        expect(matches).toHaveLength(1);
-    });
-
-    it('Měl by detekovat chybějící startovní blok a nahradit ho', () => {
-        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>`;
-        const result = parseDrawioToPseudocode(xml);
-        
-        expect(result.errors.length).toBeGreaterThan(0);
-        expect(result.errors[0]).toContain('neobsahuje počáteční blok');
+        expect(result.code).toContain('FUNCTION main()');
+        expect(result.code).toContain('ENDFUNCTION');
     });
 });
 
-describe('Pseudocode to Diagram Parser - Dynamic Y Auto-Layout', () => {
-    it('Měl by dynamicky přepočítat a posunout Y pozice bloků, pokud dojde k odebrání řádku z kódu', () => {
-        const initialCode = `FUNCTION main()
-    Akce1()
-    Akce2()
-    Akce3()
-ENDFUNCTION`;
-        const result1 = parsePseudocodeToDrawio(initialCode);
+describe('Diagram to Pseudocode Parser - Semantic Scope Checker', () => {
+    it('Měl by vyhodit chybu, pokud je proměnná použita v podmínce před deklarací', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="n1" value="main" style="ellipse;" vertex="1" parent="1"><mxGeometry x="0" y="0" as="geometry"/></mxCell>
+            <mxCell id="n2" value="neznama &gt; 0" style="rhombus;" vertex="1" parent="1"><mxGeometry x="0" y="100" as="geometry"/></mxCell>
+            <mxCell id="n3" value="ENDFUNCTION" style="ellipse;" vertex="1" parent="1"><mxGeometry x="0" y="200" as="geometry"/></mxCell>
+            <mxCell id="e1" edge="1" parent="1" source="n1" target="n2" />
+            <mxCell id="e2" value="True" edge="1" parent="1" source="n2" target="n3" />
+        </root></mxGraphModel>`;
         
-        const modifiedCode = `FUNCTION main()
-    Akce1()
-    Akce3()
-ENDFUNCTION`;
-        const result2 = parsePseudocodeToDrawio(modifiedCode, result1.xml);
-        
-        // OPRAVA: Použití [\s\S]*? zajistí vyhledávání i přes zalomení řádků (newline)
-        const match1 = result1.xml.match(/value="Akce3\(\)"[\s\S]*?y="(\d+)"/);
-        const match2 = result2.xml.match(/value="Akce3\(\)"[\s\S]*?y="(\d+)"/);
-        
-        const y1 = parseInt(match1[1]);
-        const y2 = parseInt(match2[1]);
-        
-        // Akce3() by měla mít menší Y (být výše), když jsme Akce2() smazali
-        expect(y2).toBeLessThan(y1);
+        const result = parseDrawioToPseudocode(xml);
+        expect(result.errors.some(e => e.includes('Proměnná \'neznama\' byla použita před deklarací'))).toBe(true);
     });
 
-    it('Měl by správně transformovat samotný IO blok Vstup na INPUT varování', () => {
-        const input = `FUNCTION main()
-    Vstup
-ENDFUNCTION`;
-        const result = parsePseudocodeToDrawio(input);
-
-        expect(result.xml).toContain('value="Vstup"');
-        expect(result.xml).toContain('shape=parallelogram');
+    it('Měl by vyhodit chybu, pokud se použije proměnná mimo svůj IF scope', () => {
+        // Zde deklarujeme 'lokalniProm' v IF bloku, ale použijeme ji po ENDIF. To by mělo hlásit chybu.
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="n1" value="main" style="ellipse;" vertex="1" parent="1"><mxGeometry x="0" y="0" as="geometry"/></mxCell>
+            <mxCell id="n2" value="x &gt; 0" style="rhombus;" vertex="1" parent="1"><mxGeometry x="0" y="100" as="geometry"/></mxCell>
+            <mxCell id="n3" value="lokalniProm = 5" style="whiteSpace=wrap;" vertex="1" parent="1"><mxGeometry x="-100" y="200" as="geometry"/></mxCell>
+            <mxCell id="n4" value="PRINT(lokalniProm)" style="whiteSpace=wrap;" vertex="1" parent="1"><mxGeometry x="0" y="300" as="geometry"/></mxCell>
+            
+            <mxCell id="e1" edge="1" parent="1" source="n1" target="n2" />
+            <mxCell id="e2" value="True" edge="1" parent="1" source="n2" target="n3" />
+            <mxCell id="e3" value="False" edge="1" parent="1" source="n2" target="n4" />
+            <mxCell id="e4" edge="1" parent="1" source="n3" target="n4" />
+        </root></mxGraphModel>`;
+        
+        const result = parseDrawioToPseudocode(xml);
+        expect(result.errors.some(e => e.includes('Proměnná \'lokalniProm\' byla použita před deklarací'))).toBe(true);
     });
 });

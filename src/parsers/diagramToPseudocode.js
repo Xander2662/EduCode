@@ -8,6 +8,29 @@ export const parseDrawioToPseudocode = (xml) => {
     let edges = [];
     let errors = [];
 
+    const KEYWORDS = new Set(['AND','OR','NOT','TRUE','FALSE','INPUT','PRINT','VSTUP','MOD','DIV']);
+
+    const extractVariables = (expr) => {
+        const noStrings = expr.replace(/"[^"]*"/g, '');
+        const vars = noStrings.match(/[a-zA-Z_]\w*/g) || [];
+        return vars.filter(v => !KEYWORDS.has(v.toUpperCase()));
+    };
+
+    const checkVariables = (expr, scope) => {
+        const vars = extractVariables(expr);
+        vars.forEach(v => {
+            if (!scope.has(v)) {
+                const err = `Proměnná '${v}' byla použita před deklarací nebo je mimo svůj Scope.`;
+                if (!errors.includes(err)) errors.push(err);
+            }
+        });
+    };
+
+    const declareVariables = (expr, scope) => {
+        const vars = extractVariables(expr);
+        vars.forEach(v => scope.add(v));
+    };
+
     const cleanTextWithLines = (html) => {
       if (!html) return '';
       let t = html.replace(/<br\s*\/?>/gi, '\n')
@@ -158,7 +181,7 @@ export const parseDrawioToPseudocode = (xml) => {
         }
     };
 
-    const generateStatement = (node, indent = "") => {
+    const generateStatement = (node, indent = "", currentScope) => {
         printCommentsBeforeY(node.y, indent);
         if (node.type === 'MERGE' || !node.value) return;
 
@@ -167,27 +190,41 @@ export const parseDrawioToPseudocode = (xml) => {
                 let val = line.trim();
                 if (!val) return;
                 
-                if (val.startsWith('"') && val.endsWith('"')) {
+                if (val.includes('=')) {
+                    const parts = val.split('=');
+                    const left = parts[0];
+                    const right = parts.slice(1).join('=');
+                    checkVariables(right, currentScope);
+                    declareVariables(left, currentScope);
+                    appendLine(`${indent}${val}`, node.id);
+                } else if (val.startsWith('"') && val.endsWith('"')) {
                     appendLine(`${indent}PRINT(${val})`, node.id);
-                } else if (val.toUpperCase().startsWith('RETURN') || val.includes('=')) {
+                } else if (val.toUpperCase().startsWith('RETURN')) {
+                    checkVariables(val.substring(6), currentScope);
                     appendLine(`${indent}${val}`, node.id);
                 } else {
                     let isFuncFormat = val.includes('(') || val.includes(')');
+                    checkVariables(val, currentScope);
                     appendLine(`${indent}${isFuncFormat ? val : val + '()'}`, node.id);
                 }
             });
         } else if (node.type === 'IO') {
             if (/^(INT\s|STRING\s|REAL\s|BOOLEAN\s|DEKLARACE)/i.test(node.value)) {
+                declareVariables(node.value.split(' ').slice(1).join(' '), currentScope);
                 appendLine(`${indent}${node.value}`, node.id);
             } else if (node.value.toUpperCase().startsWith('PRINT')) {
                 let inner = node.value.substring(5).trim();
                 if (inner.startsWith('(')) inner = inner.substring(1, inner.length - 1).trim();
+                checkVariables(inner, currentScope);
                 appendLine(`${indent}PRINT(${inner})`, node.id);
             } else if (node.value.toUpperCase().startsWith('VSTUP') || node.value.toUpperCase() === 'VSTUP') {
+                declareVariables(node.value.substring(5), currentScope);
                 appendLine(`${indent}${node.value}`, node.id);
             } else if (!node.value.includes('=')) {
+                declareVariables(node.value, currentScope);
                 appendLine(`${indent}${node.value} = INPUT()`, node.id);
             } else {
+                declareVariables(node.value.split('=')[0], currentScope);
                 appendLine(`${indent}${node.value}`, node.id);
             }
         }
@@ -229,7 +266,7 @@ export const parseDrawioToPseudocode = (xml) => {
         let endNodeId = null;
         let endNodeVal = `END${start.entityType || 'FUNCTION'}`;
 
-        const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null) => {
+        const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null, currentScope = new Set()) => {
             if (!nodeId || !nodes[nodeId] || visited.has(nodeId)) return;
             if (nodeId === stopId) return;
 
@@ -243,17 +280,20 @@ export const parseDrawioToPseudocode = (xml) => {
                 declaredFuncs.add(fName);
 
                 appendLine(`${indent}${node.entityType} ${fName}()`, node.id);
-                if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId);
+                if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId, currentScope);
                 printCommentsBeforeY(Infinity, indent + "    ");
             }
             else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE') {
-                generateStatement(node, indent);
+                generateStatement(node, indent, currentScope);
                 if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
-                    traverse(node.next[0].target, indent, new Set(inPath), stopId);
+                    traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope);
                 }
             }
             else if (node.type === 'CONDITION') {
                 printCommentsBeforeY(node.y, indent);
+                
+                checkVariables(node.value, currentScope);
+
                 const trueEdge = node.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes(e.value)) || node.next[0];
                 const falseEdge = node.next.find(e => ['ne', 'no', 'false', '0', 'n', '-'].includes(e.value)) || node.next[1];
                 
@@ -285,7 +325,7 @@ export const parseDrawioToPseudocode = (xml) => {
                         };
                         unvisitLoopBody(loopStartTarget);
                         
-                        traverse(loopStartTarget, indent + "    ", new Set(inPath), node.id);
+                        traverse(loopStartTarget, indent + "    ", new Set(inPath), node.id, new Set(currentScope));
                         
                         temporarilyUnvisited.forEach(id => visited.add(id));
                     }
@@ -293,21 +333,21 @@ export const parseDrawioToPseudocode = (xml) => {
                     appendLine(`${indent}${isFor ? 'ENDFOR' : 'ENDWHILE'}`);
 
                     const exitNode = isTrueLoop ? fTarget : tTarget;
-                    if (exitNode && exitNode !== stopId && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId);
+                    if (exitNode && exitNode !== stopId && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId, currentScope);
                 } else {
                     let mergeNodeId = findConvergence(tTarget, fTarget);
                     
                     appendLine(`${indent}IF ${cleanCond} THEN`, node.id);
-                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId);
+                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, new Set(currentScope));
                     
                     if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'END') {
                         appendLine(`${indent}ELSE`);
-                        traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId);
+                        traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, new Set(currentScope));
                     }
                     appendLine(`${indent}ENDIF`);
                     
                     if (mergeNodeId && mergeNodeId !== stopId) {
-                        traverse(mergeNodeId, indent, new Set(inPath), stopId);
+                        traverse(mergeNodeId, indent, new Set(inPath), stopId, currentScope);
                     }
                 }
             }

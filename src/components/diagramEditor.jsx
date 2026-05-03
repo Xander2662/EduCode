@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, Background, Handle, Position, MarkerType, BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useReactFlow, useNodes, useEdges } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Download, Upload, Square, Circle, Diamond, AlignLeft, RefreshCcw, Copy, Trash2, MessageSquare } from 'lucide-react';
+import { Download, Upload, Square, Circle, Diamond, AlignLeft, RefreshCcw, Copy, Trash2, MessageSquare, FileJson, FileCode } from 'lucide-react';
 import { drawioToReactFlow, reactFlowToDrawio } from '../utils/diagramConverter';
 import { calculateGroupNodes } from '../utils/grouping';
 
@@ -22,21 +22,39 @@ const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, so
     const isBackEdge = sourceY > targetY;
     if (isBackEdge) {
         let maxX = Math.max(sourceX, targetX);
+        let minX = Math.min(sourceX, targetX);
+        
         nodes.forEach(n => {
             if (n.position.y >= targetY - 30 && n.position.y <= sourceY + 30) {
-                const nodeMaxX = n.position.x + (n.measured?.width || 150);
+                const nodeX = n.position.x;
+                const nodeMaxX = nodeX + (n.measured?.width || 150);
                 if (nodeMaxX > maxX) maxX = nodeMaxX;
+                if (nodeX < minX) minX = nodeX;
             }
         });
         
-        const rightEdgeX = maxX + 40; 
+        const loopNode = nodes.find(n => n.id === target);
+        const loopCenterX = loopNode ? loopNode.position.x + (loopNode.measured?.width || 120) / 2 : targetX;
+        
+        const routeLeft = sourceX < loopCenterX;
+        
         const bottomY = sourceY + 30; 
         const topY = targetY - 30;    
         const r = 10;                 
         
-        const path = `M ${sourceX} ${sourceY} L ${sourceX} ${bottomY - r} A ${r} ${r} 0 0 0 ${sourceX + r} ${bottomY} L ${rightEdgeX - r} ${bottomY} A ${r} ${r} 0 0 0 ${rightEdgeX} ${bottomY - r} L ${rightEdgeX} ${topY + r} A ${r} ${r} 0 0 0 ${rightEdgeX - r} ${topY} L ${targetX + r} ${topY} A ${r} ${r} 0 0 0 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
+        let path, finalLabelX;
         
-        return [path, rightEdgeX, (bottomY + topY) / 2];
+        if (routeLeft) {
+            const leftEdgeX = minX - 40;
+            path = `M ${sourceX} ${sourceY} L ${sourceX} ${bottomY - r} A ${r} ${r} 0 0 1 ${sourceX - r} ${bottomY} L ${leftEdgeX + r} ${bottomY} A ${r} ${r} 0 0 1 ${leftEdgeX} ${bottomY - r} L ${leftEdgeX} ${topY + r} A ${r} ${r} 0 0 1 ${leftEdgeX + r} ${topY} L ${targetX - r} ${topY} A ${r} ${r} 0 0 1 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
+            finalLabelX = leftEdgeX;
+        } else {
+            const rightEdgeX = maxX + 40; 
+            path = `M ${sourceX} ${sourceY} L ${sourceX} ${bottomY - r} A ${r} ${r} 0 0 0 ${sourceX + r} ${bottomY} L ${rightEdgeX - r} ${bottomY} A ${r} ${r} 0 0 0 ${rightEdgeX} ${bottomY - r} L ${rightEdgeX} ${topY + r} A ${r} ${r} 0 0 0 ${rightEdgeX - r} ${topY} L ${targetX + r} ${topY} A ${r} ${r} 0 0 0 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
+            finalLabelX = rightEdgeX;
+        }
+        
+        return [path, finalLabelX, (bottomY + topY) / 2];
     } else {
         return getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
     }
@@ -102,9 +120,9 @@ const handleInputResize = (e) => {
   e.target.style.width = Math.max(100, e.target.scrollWidth) + 'px';
 };
 
-// Čistý div pro pozadí s roztažením w-full h-full na velikost dodanou React Flow stylem
+// Vykresluje obal přes celý node kontejner React Flow
 const GroupBgNode = ({ data }) => (
-    <div style={{ backgroundColor: data.bgColor, borderColor: data.borderColor }} className="w-full h-full rounded-2xl border-[3px] border-dashed pointer-events-none" />
+    <div style={{ backgroundColor: data.bgColor, borderColor: data.borderColor }} className="w-full h-full rounded-[2rem] border-[3px] border-dashed pointer-events-none" />
 );
 
 const StartEndNode = ({ id, data, selected }) => {
@@ -308,6 +326,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [contextMenu, setContextMenu] = useState(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const { screenToFlowPosition } = useReactFlow();
   
   const hoveredEdgeRef = useRef(null);
@@ -386,6 +405,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
         setNodes(nds => nds.map(n => ({ ...n, selected: false })));
         setEdges(eds => eds.map(edge => ({ ...edge, selected: false })));
         setContextMenu(null);
+        setShowExportMenu(false);
         if (onPaneClick) onPaneClick();
         return;
       }
@@ -462,6 +482,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
   const onNodeDrag = useCallback((event, node) => {
     if (readOnly) return;
     setContextMenu(null);
+    setShowExportMenu(false);
 
     let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
     if (draggedNodes.length === 0) draggedNodes = [node];
@@ -756,12 +777,35 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
     setContextMenu({ mouseX: e.clientX, mouseY: e.clientY });
   }, [readOnly]);
 
-  const handleExport = () => {
+  const handleExportEduCode = () => {
+    setShowExportMenu(false);
     const dataStr = "data:text/xml;charset=utf-8," + encodeURIComponent(xml);
     const a = document.createElement('a');
     a.href = dataStr;
-    a.download = 'diagram.drawio.xml';
+    a.download = 'educode_diagram.xml';
     a.click();
+  };
+
+  const handleExportDrawioStandard = () => {
+    setShowExportMenu(false);
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xml, "text/xml");
+      doc.querySelectorAll('mxCell').forEach(cell => {
+          cell.removeAttribute('type');
+          cell.removeAttribute('mode');
+          cell.removeAttribute('entityType');
+          cell.removeAttribute('edgeStyle');
+      });
+      const cleanXml = new XMLSerializer().serializeToString(doc);
+      const dataStr = "data:text/xml;charset=utf-8," + encodeURIComponent(cleanXml);
+      const a = document.createElement('a');
+      a.href = dataStr;
+      a.download = 'standard_diagram.drawio';
+      a.click();
+    } catch (e) {
+      console.error("Export failed", e);
+    }
   };
 
   const handleImport = (e) => {
@@ -776,7 +820,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
   const btnClass = `p-2 rounded transition-opacity disabled:opacity-25 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 ${btnColor}`;
 
   return (
-    <div className="w-full h-full relative outline-none" tabIndex={0}>
+    <div className="w-full h-full relative outline-none" tabIndex={0} onClick={() => { setContextMenu(null); setShowExportMenu(false); }}>
       <style>{`
         .react-flow__edge.drop-target .react-flow__edge-path {
           stroke: #4f46e5 !important;
@@ -829,12 +873,21 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
         </div>
       )}
 
+      {/* Opravené pořadí tlačítek (Import vlevo, Export vpravo) podle tvých instrukcí */}
       <div className="absolute top-4 right-4 z-10 flex gap-2 bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700">
-        <button onClick={handleExport} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-700 dark:text-gray-300" title="Export .drawio"><Download size={18}/></button>
-        <label className={`p-2 rounded cursor-pointer text-gray-700 dark:text-gray-300 ${readOnly ? 'opacity-25 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}`} title="Import .drawio">
+        <label className={`p-2 rounded cursor-pointer text-gray-700 dark:text-gray-300 ${readOnly ? 'opacity-25 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}`} title="Import">
           <Upload size={18}/>
           <input type="file" accept=".xml,.drawio,.json" className="hidden" onChange={handleImport} disabled={readOnly} />
         </label>
+        <div className="relative">
+            <button onClick={(e) => { e.stopPropagation(); setShowExportMenu(!showExportMenu); }} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-700 dark:text-gray-300 transition-colors" title="Export"><Download size={18}/></button>
+            {showExportMenu && (
+                <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 flex flex-col py-1">
+                    <button onClick={handleExportEduCode} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><FileJson size={14} className="text-indigo-500"/> EduCode (.xml)</button>
+                    <button onClick={handleExportDrawioStandard} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><FileCode size={14} className="text-orange-500"/> Draw.io (.drawio)</button>
+                </div>
+            )}
+        </div>
       </div>
 
       <div className="w-full h-full" onContextMenu={handlePaneContextMenu}>
@@ -845,7 +898,7 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
           onConnect={readOnly ? undefined : onConnect} 
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
-          onPaneClick={() => { setContextMenu(null); if (onPaneClick) onPaneClick(); }}
+          onPaneClick={() => { setContextMenu(null); setShowExportMenu(false); if (onPaneClick) onPaneClick(); }}
           onSelectionChange={({ nodes }) => {
               if (onSelectionChange) onSelectionChange(nodes.filter(n => n.type !== 'GROUP_BG').map(n => n.id));
           }}
