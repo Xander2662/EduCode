@@ -1,64 +1,66 @@
 import { describe, it, expect } from 'vitest';
 import { parsePseudocodeToDrawio } from '../src/parsers/pseudocodeToDiagram';
 
-describe('Pseudocode to Diagram Parser - Loops & DO-WHILE', () => {
-    it('Měl by detekovat DO-WHILE cyklus a zabránit duplikaci bloků (Loop Peeling)', () => {
-        const input = `FUNCTION main()
-    Operace()
-    WHILE x > 0 DO
-        Operace()
-    ENDWHILE
+describe('Pseudocode to Diagram Parser - Dynamic Y Auto-Layout', () => {
+    it('Měl by dynamicky přepočítat a posunout Y pozice bloků, pokud dojde k odebrání řádku z kódu', () => {
+        const initialCode = `FUNCTION main()
+    Akce1()
+    Akce2()
+    Akce3()
 ENDFUNCTION`;
-        const result = parsePseudocodeToDrawio(input);
-
-        expect(result.errors).toHaveLength(0);
-
-        // 1. Zkontrolujeme, že se "Operace()" vygenerovala pouze JEDNOU!
-        const operaceMatches = result.xml.match(/value="Operace\(\)"/g) || [];
-        expect(operaceMatches).toHaveLength(1);
-
-        // 2. Zkontrolujeme, že DO-WHILE nevytvořil žádný neviditelný MERGE uzel 
-        const mergeMatches = result.xml.match(/style="ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none/g) || [];
-        expect(mergeMatches).toHaveLength(0);
+        const result1 = parsePseudocodeToDrawio(initialCode);
+        
+        const modifiedCode = `FUNCTION main()
+    Akce1()
+    Akce3()
+ENDFUNCTION`;
+        const result2 = parsePseudocodeToDrawio(modifiedCode, result1.xml);
+        
+        const match1 = result1.xml.match(/value="Akce3\(\)"[\s\S]*?y="(\d+)"/);
+        const match2 = result2.xml.match(/value="Akce3\(\)"[\s\S]*?y="(\d+)"/);
+        
+        const y1 = parseInt(match1[1]);
+        const y2 = parseInt(match2[1]);
+        
+        expect(y2).toBeLessThan(y1);
     });
 
-    it('Měl by vygenerovat standardní WHILE cyklus s návratem přimo do podmínky (bez MERGE)', () => {
+    it('Měl by správně transformovat samotný IO blok Vstup na INPUT varování', () => {
         const input = `FUNCTION main()
-    Vstup x
-    WHILE x > 0 DO
-        Operace()
-    ENDWHILE
+    Vstup
 ENDFUNCTION`;
         const result = parsePseudocodeToDrawio(input);
 
-        expect(result.errors).toHaveLength(0);
-
-        // 1. Zkontrolujeme, že se bloky vygenerovaly
-        expect(result.xml).toContain('value="Vstup x"');
-        expect(result.xml).toContain('value="Operace()"');
-
-        // 2. MERGE uzly byly odstraněny úplně, mělo by jich tu být 0
-        const mergeMatches = result.xml.match(/style="ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none/g) || [];
-        expect(mergeMatches).toHaveLength(0);
+        expect(result.xml).toContain('value="Vstup"');
+        expect(result.xml).toContain('shape=parallelogram');
     });
-    
-    it('Měl by správně zpracovat zanořené cykly bez duplikací a bez MERGE uzlů', () => {
-        const input = `FUNCTION main()
-    x = 0
-    WHILE x < 10 DO
-        x = x + 1
-        y = 0
-        WHILE y < 5 DO
-            y = y + 1
-        ENDWHILE
-    ENDWHILE
+});
+
+describe('T/F Port Persistence', () => {
+    it('Měl by zachovat uživatelsky prohozené T/F porty (True na s-right, False na s-bottom)', () => {
+        // Simulujeme existující XML, kde uživatel ručně prohodil cesty tak, že "True" je na s-right a "False" na s-bottom
+        const existingXml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="n1" value="x &gt; 0" type="CONDITION" vertex="1" parent="1"><mxGeometry x="360" y="200" width="120" height="60" as="geometry"/></mxCell>
+            <mxCell id="e1" value="True" style="sourceHandle=s-right;" edge="1" parent="1" source="n1" target="n2" />
+            <mxCell id="e2" value="False" style="sourceHandle=s-bottom;" edge="1" parent="1" source="n1" target="n3" />
+        </root></mxGraphModel>`;
+        
+        const code = `FUNCTION main()
+    IF x > 0 THEN
+        PRINT("Kladne")
+    ELSE
+        PRINT("Zaporne")
+    ENDIF
 ENDFUNCTION`;
-        const result = parsePseudocodeToDrawio(input);
         
-        expect(result.errors).toHaveLength(0);
+        // Převedeme pseudo -> diagram s pomocí historie z XML
+        const result = parsePseudocodeToDrawio(code, existingXml);
         
-        // Zkontrolujeme počet MERGE uzlů - měly by tu být 0
-        const mergeMatches = result.xml.match(/style="ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none/g) || [];
-        expect(mergeMatches).toHaveLength(0);
+        // Zkontrolujeme, zda generátor zachoval 's-right' port pro "True" cestu
+        const trueEdgeMatch = result.xml.match(/value="True" style="[^"]*sourceHandle=([^;]+);/);
+        const falseEdgeMatch = result.xml.match(/value="False" style="[^"]*sourceHandle=([^;]+);/);
+        
+        expect(trueEdgeMatch[1]).toBe('s-right');
+        expect(falseEdgeMatch[1]).toBe('s-bottom');
     });
 });

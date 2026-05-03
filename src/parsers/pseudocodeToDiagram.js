@@ -47,9 +47,11 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
     if (blocks.length === 0) return { xml: '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>', errors: [] };
 
     let existingNodes = [];
+    let existingEdges = [];
     if (existingXml && existingXml.includes('<mxGraphModel')) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(existingXml, "text/xml");
+        
         doc.querySelectorAll('mxCell[vertex="1"]').forEach(cell => {
             let rawVal = cell.getAttribute('value') || '';
             let val = rawVal.replace(/<br\s*\/?>/gi, '\n')
@@ -63,16 +65,27 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                             .trim();
 
             const style = cell.getAttribute('style') || '';
+            const cellType = cell.getAttribute('type'); // Identifikace uzlu dle custom atributu (využíváno v testech)
             const geo = cell.querySelector('mxGeometry');
             if (geo) {
                 let type = 'ACTION';
                 if (style.includes('ellipse') && style.includes('strokeColor=none') && style.includes('fillColor=none')) type = 'MERGE';
-                else if (style.includes('ellipse')) type = 'START_END';
-                else if (style.includes('rhombus') || style.includes('hexagon')) type = 'CONDITION';
-                else if (style.includes('shape=parallelogram')) type = 'IO';
-                else if (style.includes('shape=note')) type = 'COMMENT';
+                else if (style.includes('ellipse') || cellType === 'START_END') type = 'START_END';
+                else if (style.includes('rhombus') || style.includes('hexagon') || cellType === 'CONDITION') type = 'CONDITION';
+                else if (style.includes('shape=parallelogram') || cellType === 'IO') type = 'IO';
+                else if (style.includes('shape=note') || cellType === 'COMMENT') type = 'COMMENT';
                 existingNodes.push({ id: cell.getAttribute('id'), val, type, x: parseFloat(geo.getAttribute('x')), y: parseFloat(geo.getAttribute('y')), used: false });
             }
+        });
+        
+        doc.querySelectorAll('mxCell[edge="1"]').forEach(cell => {
+            const source = cell.getAttribute('source');
+            const target = cell.getAttribute('target');
+            let rawVal = cell.getAttribute('value') || '';
+            let val = rawVal.replace(/<[^>]*>?/gm, '').trim().toLowerCase();
+            const style = cell.getAttribute('style') || '';
+            const shMatch = style.match(/sourceHandle=([^;]+)/);
+            existingEdges.push({ source, target, val, sourceHandle: shMatch ? shMatch[1] : 's-bottom' });
         });
     }
 
@@ -83,18 +96,36 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         const match = existingNodes.find(n => !n.used && n.type === type && normalize(n.val) === normalizedTarget);
         if (match) {
             match.used = true;
-            // Dynamické Y (Auto-Layout osy Y)
             return { x: match.x, y: currentY, matched: true, oldId: match.id };
         }
         return { x: defX, y: currentY, matched: false, oldId: getNewId() };
     };
 
-    const getConditionPorts = (isNot) => ({
-        tText: isNot ? EL.f : EL.t,
-        fText: isNot ? EL.t : EL.f,
-        tHandle: isNot ? "s-right" : "s-bottom",
-        fHandle: isNot ? "s-bottom" : "s-right"
-    });
+    // Získává existující rozložení True/False portů z předchozího diagramu
+    const getConditionPorts = (nodeId, isNot) => {
+        let tHandle = "s-bottom";
+        let fHandle = "s-right";
+        
+        const trueVals = ['ano', 'yes', 'true', '1', 'y', '+'];
+        const falseVals = ['ne', 'no', 'false', '0', 'n', '-'];
+        
+        const oldTrueEdge = existingEdges.find(e => e.source === nodeId && trueVals.includes(e.val));
+        const oldFalseEdge = existingEdges.find(e => e.source === nodeId && falseVals.includes(e.val));
+        
+        if (oldTrueEdge) tHandle = oldTrueEdge.sourceHandle;
+        if (oldFalseEdge) fHandle = oldFalseEdge.sourceHandle;
+        
+        if (tHandle === fHandle) {
+            fHandle = tHandle === 's-bottom' ? 's-right' : 's-bottom';
+        }
+
+        return {
+            tText: isNot ? EL.f : EL.t,
+            fText: isNot ? EL.t : EL.f,
+            tHandle: isNot ? fHandle : tHandle,
+            fHandle: isNot ? tHandle : fHandle
+        };
+    };
 
     const findEndWhile = (linesArr, startIndex) => {
         let depth = 0;
@@ -210,25 +241,29 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 lineToNodeId[i] = condId;
                 pendingExits.forEach(exit => addEdge(exit.id, condId, exit.text, exit.handle, "t-top"));
                 
-                const ports = getConditionPorts(isNot);
-                stack.push({ type: 'IF', id: condId, trueExits: null, isNot });
+                const ports = getConditionPorts(condId, isNot);
+                stack.push({ type: 'IF', id: condId, trueExits: null, isNot, branchStartY: yOffset, trueMaxY: 0 });
                 
                 pendingExits = [{ id: condId, text: ports.tText, handle: ports.tHandle }];
             } 
             else if (upper === 'ELSE') {
                 const currentIf = stack[stack.length - 1];
                 currentIf.trueExits = [...pendingExits]; 
-                const ports = getConditionPorts(currentIf.isNot);
+                currentIf.trueMaxY = yOffset;
+                yOffset = currentIf.branchStartY;
+                
+                const ports = getConditionPorts(currentIf.id, currentIf.isNot);
                 pendingExits = [{ id: currentIf.id, text: ports.fText, handle: ports.fHandle }];
             } 
             else if (upper === 'ENDIF') {
                 const currentIf = stack.pop();
                 if (currentIf.trueExits === null) {
                     currentIf.trueExits = [...pendingExits];
-                    const ports = getConditionPorts(currentIf.isNot);
+                    const ports = getConditionPorts(currentIf.id, currentIf.isNot);
                     pendingExits = [{ id: currentIf.id, text: ports.fText, handle: ports.fHandle }];
                 }
                 pendingExits = [...currentIf.trueExits, ...pendingExits];
+                yOffset = Math.max(yOffset, currentIf.trueMaxY || currentIf.branchStartY);
             }
             else if (upper.startsWith('WHILE ') || upper.startsWith('FOR ')) {
                 const isFor = upper.startsWith('FOR ');
@@ -284,13 +319,13 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 
                 if (isDoWhile) {
                     pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
-                    const ports = getConditionPorts(isNot);
-                    addEdge(loopId, doWhileTargetId, ports.tText, ports.tHandle, "t-left");
+                    const ports = getConditionPorts(loopId, isNot);
+                    addEdge(loopId, doWhileTargetId, ports.tText, ports.tHandle, "t-top");
                     stack.push({ type: 'DO_WHILE', id: loopId, isNot });
                     pendingExits = [{ id: loopId, text: ports.fText, handle: ports.fHandle }];
                 } else {
                     pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
-                    const ports = getConditionPorts(isNot);
+                    const ports = getConditionPorts(loopId, isNot);
                     stack.push({ type: 'LOOP', id: loopId, mergeId: null, isNot });
                     pendingExits = [{ id: loopId, text: ports.tText, handle: ports.tHandle }];
                 }
@@ -302,10 +337,10 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                     // empty
                 } else {
                     pendingExits.forEach(exit => {
-                        let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.isNot).tHandle : exit.handle;
-                        addEdge(exit.id, currentLoop.id, exit.text, returnHandle, "t-left"); 
+                        let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.id, currentLoop.isNot).tHandle : exit.handle;
+                        addEdge(exit.id, currentLoop.id, exit.text, returnHandle, "t-top"); 
                     });
-                    const ports = getConditionPorts(currentLoop.isNot);
+                    const ports = getConditionPorts(currentLoop.id, currentLoop.isNot);
                     pendingExits = [{ id: currentLoop.id, text: ports.fText, handle: ports.fHandle }];
                 }
             }
@@ -352,10 +387,11 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
     let xml = `<mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">\n  <root>\n    <mxCell id="0" />\n    <mxCell id="1" parent="0" />\n`;
 
     outNodes.forEach(n => {
-        let w = 120, h = 60;
-        if (n.type === 'CONDITION') { w = 140; h = 70; }
+        let w = 100, h = 50;
+        if (n.type === 'IO') { w = 120; h = 50; }
+        if (n.type === 'CONDITION') { w = 120; h = 60; }
         if (n.type === 'START_END') { w = 100; h = 40; }
-        if (n.type === 'COMMENT') { w = 180; h = 50; }
+        if (n.type === 'COMMENT') { w = 160; h = 40; }
         if (n.type === 'MERGE') { w = 10; h = 10; }
         
         let style = STYLES[n.type] || n.type;
