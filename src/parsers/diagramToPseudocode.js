@@ -82,19 +82,59 @@ export const parseDrawioToPseudocode = (xml) => {
     const startNodes = Object.values(nodes).filter(n => n.type === 'START');
     startNodes.sort((a, b) => a.x - b.x || a.y - b.y);
 
+    // ZÁCHRANA ODPOJENÝCH BLOKŮ (GHOST STARTS)
+    // Pokud na plátně nejsou STARTy nebo zbyly bloky bez návaznosti, zachováme je.
     if (startNodes.length === 0) {
-        errors.push("Diagram neobsahuje počáteční blok START (byl vygenerován automaticky pro zachování kódu).");
-        const roots = Object.values(nodes).filter(n => n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END');
+        let roots = Object.values(nodes).filter(n => n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END');
+        let clusterId = 1;
+        let assigned = new Set();
+        
         if (roots.length > 0) {
-            roots.sort((a, b) => a.y - b.y);
-            const ghostId = 'ghost_start';
-            nodes[ghostId] = { id: ghostId, value: 'main', type: 'START', x: 360, y: 0, next: [], prev: [], entityType: 'FUNCTION' };
-            edges.push({ source: ghostId, target: roots[0].id, value: '' });
-            nodes[ghostId].next.push({ target: roots[0].id, value: '' });
-            roots[0].prev.push({ source: ghostId, value: '' });
-            startNodes.push(nodes[ghostId]);
-        } else {
-            return { code: "", errors: ["Diagram neobsahuje počáteční blok."], nodeLineMap: {} };
+            roots.forEach(r => {
+                const ghostId = `ghost_start_${clusterId}`;
+                nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: r.x, y: r.y - 100, next: [], prev: [], entityType: 'FUNCTION' };
+                edges.push({ source: ghostId, target: r.id, value: '' });
+                nodes[ghostId].next.push({ target: r.id, value: '' });
+                r.prev.push({ source: ghostId, value: '' });
+                startNodes.push(nodes[ghostId]);
+                clusterId++;
+                
+                let q = [r.id];
+                while(q.length > 0) {
+                    let curr = q.shift();
+                    if(!assigned.has(curr)) {
+                        assigned.add(curr);
+                        nodes[curr].next.forEach(e => q.push(e.target));
+                    }
+                }
+            });
+            errors.push(`Diagram neobsahuje počáteční blok. Bylo automaticky vygenerováno ${roots.length} funkcí (fragmentů) pro zachování vašich bloků.`);
+        }
+
+        // Záchrana úplně odtržených zacyklených struktur (nemají ani Root)
+        Object.values(nodes).forEach(n => {
+            if (!assigned.has(n.id) && n.type !== 'COMMENT' && n.type !== 'START' && n.type !== 'END' && n.type !== 'MERGE') {
+                const ghostId = `ghost_start_${clusterId}`;
+                nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION' };
+                edges.push({ source: ghostId, target: n.id, value: '' });
+                nodes[ghostId].next.push({ target: n.id, value: '' });
+                n.prev.push({ source: ghostId, value: '' });
+                startNodes.push(nodes[ghostId]);
+                clusterId++;
+                
+                let q = [n.id];
+                while(q.length > 0) {
+                    let curr = q.shift();
+                    if(!assigned.has(curr)) {
+                        assigned.add(curr);
+                        nodes[curr].next.forEach(e => q.push(e.target));
+                    }
+                }
+            }
+        });
+
+        if (startNodes.length === 0) {
+            return { code: "", errors: ["Diagram je prázdný."], nodeLineMap: {} };
         }
     }
 
