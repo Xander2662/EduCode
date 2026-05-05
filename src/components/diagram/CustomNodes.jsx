@@ -1,6 +1,6 @@
 import React from 'react';
 import { Handle, Position, useReactFlow, useEdges } from '@xyflow/react';
-import { edgeLabels, getSelectClass, extHighlightClass } from './constants';
+import { edgeLabels, getHighlightClass } from './constants';
 
 const DragHandle = () => <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors mx-auto mb-1" title="Chytit a přesunout" />;
 
@@ -15,7 +15,6 @@ const handleInputResize = (e) => {
   e.target.style.width = Math.max(100, e.target.scrollWidth) + 'px';
 };
 
-// Vlastní obsluha kláves (zavře blok na Enter, ale zachová možnost dělat normální enter pro více řádků přes Shift+Enter)
 const handleNodeKeyDown = (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
@@ -49,7 +48,7 @@ export const StartEndNode = ({ id, data, selected }) => {
   const titleColor = isGray ? 'text-gray-500' : 'text-fuchsia-500';
   const handleClass = isGray ? '!bg-gray-400' : '!bg-fuchsia-600';
   
-  const highlightClass = data.externalHighlight ? extHighlightClass : getSelectClass(selected, borderClass, data.isRuntimeActive);
+  const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, borderClass);
 
   return (
     <div className={`${bgClass} border-2 rounded-[2rem] min-w-[140px] min-h-[40px] flex flex-col justify-center items-center p-2 transition-all relative ${highlightClass}`}>
@@ -96,7 +95,7 @@ export const ActionNode = ({ id, data, selected }) => {
   const baseBorder = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-blue-300 dark:border-blue-700';
   const handleClass = isGray ? '!bg-gray-400' : '!bg-blue-600';
   
-  const highlightClass = data.externalHighlight ? extHighlightClass : getSelectClass(selected, baseBorder, data.isRuntimeActive);
+  const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, baseBorder);
 
   return (
     <div className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass}`}>
@@ -112,26 +111,44 @@ export const ActionNode = ({ id, data, selected }) => {
 };
 
 export const IONode = ({ id, data, selected }) => {
-  const isExt = data.externalHighlight;
-  const isSel = selected;
   const isGray = data.colorMode === false;
 
   const fillClass = isGray ? 'fill-gray-50 dark:fill-gray-800' : 'fill-emerald-50 dark:fill-emerald-900/30';
   const defaultStroke = isGray ? 'text-gray-400 dark:text-gray-600' : 'text-emerald-400 dark:text-emerald-700';
   const handleClass = isGray ? '!bg-gray-400' : '!bg-emerald-600';
   
-  let strokeClass = isExt ? 'text-emerald-500' : (isSel ? 'text-indigo-600 dark:text-indigo-500' : defaultStroke);
+  let strokeClass = defaultStroke;
   let shadowClass = '';
+  let strokeW = "2";
   
   if (data.isRuntimeActive) {
       strokeClass = 'text-red-500 dark:text-red-500';
-      shadowClass = 'drop-shadow-[0_0_12px_rgba(239,68,68,0.8)] z-50';
+      shadowClass = 'drop-shadow-[0_0_12px_rgba(239,68,68,0.8)]';
+      strokeW = "4";
+  } else if (data.externalHighlight) {
+      strokeClass = 'text-emerald-500';
+      strokeW = "4";
+  } else if (selected) {
+      strokeClass = 'text-indigo-600 dark:text-indigo-500';
+      strokeW = "4";
   }
+
+  const handleUserChange = (e) => {
+      let val = e.target.value;
+      if (val.toLowerCase().startsWith('vstup ')) {
+          val = val.substring(6).trim();
+          e.target.value = val;
+      } else if (val.toLowerCase() === 'vstup') {
+          val = '';
+          e.target.value = val;
+      }
+      data.onChange(e);
+  };
 
   return (
     <div className={`relative min-w-[120px] min-h-[50px] flex flex-col transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
-        <polygon points="15,2 98,2 85,98 2,98" className={fillClass} stroke="currentColor" strokeWidth={isSel || isExt || data.isRuntimeActive ? "4" : "2"} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        <polygon points="15,2 98,2 85,98 2,98" className={fillClass} stroke="currentColor" strokeWidth={strokeW} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
       <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
@@ -140,10 +157,10 @@ export const IONode = ({ id, data, selected }) => {
       
       <div className="pt-2 z-10"><DragHandle /></div>
       
-      {/* Posunuto ještě více doprava do bezpečné zóny (mimo rukojeť a překryv) */}
-      <span className="absolute top-[8px] left-[35px] text-[9px] font-bold text-emerald-700/60 dark:text-emerald-400/60 pointer-events-none select-none">VSTUP</span>
+      {/* Opravené zarovnání: Bezpečně mimo zkosenou hranu vlevo (15% je 18px, použijeme 28px) */}
+      <span className="absolute top-[4px] left-[28px] text-[9px] font-bold text-emerald-700/60 dark:text-emerald-400/60 pointer-events-none select-none">VSTUP</span>
       
-      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 pt-1 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      <textarea rows={1} defaultValue={data.label} onChange={handleUserChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 pt-1 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
     </div>
   );
@@ -154,20 +171,26 @@ export const ConditionNode = ({ id, data, selected }) => {
   const outEdges = edges.filter(e => e.source === id).length;
   const hasWarning = outEdges === 1;
 
-  const isExt = data.externalHighlight;
-  const isSel = selected;
   const isGray = data.colorMode === false;
 
   const fillClass = isGray ? 'fill-gray-50 dark:fill-gray-800' : (hasWarning ? 'fill-red-50 dark:fill-red-900/20' : 'fill-orange-50 dark:fill-orange-900/30');
   const defaultStroke = isGray ? 'text-gray-400 dark:text-gray-600' : 'text-orange-400 dark:text-orange-700';
   const handleClass = isGray ? '!bg-gray-400' : '!bg-orange-600';
   
-  let strokeClass = isExt ? 'text-emerald-500' : (isSel ? 'text-indigo-600 dark:text-indigo-500' : defaultStroke);
+  let strokeClass = defaultStroke;
   let shadowClass = '';
+  let strokeW = "2";
   
   if (data.isRuntimeActive) {
       strokeClass = 'text-red-500 dark:text-red-500';
-      shadowClass = 'drop-shadow-[0_0_12px_rgba(239,68,68,0.8)] z-50';
+      shadowClass = 'drop-shadow-[0_0_12px_rgba(239,68,68,0.8)]';
+      strokeW = "4";
+  } else if (data.externalHighlight) {
+      strokeClass = 'text-emerald-500';
+      strokeW = "4";
+  } else if (selected) {
+      strokeClass = 'text-indigo-600 dark:text-indigo-500';
+      strokeW = "4";
   }
   
   const pref = edgeLabels[data.edgeStyle || 'true-false'];
@@ -196,7 +219,7 @@ export const ConditionNode = ({ id, data, selected }) => {
   return (
     <div className={`relative flex flex-col items-center justify-center min-w-[120px] min-h-[60px] transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
-        <polygon points="15,2 85,2 98,50 85,98 15,98 2,50" className={fillClass} stroke="currentColor" strokeWidth={isSel || isExt || data.isRuntimeActive ? "4" : "2"} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        <polygon points="15,2 85,2 98,50 85,98 15,98 2,50" className={fillClass} stroke="currentColor" strokeWidth={strokeW} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
       <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
@@ -216,7 +239,7 @@ export const CommentNode = ({ id, data, selected }) => {
   const isGray = data.colorMode === false;
   const bgClass = isGray ? 'bg-gray-50 dark:bg-gray-800' : 'bg-yellow-50 dark:bg-yellow-900/30';
   const borderClass = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-yellow-300 dark:border-yellow-700';
-  const highlightClass = data.externalHighlight ? extHighlightClass : getSelectClass(selected, borderClass, data.isRuntimeActive);
+  const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, borderClass);
 
   return (
     <div className={`${bgClass} border-2 p-2 min-w-[160px] flex flex-col rounded-md relative transition-all ${highlightClass}`}>

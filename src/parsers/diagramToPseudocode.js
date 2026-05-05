@@ -100,17 +100,25 @@ export const parseDrawioToPseudocode = (xml) => {
     let clusterId = 1;
     let assigned = new Set();
     
+    // 1. Značení všech uzlů, které bezpečně leží pod hlavními START bloky
     startNodes.forEach(sn => {
         let q = [sn.id];
+        assigned.add(sn.id);
         while(q.length > 0) {
             let curr = q.shift();
-            if(!assigned.has(curr)) {
-                assigned.add(curr);
-                nodes[curr].next.forEach(e => q.push(e.target));
+            const node = nodes[curr];
+            if (node && node.next) {
+                node.next.forEach(e => {
+                    if(!assigned.has(e.target)) {
+                        assigned.add(e.target);
+                        q.push(e.target);
+                    }
+                });
             }
         }
     });
 
+    // 2. Vyhledání kořenů bez rodičů (nezapojené Akce/Vstupy nahoře) - Oprava infinite loops
     let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END' && n.type !== 'GROUP_BG');
     
     roots.forEach(r => {
@@ -123,15 +131,22 @@ export const parseDrawioToPseudocode = (xml) => {
         clusterId++;
         
         let q = [r.id];
+        assigned.add(r.id);
         while(q.length > 0) {
             let curr = q.shift();
-            if(!assigned.has(curr)) {
-                assigned.add(curr);
-                nodes[curr].next.forEach(e => q.push(e.target));
+            const node = nodes[curr];
+            if(node && node.next) {
+                node.next.forEach(e => {
+                    if(!assigned.has(e.target)) {
+                        assigned.add(e.target);
+                        q.push(e.target);
+                    }
+                });
             }
         }
     });
 
+    // 3. Totální sirotci (zacyklené bloky visící v prostoru bez kořene)
     Object.values(nodes).forEach(n => {
         if (!assigned.has(n.id) && n.type !== 'COMMENT' && n.type !== 'START' && n.type !== 'END' && n.type !== 'MERGE' && n.type !== 'GROUP_BG') {
             const ghostId = `ghost_start_${clusterId}`;
@@ -143,11 +158,17 @@ export const parseDrawioToPseudocode = (xml) => {
             clusterId++;
             
             let q = [n.id];
+            assigned.add(n.id);
             while(q.length > 0) {
                 let curr = q.shift();
-                if(!assigned.has(curr)) {
-                    assigned.add(curr);
-                    nodes[curr].next.forEach(e => q.push(e.target));
+                const node = nodes[curr];
+                if(node && node.next) {
+                    node.next.forEach(e => {
+                        if(!assigned.has(e.target)) {
+                            assigned.add(e.target);
+                            q.push(e.target);
+                        }
+                    });
                 }
             }
         }
