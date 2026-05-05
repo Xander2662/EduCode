@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Move, RefreshCcw, Square, Circle, AlignLeft, Diamond, MessageSquare, MousePointer, Settings, Play, Pause, StepForward, Square as StopSquare } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parsePseudocodeToPython } from './parsers/pseudocodeToPython';
 import { DiagramRunner } from './utils/runner';
 import { drawioToReactFlow } from './utils/diagramConverter';
 import DiagramEditor from './components/diagramEditor';
+import TutorialDialog from './components/TutorialDialog';
 
 const PANEL_TYPES = {
   drawio: { id: 'drawio', label: 'Diagram', title: 'Vizuální návrh' },
@@ -124,41 +125,6 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
   );
 };
 
-const TutorialDialog = ({ onClose }) => {
-  const [tab, setTab] = useState('zaklady');
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-800">
-          <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2"><HelpCircle size={20} className="text-indigo-500"/> Nápověda k editoru</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 p-1"><X size={20} /></button>
-        </div>
-        <div className="flex border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 overflow-x-auto">
-          <button onClick={() => setTab('zaklady')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'zaklady' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>Základní bloky</button>
-          <button onClick={() => setTab('spojovani')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'spojovani' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>Spojování & Cykly</button>
-          <button onClick={() => setTab('klavesy')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'klavesy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>Klávesové zkratky</button>
-        </div>
-        <div className="p-6 overflow-y-auto max-h-[60vh] text-gray-700 dark:text-gray-300 text-sm leading-relaxed space-y-6">
-          {tab === 'zaklady' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="border border-fuchsia-200 bg-fuchsia-50 dark:bg-fuchsia-900/20 p-4 rounded-lg flex items-start gap-3">
-                <Circle size={24} className="text-fuchsia-600 mt-1 shrink-0" />
-                <div><h4 className="font-bold text-fuchsia-800 dark:text-fuchsia-400">Start / Konec</h4><p className="text-xs mt-1">Povinné bloky.</p></div>
-              </div>
-              <div className="border border-blue-200 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg flex items-start gap-3">
-                <Square size={24} className="text-blue-600 mt-1 shrink-0" />
-                <div><h4 className="font-bold text-blue-800 dark:text-blue-400">Akce (Operace)</h4><p className="text-xs mt-1">Matematika a výpisy.</p></div>
-              </div>
-            </div>
-          )}
-          {tab === 'spojovani' && (<div><p>Zde je nápověda pro spojování...</p></div>)}
-          {tab === 'klavesy' && (<div><p>Klávesové zkratky...</p></div>)}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const [flow, setFlow] = useState('bidirectional');
   const [panels, setPanels] = useState(['drawio', 'pseudocode']);
@@ -183,7 +149,6 @@ export default function App() {
   const [externalSelectedIds, setExternalSelectedIds] = useState([]);
   const [nodeLineMap, setNodeLineMap] = useState({});
 
-  // --- RUNTIME STATE ---
   const [runner, setRunner] = useState(null);
   const [runtimeActiveNodeId, setRuntimeActiveNodeId] = useState(null);
   const [runtimeVars, setRuntimeVars] = useState({});
@@ -191,7 +156,9 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   
   const playIntervalRef = useRef(null);
-  const activeWindow = useRef('pseudocode'); 
+  
+  // Zásadní změna: Pamatuje si, kde se stala poslední změna. Zabraňuje smyčkám a řeší ztrátu focusu
+  const lastEdited = useRef('drawio'); 
 
   useEffect(() => {
     const seen = localStorage.getItem('eduCodeTutorialSeen');
@@ -226,7 +193,7 @@ export default function App() {
 
   useEffect(() => {
     if (flow === 'code-to-diagram') return;
-    if (flow === 'bidirectional' && activeWindow.current !== 'drawio') return;
+    if (flow === 'bidirectional' && lastEdited.current !== 'drawio') return;
 
     const timeoutId = setTimeout(() => {
       try {
@@ -243,7 +210,7 @@ export default function App() {
 
   useEffect(() => {
     if (flow === 'diagram-to-code') return;
-    if (flow === 'bidirectional' && activeWindow.current !== 'pseudocode') return;
+    if (flow === 'bidirectional' && lastEdited.current !== 'pseudocode') return;
 
     const timeoutId = setTimeout(() => {
       try {
@@ -362,11 +329,7 @@ export default function App() {
   const renderPanelContent = (type) => {
     if (type === 'drawio') {
       return (
-        <div
-          className="flex-1 flex flex-col relative w-full h-full"
-          onMouseEnter={() => { activeWindow.current = 'drawio'; }}
-          onFocusCapture={() => { activeWindow.current = 'drawio'; }}
-        >
+        <div className="flex-1 flex flex-col relative w-full h-full">
           <DiagramEditor
             xml={diagramXml}
             edgeStyle={edgeStyle}
@@ -376,53 +339,62 @@ export default function App() {
             externalSelectedIds={runtimeActiveNodeId ? [runtimeActiveNodeId] : externalSelectedIds}
             activeRuntimeNodeId={runtimeActiveNodeId}
             onXmlChange={(xml) => {
-              if (flow === 'diagram-to-code' || (flow === 'bidirectional' && activeWindow.current === 'drawio')) {
-                setDiagramXml(xml);
-              }
+               lastEdited.current = 'drawio';
+               setDiagramXml(xml);
             }}
             onImportXml={(xml) => {
-                activeWindow.current = 'drawio'; 
-                setDiagramXml(xml);
+               lastEdited.current = 'drawio';
+               setDiagramXml(xml);
             }}
             readOnly={flow === 'code-to-diagram' || isPlaying || runner !== null}
           />
           
           {showDebugger && (
-            <div className="absolute top-20 left-4 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-30 flex flex-col overflow-hidden">
-                <div className="bg-gray-100 dark:bg-gray-900 px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                    <span>Debugger</span>
-                    <div className={`w-2 h-2 rounded-full ${runner && !runner.isFinished ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} title={runner && !runner.isFinished ? 'Běží' : 'Zastaveno'}></div>
+            <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden flex flex-col justify-between p-4">
+                <style>{`.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
+                {/* Přidáno mt-14, aby se okénko debuggeru vyhnulo export/import tlačítkům */}
+                <div className="flex justify-end w-full mt-14">
+                    <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-xl w-64 pointer-events-auto flex flex-col overflow-hidden transition-all">
+                       <div className="px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/50 flex justify-between items-center">
+                          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Paměť</span>
+                          <span className={`w-2 h-2 rounded-full ${runner && !runner.isFinished ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                       </div>
+                       <div className="p-4 flex flex-col gap-2 max-h-[40vh] overflow-y-auto no-scrollbar">
+                          {Object.keys(runtimeVars).length === 0 ? (
+                              <div className="text-xs text-gray-400 italic text-center">Zatím prázdné</div>
+                          ) : (
+                              Object.keys(runtimeVars).map(k => (
+                                  <div key={k} className="flex justify-between items-center text-sm font-mono bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 px-3 py-1.5 rounded-lg">
+                                      <span className="text-gray-600 dark:text-gray-400">{k}</span>
+                                      <span className="font-bold text-indigo-600 dark:text-indigo-400">{runtimeVars[k]}</span>
+                                  </div>
+                              ))
+                          )}
+                       </div>
+                    </div>
                 </div>
-                <div className="flex flex-col h-[180px] text-sm text-gray-700 dark:text-gray-300">
-                    <div className="flex-1 p-3 overflow-y-auto border-b border-gray-200 dark:border-gray-700">
-                        <div className="flex justify-between font-mono text-xs border-b border-gray-200 dark:border-gray-700 pb-1 mb-2">
-                            <span className="font-semibold text-gray-500">Proměnná</span>
-                            <span className="font-semibold text-gray-500">Hodnota</span>
+
+                <div className="flex justify-between items-end w-full pointer-events-none mb-2">
+                    <div className="w-72 pointer-events-auto">
+                      {runtimeOutput.length > 0 && (
+                        <div className="bg-gray-900/95 backdrop-blur-md border border-gray-700 rounded-2xl shadow-xl p-4 w-full">
+                            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Výstup (Console)</div>
+                            <div className="font-mono text-sm text-green-400 flex flex-col gap-1 max-h-[20vh] overflow-y-auto no-scrollbar">
+                                {runtimeOutput.slice(-5).map((o,i) => <div key={i}>{`> ${o}`}</div>)}
+                            </div>
                         </div>
-                        {Object.keys(runtimeVars).length === 0 ? (
-                             <div className="flex justify-center items-center h-full text-xs text-gray-400 italic mt-6">
-                                Watch list je prázdný
-                             </div>
-                        ) : (
-                             Object.keys(runtimeVars).map(k => (
-                                 <div key={k} className="flex justify-between text-xs font-mono mb-1">
-                                     <span>{k}</span>
-                                     <span className="font-bold text-indigo-600 dark:text-indigo-400">{runtimeVars[k]}</span>
-                                 </div>
-                             ))
-                        )}
+                      )}
                     </div>
-                    <div className="h-[70px] p-2 overflow-y-auto bg-gray-50 dark:bg-gray-900">
-                         <div className="font-bold mb-1 text-[10px] text-gray-400 uppercase">Výstup</div>
-                         {runtimeOutput.map((o,i) => <div key={i} className="text-xs font-mono text-gray-800 dark:text-gray-200">{`> ${o}`}</div>)}
+                    
+                    <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2 pointer-events-auto flex gap-2">
+                        <button onClick={doStep} disabled={isPlaying || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all"><StepForward size={20} /></button>
+                        <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlaying ? 'bg-amber-100 text-amber-600 hover:bg-amber-200' : 'bg-green-100 text-green-600 hover:bg-green-200'}`}>
+                            {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+                        </button>
+                        <button onClick={stopDebugger} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 disabled:opacity-30 transition-all"><StopSquare size={20} /></button>
                     </div>
-                </div>
-                <div className="bg-gray-50 dark:bg-gray-900 p-2 flex gap-3 justify-center border-t border-gray-200 dark:border-gray-700">
-                    <button onClick={doStep} disabled={isPlaying || (runner && runner.isFinished)} className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 disabled:opacity-30 transition-colors" title="Krok (Step)"><StepForward size={16} /></button>
-                    <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors ${isPlaying ? 'text-amber-500' : 'text-green-600 dark:text-green-500'}`} title={isPlaying ? "Pauza" : "Spustit"}>
-                        {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-                    </button>
-                    <button onClick={stopDebugger} disabled={!runner} className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-red-600 dark:text-red-500 disabled:opacity-30 transition-colors" title="Zastavit (Stop)"><StopSquare size={16} /></button>
+
+                    <div className="w-72" /> 
                 </div>
             </div>
           )}
@@ -433,22 +405,14 @@ export default function App() {
     if (type === 'python') {
       return (
         <div className="flex-1 flex flex-col overflow-hidden relative bg-white dark:bg-gray-900">
-          <LineNumberedTextarea
-            value={pythonCode}
-            readOnly={true}
-            placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}
-          />
+          <LineNumberedTextarea value={pythonCode} readOnly={true} placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`} />
         </div>
       );
     }
 
     if (type === 'pseudocode') {
       return (
-        <div 
-          className="flex-1 flex flex-col overflow-hidden relative bg-white dark:bg-gray-900"
-          onMouseEnter={() => { activeWindow.current = 'pseudocode'; }}
-          onFocusCapture={() => { activeWindow.current = 'pseudocode'; }}
-        >
+        <div className="flex-1 flex flex-col overflow-hidden relative bg-white dark:bg-gray-900">
           {parseErrors.length > 0 && (
             <div className="bg-red-50 dark:bg-red-900/30 border-b border-red-500 p-3 z-10">
               <h4 className="text-red-700 dark:text-red-400 font-bold text-sm flex items-center gap-2 mb-2"><AlertCircle size={16} /> Upozornění</h4>
@@ -460,7 +424,10 @@ export default function App() {
 
           <LineNumberedTextarea
             value={pseudocode}
-            onChange={(e) => setPseudocode(e.target.value)}
+            onChange={(e) => {
+               lastEdited.current = 'pseudocode';
+               setPseudocode(e.target.value);
+            }}
             onCursorChange={handleCodeCursorChange}
             readOnly={flow === 'diagram-to-code'}
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}

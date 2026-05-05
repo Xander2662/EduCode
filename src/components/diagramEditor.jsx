@@ -218,15 +218,27 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     if (xml && xml !== lastXmlRef.current) {
       lastXmlRef.current = xml;
       const { nodes: parsedNodes, edges: parsedEdges } = drawioToReactFlow(xml);
-      setNodes(prev => parsedNodes.map(n => ({ ...n, selected: prev.find(p => p.id === n.id)?.selected || false, data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(n.id, e.target.value) } })));
-      setEdges(prev => parsedEdges.map(e => ({ ...e, selected: prev.find(p => p.id === e.id)?.selected || false, data: { ...e.data, readOnly, edgeStyle }, markerEnd: { type: MarkerType.ArrowClosed } })));
+      setNodes(prev => parsedNodes.map(n => ({ 
+          ...n, 
+          selected: prev.find(p => p.id === n.id)?.selected || false, 
+          data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(n.id, e.target.value) } 
+      })));
+      
+      setEdges(prev => parsedEdges.map(e => ({ 
+          ...e, 
+          type: 'customEdge',
+          selected: prev.find(p => p.id === e.id)?.selected || false, 
+          data: { ...e.data, readOnly, edgeStyle }, 
+          markerEnd: { type: MarkerType.ArrowClosed } 
+      })));
     }
   }, [xml, readOnly, edgeStyle, setNodes, setEdges, updateNodeLabel]);
 
   useEffect(() => {
     if (nodes.length > 0 || edges.length > 0) {
       const timer = setTimeout(() => {
-        const generatedXml = reactFlowToDrawio(nodes.filter(n => n.type !== 'GROUP_BG'), edges);
+        const exportNodes = nodes.filter(n => n.type !== 'GROUP_BG');
+        const generatedXml = reactFlowToDrawio(exportNodes, edges);
         if (generatedXml !== lastXmlRef.current) { lastXmlRef.current = generatedXml; onXmlChange(generatedXml); }
       }, 300);
       return () => clearTimeout(timer);
@@ -274,11 +286,18 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const addNodeAt = (type, label, clientPos = null) => {
     if (readOnly) return;
+    const newId = 'node_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
     const position = clientPos ? screenToFlowPosition({ x: clientPos.mouseX, y: clientPos.mouseY }) : (() => {
         const bounds = document.querySelector('.react-flow').getBoundingClientRect();
         return screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 });
     })();
-    setNodes(nds => nds.concat({ id: Date.now().toString(), type, position, selected: false, data: { label, readOnly, ...(type === 'START_END' ? { mode: 'unassigned', entityType: 'FUNCTION' } : {}), onChange: (e) => updateNodeLabel(Date.now().toString(), e.target.value) } }));
+    setNodes((nds) => nds.concat({ 
+        id: newId, 
+        type, 
+        position, 
+        selected: false, 
+        data: { label, readOnly, ...(type === 'START_END' ? { mode: 'unassigned', entityType: 'FUNCTION' } : {}), onChange: (e) => updateNodeLabel(newId, e.target.value) } 
+    }));
   };
 
   const handlePaneContextMenu = useCallback((e) => { if (readOnly) return; e.preventDefault(); setContextMenu({ mouseX: e.clientX, mouseY: e.clientY }); }, [readOnly]);
@@ -333,7 +352,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
                   {type: 'CONDITION', label: 'Podmínka', icon: Diamond, color: colorMode ? "text-orange-500" : "text-gray-500"},
                   {type: 'COMMENT', label: 'Komentář', icon: MessageSquare, color: colorMode ? "text-yellow-500" : "text-gray-500"}
                 ].map(item => (
-                  <button key={item.type} onClick={() => { addNodeAt(item.type, item.type === 'COMMENT'?'#':(item.type==='CONDITION'?'x>0':''), contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                  <button key={item.type} onClick={() => { addNodeAt(item.type, item.type === 'COMMENT'?'#':(item.type==='CONDITION'?'x>0':(item.type==='IO'?'x':'')), contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
                     <item.icon size={14} className={item.color}/> {item.label}
                   </button>
                 ))}
@@ -344,7 +363,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       <div className="absolute top-4 left-4 z-10 flex gap-2 bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700">
         <button onClick={() => addNodeAt('START_END', '')} disabled={readOnly} className={btnClass}><Circle size={18} className={colorMode ? "text-fuchsia-600" : ""} /></button>
         <button onClick={() => addNodeAt('ACTION', 'Operace')} disabled={readOnly} className={btnClass}><Square size={18} className={colorMode ? "text-blue-600" : ""} /></button>
-        <button onClick={() => addNodeAt('IO', 'Vstup')} disabled={readOnly} className={btnClass}><AlignLeft size={18} className={colorMode ? "text-emerald-600" : ""} style={{transform: 'skew(-15deg)'}} /></button>
+        <button onClick={() => addNodeAt('IO', 'x')} disabled={readOnly} className={btnClass}><AlignLeft size={18} className={colorMode ? "text-emerald-600" : ""} style={{transform: 'skew(-15deg)'}} /></button>
         <button onClick={() => addNodeAt('CONDITION', 'x > 0')} disabled={readOnly} className={btnClass}><Diamond size={18} className={colorMode ? "text-orange-600" : ""} /></button>
         <button onClick={() => addNodeAt('COMMENT', '# Komentář')} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
       </div>

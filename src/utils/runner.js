@@ -6,7 +6,6 @@ export class DiagramRunner {
         this.output = [];
         this.isFinished = false;
 
-        // Silnější detekce Startu, pokud chybí přesná data z XML
         let startNode = this.nodes.find(n => n.type === 'START_END' && n.data?.mode === 'start');
         if (!startNode) {
             startNode = this.nodes.find(n => n.type === 'START_END' && !this.edges.some(e => e.target === n.id)) || this.nodes.find(n => n.type === 'START_END');
@@ -16,11 +15,10 @@ export class DiagramRunner {
         if (!this.currentNodeId) this.isFinished = true;
     }
 
-    // Odstraňuje neviditelný DrawIO balast, aby eval nezhavaroval
     cleanText(html) {
         if (!html) return '';
         let t = html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/div>/gi, '\n').replace(/<\/p>/gi, '\n');
-        t = t.replace(/<\/?[^>]+(>|$)/g, ""); // Strip ALL tags
+        t = t.replace(/<\/?[^>]+(>|$)/g, ""); 
         t = t.replace(/&nbsp;/gi, ' ').replace(/&gt;/gi, '>').replace(/&lt;/gi, '<').replace(/&amp;/gi, '&').replace(/\u00A0/g, ' ');
         return t.trim();
     }
@@ -75,20 +73,26 @@ export class DiagramRunner {
         } 
         else if (node.type === 'IO') {
             let text = this.cleanText(node.data?.label || '').trim();
-            if (text.toUpperCase().startsWith('VSTUP') || text.toUpperCase() === 'VSTUP') {
-                const varName = text.replace(/^VSTUP/i, '').trim() || 'x';
-                let input = window.prompt(`Zadejte hodnotu pro proměnnou '${varName}':`, "0");
-                let parsed = parseFloat(input);
-                this.variables[varName] = isNaN(parsed) ? input : parsed;
-            } else if (text.toUpperCase().startsWith('PRINT')) {
+            if (text.toUpperCase().startsWith('VSTUP')) {
+                text = text.substring(5).trim();
+            }
+
+            if (text.toUpperCase().startsWith('PRINT')) {
                 let inner = text.substring(5).trim();
                 if(inner.startsWith('(')) inner = inner.substring(1, inner.length-1);
                 const val = this.evalExpr(inner);
                 this.output.push(val !== undefined ? String(val) : inner);
+            } else if (text.includes('=')) {
+                const [left, ...rightParts] = text.split('=');
+                const varName = left.trim();
+                const expr = rightParts.join('=').trim();
+                const val = this.evalExpr(expr);
+                if (val !== undefined) this.variables[varName] = val;
             } else {
-                let input = window.prompt(`Zadejte hodnotu pro: ${text}`, "0");
+                const varName = text || 'x';
+                let input = window.prompt(`Zadejte hodnotu pro proměnnou '${varName}':`, "0");
                 let parsed = parseFloat(input);
-                this.variables[text.split('=')[0].trim()] = isNaN(parsed) ? input : parsed;
+                this.variables[varName] = isNaN(parsed) ? input : parsed;
             }
             if (outEdges.length > 0) nextNodeId = outEdges[0].target;
         } 

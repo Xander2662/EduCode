@@ -46,6 +46,7 @@ export const StartEndNode = ({ id, data, selected }) => {
   return (
     <div className={`${bgClass} border-2 rounded-[2rem] min-w-[140px] min-h-[40px] flex flex-col justify-center items-center p-2 transition-all relative ${highlightClass}`}>
       {mode !== 'start' && <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />}
+      
       {mode === 'unassigned' && (
         <>
           <DragHandle />
@@ -55,6 +56,7 @@ export const StartEndNode = ({ id, data, selected }) => {
           </div>
         </>
       )}
+
       {mode === 'start' && (
         <div className="w-full flex-1 flex flex-col px-2 relative pb-1">
           <div className="flex justify-between items-center w-full mb-1 px-1">
@@ -65,12 +67,16 @@ export const StartEndNode = ({ id, data, selected }) => {
           <input defaultValue={data.label} onChange={data.onChange} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono font-bold nodrag text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
         </div>
       )}
+
       {mode === 'end' && (
         <div className="w-full flex-1 flex flex-col items-center justify-center px-3 pb-1 pointer-events-none select-none">
           <DragHandle />
-          <span className="w-full text-center text-sm font-mono font-bold text-gray-900 dark:text-gray-100 block mt-1">{data.label || `END${entityType}`}</span>
+          <span className="w-full text-center text-sm font-mono font-bold text-gray-900 dark:text-gray-100 block mt-1">
+            {data.label || `END${entityType}`}
+          </span>
         </div>
       )}
+
       {mode !== 'end' && <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />}
     </div>
   );
@@ -81,11 +87,15 @@ export const ActionNode = ({ id, data, selected }) => {
   const bgClass = isGray ? 'bg-gray-50 dark:bg-gray-800' : 'bg-blue-50 dark:bg-blue-900/30';
   const baseBorder = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-blue-300 dark:border-blue-700';
   const handleClass = isGray ? '!bg-gray-400' : '!bg-blue-600';
+  
   const highlightClass = data.externalHighlight ? extHighlightClass : getSelectClass(selected, baseBorder, data.isRuntimeActive);
 
   return (
     <div className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass}`}>
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
+      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
       <DragHandle />
       <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
@@ -102,7 +112,6 @@ export const IONode = ({ id, data, selected }) => {
   const defaultStroke = isGray ? 'text-gray-400 dark:text-gray-600' : 'text-emerald-400 dark:text-emerald-700';
   const handleClass = isGray ? '!bg-gray-400' : '!bg-emerald-600';
   
-  // Zvláštní Highlight logiky pro Runtime
   let strokeClass = isExt ? 'text-emerald-500' : (isSel ? 'text-indigo-600 dark:text-indigo-500' : defaultStroke);
   let shadowClass = '';
   
@@ -117,8 +126,16 @@ export const IONode = ({ id, data, selected }) => {
         <polygon points="15,2 98,2 85,98 2,98" className={fillClass} stroke="currentColor" strokeWidth={isSel || isExt || data.isRuntimeActive ? "4" : "2"} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
+      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      
       <div className="pt-2 z-10"><DragHandle /></div>
-      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      
+      {/* Vodoznak posunut mimo blok a oddělen od drag handle */}
+      <span className="absolute top-[4px] left-[14px] text-[9px] font-bold text-emerald-700/60 dark:text-emerald-400/60 pointer-events-none select-none">VSTUP</span>
+      
+      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 pt-1 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
     </div>
   );
@@ -174,6 +191,10 @@ export const ConditionNode = ({ id, data, selected }) => {
         <polygon points="15,2 85,2 98,50 85,98 15,98 2,50" className={fillClass} stroke="currentColor" strokeWidth={isSel || isExt || data.isRuntimeActive ? "4" : "2"} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
+      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+
       <div className="absolute top-1 z-10"><DragHandle /></div>
       <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`min-w-[70px] max-w-[100px] text-center outline-none bg-transparent text-sm font-mono nodrag mt-2 z-10 resize-none overflow-hidden text-gray-900 dark:text-gray-100 px-1 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       

@@ -71,15 +71,7 @@ export const parseDrawioToPseudocode = (xml) => {
         }
         else if (style.includes('rhombus') || style.includes('hexagon')) type = 'CONDITION';
         else if (style.includes('shape=parallelogram')) {
-          if (value.includes('=') && !value.toLowerCase().startsWith('vstup')) type = 'ACTION';
-          else if (value.toUpperCase().startsWith('RETURN')) type = 'ACTION';
-          else {
-              type = 'IO';
-              let tokens = value.split(/[,\s\n\t]+/).filter(Boolean);
-              if (tokens.length > 0 && tokens[0].toLowerCase() === 'vstup') {
-                  value = tokens.length > 1 ? 'Vstup ' + tokens.slice(1).join(', ') : 'Vstup';
-              }
-          }
+            type = 'IO';
         }
         
         const entityMatch = style.match(/entityType=([^;]+)/);
@@ -209,24 +201,45 @@ export const parseDrawioToPseudocode = (xml) => {
                 }
             });
         } else if (node.type === 'IO') {
-            if (/^(INT\s|STRING\s|REAL\s|BOOLEAN\s|DEKLARACE)/i.test(node.value)) {
-                declareVariables(node.value.split(' ').slice(1).join(' '), currentScope);
-                appendLine(`${indent}${node.value}`, node.id);
-            } else if (node.value.toUpperCase().startsWith('PRINT')) {
-                let inner = node.value.substring(5).trim();
-                if (inner.startsWith('(')) inner = inner.substring(1, inner.length - 1).trim();
-                checkVariables(inner, currentScope);
-                appendLine(`${indent}PRINT(${inner})`, node.id);
-            } else if (node.value.toUpperCase().startsWith('VSTUP') || node.value.toUpperCase() === 'VSTUP') {
-                declareVariables(node.value.substring(5), currentScope);
-                appendLine(`${indent}${node.value}`, node.id);
-            } else if (!node.value.includes('=')) {
-                declareVariables(node.value, currentScope);
-                appendLine(`${indent}${node.value} = INPUT()`, node.id);
-            } else {
-                declareVariables(node.value.split('=')[0], currentScope);
-                appendLine(`${indent}${node.value}`, node.id);
-            }
+            let lines = node.value.split(/[\n;]+/);
+            lines.forEach(line => {
+                let val = line.trim();
+                if(!val) return;
+                
+                if (val.toUpperCase().startsWith('PRINT') || val.includes('"')) {
+                    let inner = val.toUpperCase().startsWith('PRINT') ? val.substring(5).trim() : val;
+                    if (inner.startsWith('(')) inner = inner.substring(1, inner.length - 1).trim();
+                    checkVariables(inner, currentScope);
+                    appendLine(`${indent}PRINT(${inner})`, node.id);
+                } else if (val.includes('=')) {
+                    val.split(',').forEach(part => {
+                        let p = part.trim();
+                        if(!p) return;
+                        if(p.includes('=')) {
+                             let [left, right] = p.split('=');
+                             declareVariables(left.trim(), currentScope);
+                             checkVariables(right.trim(), currentScope);
+                             appendLine(`${indent}${p}`, node.id);
+                        } else {
+                             let cleanV = p.replace(/^VSTUP\s+/i, '').trim();
+                             cleanV = cleanV.replace(/[^\w]/g, ''); // Vyčištění pro zbloudilé tečky "y."
+                             if (cleanV) {
+                                 declareVariables(cleanV, currentScope);
+                                 appendLine(`${indent}Vstup ${cleanV}`, node.id);
+                             }
+                        }
+                    });
+                } else {
+                    val.split(',').forEach(part => {
+                        let p = part.trim().replace(/^VSTUP\s+/i, '');
+                        p = p.replace(/[^\w]/g, ''); // Vyčištění např. "y." -> "y"
+                        if(p) {
+                            declareVariables(p, currentScope);
+                            appendLine(`${indent}Vstup ${p}`, node.id);
+                        }
+                    });
+                }
+            });
         }
     };
 
@@ -383,4 +396,4 @@ export const parseDrawioToPseudocode = (xml) => {
   } catch (err) {
     return { code: "", errors: ["Kritická chyba parseru: " + err.message], nodeLineMap: {} };
   }
-};
+};  
