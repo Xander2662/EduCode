@@ -63,7 +63,7 @@ export const parseDrawioToPseudocode = (xml) => {
         let type = 'ACTION';
         if (style.includes('shape=note') || style.includes('fillColor=#fff2cc') || value.startsWith('#') || value.startsWith('//')) type = 'COMMENT';
         else if (style.includes('ellipse') && style.includes('strokeColor=none') && style.includes('fillColor=none')) type = 'MERGE';
-        else if (style.includes('ellipse')) {
+        else if (style.includes('ellipse') || style.includes('mode=start') || style.includes('mode=end') || value.toUpperCase() === 'START' || value.toUpperCase() === 'MAIN') {
             const modeMatch = style.match(/mode=([^;]+)/);
             const mode = modeMatch ? modeMatch[1] : null;
             if (mode === 'end' || value.toUpperCase() === 'ENDFUNCTION' || value.toUpperCase() === 'ENDCLASS' || value.toUpperCase() === 'KONEC') type = 'END';

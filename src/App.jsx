@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Move, RefreshCcw, Square, Circle, AlignLeft, Diamond, MessageSquare, MousePointer, Settings, Play, StepForward, Square as StopSquare } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Move, RefreshCcw, Square, Circle, AlignLeft, Diamond, MessageSquare, MousePointer, Settings, Play, Pause, StepForward, Square as StopSquare } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parsePseudocodeToPython } from './parsers/pseudocodeToPython';
+import { DiagramRunner } from './utils/runner';
+import { drawioToReactFlow } from './utils/diagramConverter';
 import DiagramEditor from './components/diagramEditor';
 
 const PANEL_TYPES = {
@@ -11,7 +13,43 @@ const PANEL_TYPES = {
   python: { id: 'python', label: 'Python', title: 'Python Kód' }
 };
 
-const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], onCursorChange }) => {
+const ErrorItem = ({ error }) => {
+    const [expanded, setExpanded] = useState(false);
+    
+    const getErrorExplanation = (err) => {
+        if (err.includes("mimo svůj Scope") || err.includes("před deklarací")) {
+            return "Proměnná (např. 'x') musí být vytvořena (např. 'x = 5' nebo 'Vstup x'), než s ní začnete pracovat v podmínce nebo pro výpis. Pokud proměnnou vytvoříte uvnitř větve (např. uvnitř IF), přestane po skončení větve existovat (tzv. Scope). Mimo tento blok už proměnnou nelze použít.";
+        }
+        if (err.includes("počáteční blok")) {
+            return "Algoritmus musí mít vždy jasně definovaný začátek. Přidejte na plátno fialový blok START a napojte ho na první krok vašeho programu.";
+        }
+        if (err.includes("neměla koncový blok")) {
+            return "Program by měl být korektně ukončen blokem KONEC, aby bylo jasné, kde končí jeho běh.";
+        }
+        if (err.includes("Duplicitní název")) {
+            return "Každá funkce nebo třída musí mít unikátní název. Použili jste stejný název vícekrát.";
+        }
+        return "Zkontrolujte logiku vašeho diagramu a ujistěte se, že všechny bloky jsou správně propojené a dávají smysl.";
+    };
+
+    return (
+        <li className="flex flex-col gap-1 mb-1">
+            <div className="flex justify-between items-start gap-2">
+                <span className="flex-1">{error}</span>
+                <button onClick={() => setExpanded(!expanded)} className="text-red-500 hover:text-red-700 bg-red-100/50 dark:bg-red-800/30 p-1 rounded transition-colors shrink-0" title="Vysvětlení chyby">
+                    <HelpCircle size={14} />
+                </button>
+            </div>
+            {expanded && (
+                <div className="text-[11px] bg-red-100 dark:bg-red-900/60 p-2 rounded border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200 mt-1 leading-relaxed">
+                    {getErrorExplanation(error)}
+                </div>
+            )}
+        </li>
+    );
+};
+
+const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], runtimeActiveLine = null, onCursorChange }) => {
   const lineCount = value?.split('\n').length || 1;
   const textareaRef = useRef(null);
   const lineNumbersRef = useRef(null);
@@ -55,6 +93,9 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
            {highlightLines.map((line, idx) => (
              <div key={idx} className="absolute left-0 right-0 bg-indigo-500/20 dark:bg-indigo-400/20 transition-all" style={{ top: `${16 + line * 24}px`, height: '24px' }}></div>
            ))}
+           {runtimeActiveLine !== null && (
+             <div className="absolute left-0 right-0 bg-red-500/30 dark:bg-red-500/30 border-y border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.5)] transition-all z-20" style={{ top: `${16 + runtimeActiveLine * 24}px`, height: '24px' }}></div>
+           )}
         </div>
       </div>
 
@@ -98,83 +139,20 @@ const TutorialDialog = ({ onClose }) => {
           <button onClick={() => setTab('klavesy')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'klavesy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>Klávesové zkratky</button>
         </div>
         <div className="p-6 overflow-y-auto max-h-[60vh] text-gray-700 dark:text-gray-300 text-sm leading-relaxed space-y-6">
-          
           {tab === 'zaklady' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="border border-fuchsia-200 bg-fuchsia-50 dark:bg-fuchsia-900/20 p-4 rounded-lg flex items-start gap-3">
                 <Circle size={24} className="text-fuchsia-600 mt-1 shrink-0" />
-                <div>
-                  <h4 className="font-bold text-fuchsia-800 dark:text-fuchsia-400">Start / Konec</h4>
-                  <p className="text-xs mt-1">Povinné bloky. Označují začátek a konec vaší funkce.</p>
-                </div>
+                <div><h4 className="font-bold text-fuchsia-800 dark:text-fuchsia-400">Start / Konec</h4><p className="text-xs mt-1">Povinné bloky.</p></div>
               </div>
               <div className="border border-blue-200 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg flex items-start gap-3">
                 <Square size={24} className="text-blue-600 mt-1 shrink-0" />
-                <div>
-                  <h4 className="font-bold text-blue-800 dark:text-blue-400">Akce (Operace)</h4>
-                  <p className="text-xs mt-1">Matematické operace (<code>x = x + 1</code>) nebo volání funkcí. Pokud napíšete <code>"Text"</code>, vygeneruje se PRINT.</p>
-                </div>
-              </div>
-              <div className="border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-lg flex items-start gap-3">
-                <AlignLeft size={24} className="text-emerald-600 mt-1 shrink-0" style={{transform: 'skew(-15deg)'}} />
-                <div>
-                  <h4 className="font-bold text-emerald-800 dark:text-emerald-400">Vstup / Výstup (IO)</h4>
-                  <p className="text-xs mt-1">Příkazy jako <code>Vstup x</code>. Stačí napsat <code>x</code> a systém automaticky přiřadí vstup od uživatele.</p>
-                </div>
-              </div>
-              <div className="border border-orange-200 bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg flex items-start gap-3">
-                <Diamond size={24} className="text-orange-600 mt-1 shrink-0" />
-                <div>
-                  <h4 className="font-bold text-orange-800 dark:text-orange-400">Podmínka (IF / WHILE)</h4>
-                  <p className="text-xs mt-1">Obsahuje logický test (např. <code>x &gt; 0</code>). Vychází z ní vždy dvě cesty (Pravda / Nepravda).</p>
-                </div>
+                <div><h4 className="font-bold text-blue-800 dark:text-blue-400">Akce (Operace)</h4><p className="text-xs mt-1">Matematika a výpisy.</p></div>
               </div>
             </div>
           )}
-
-          {tab === 'spojovani' && (
-            <>
-              <div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><Move size={18}/> Vkládání bloků do šipky (Drag & Drop)</h3>
-                <p className="mb-4 text-gray-600 dark:text-gray-400">Nemusíte složitě mazat a znovu tvořit spojení. Pokud přesunete nový nebo existující blok <strong>přímo nad existující šipku</strong>, šipka se zbarví modře a blok se do ní sám vklíní a automaticky se propojí.</p>
-              </div>
-              <hr className="border-gray-200 dark:border-gray-700" />
-              <div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><MousePointer size={18}/> Rychlé menu (Pravé tlačítko myši)</h3>
-                <p className="mb-4 text-gray-600 dark:text-gray-400">Pro urychlení práce stačí kliknout <strong>pravým tlačítkem myši</strong> do prázdného prostoru. Objeví se kontextové menu a vybraný blok se vytvoří přesně na místě vašeho kurzoru.</p>
-              </div>
-              <hr className="border-gray-200 dark:border-gray-700" />
-              <div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><RefreshCcw size={18}/> Tvorba cyklu (WHILE / FOR)</h3>
-                <p className="mb-4 text-gray-600 dark:text-gray-400">Do oranžového kosočtverce <strong>nemusíte psát slovo WHILE</strong>. Stačí napsat pouze samotnou podmínku. Systém automaticky pozná, že jde o cyklus, jakmile vezmete šipku z konce akce a <strong>propojíte ji zpět</strong> do stejného kosočtverce. Modul inteligentního obchvatu se postará o vykreslení trasy mimo bloky.</p>
-              </div>
-            </>
-          )}
-
-          {tab === 'klavesy' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
-                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Del</kbd>
-                <p className="mt-2 text-xs">Smaže vybraný blok nebo hranu.</p>
-              </div>
-              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
-                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Ctrl+C</kbd> / <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Ctrl+V</kbd>
-                <p className="mt-2 text-xs">Kopírování a vložení bloků vč. vazeb.</p>
-              </div>
-              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
-                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">F2</kbd>
-                <p className="mt-2 text-xs">Okamžitě edituje text vybraného bloku.</p>
-              </div>
-              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
-                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Shift + Tažení</kbd>
-                <p className="mt-2 text-xs">Hromadný výběr pomocí obdélníku.</p>
-              </div>
-              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
-                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Ctrl + Klik</kbd>
-                <p className="mt-2 text-xs">Postupné přidávání bloků do výběru.</p>
-              </div>
-            </div>
-          )}
+          {tab === 'spojovani' && (<div><p>Zde je nápověda pro spojování...</p></div>)}
+          {tab === 'klavesy' && (<div><p>Klávesové zkratky...</p></div>)}
         </div>
       </div>
     </div>
@@ -205,6 +183,14 @@ export default function App() {
   const [externalSelectedIds, setExternalSelectedIds] = useState([]);
   const [nodeLineMap, setNodeLineMap] = useState({});
 
+  // --- RUNTIME STATE ---
+  const [runner, setRunner] = useState(null);
+  const [runtimeActiveNodeId, setRuntimeActiveNodeId] = useState(null);
+  const [runtimeVars, setRuntimeVars] = useState({});
+  const [runtimeOutput, setRuntimeOutput] = useState([]);
+  const [isPlaying, setIsPlaying] = useState(false);
+  
+  const playIntervalRef = useRef(null);
   const activeWindow = useRef('pseudocode'); 
 
   useEffect(() => {
@@ -298,6 +284,63 @@ export default function App() {
     setFlow(nextFlow);
   };
 
+  // --- RUNTIME CONTROLS ---
+  const stopDebugger = () => {
+      setIsPlaying(false);
+      if (playIntervalRef.current) clearInterval(playIntervalRef.current);
+      setRunner(null);
+      setRuntimeActiveNodeId(null);
+      setRuntimeVars({});
+      setRuntimeOutput([]);
+  };
+
+  const startDebugger = () => {
+      const { nodes, edges } = drawioToReactFlow(diagramXml);
+      const newRunner = new DiagramRunner(nodes, edges);
+      setRunner(newRunner);
+      setRuntimeVars({});
+      setRuntimeOutput([]);
+      setRuntimeActiveNodeId(newRunner.currentNodeId);
+      setIsPlaying(false);
+      return newRunner;
+  };
+
+  const doStep = () => {
+      let currentRunner = runner;
+      if (!currentRunner) { 
+          currentRunner = startDebugger(); 
+          if (!currentRunner) return; 
+      }
+      
+      const res = currentRunner.step();
+      setRuntimeVars(res.variables);
+      setRuntimeOutput(res.output);
+      setRuntimeActiveNodeId(res.nextNodeId || res.currentNodeId);
+
+      if (res.finished) {
+          setIsPlaying(false);
+          if (playIntervalRef.current) clearInterval(playIntervalRef.current);
+      }
+      setRunner(currentRunner);
+  };
+
+  const togglePlay = () => {
+      if (!runner) startDebugger();
+      if (isPlaying) {
+          setIsPlaying(false);
+          clearInterval(playIntervalRef.current);
+      } else {
+          setIsPlaying(true);
+          playIntervalRef.current = setInterval(() => {
+              doStep();
+          }, 800);
+      }
+  };
+
+  useEffect(() => {
+      return () => { if (playIntervalRef.current) clearInterval(playIntervalRef.current); }
+  }, []);
+
   const blocksToHighlight = [];
   const lines = pseudocode.split('\n');
   let currentBlock = null;
@@ -330,34 +373,56 @@ export default function App() {
             colorMode={colorMode}
             groupColoring={groupColoring}
             onSelectionChange={handleSelectionChange}
-            externalSelectedIds={externalSelectedIds}
+            externalSelectedIds={runtimeActiveNodeId ? [runtimeActiveNodeId] : externalSelectedIds}
+            activeRuntimeNodeId={runtimeActiveNodeId}
             onXmlChange={(xml) => {
               if (flow === 'diagram-to-code' || (flow === 'bidirectional' && activeWindow.current === 'drawio')) {
                 setDiagramXml(xml);
               }
             }}
-            readOnly={flow === 'code-to-diagram'}
+            onImportXml={(xml) => {
+                activeWindow.current = 'drawio'; 
+                setDiagramXml(xml);
+            }}
+            readOnly={flow === 'code-to-diagram' || isPlaying || runner !== null}
           />
           
           {showDebugger && (
             <div className="absolute top-20 left-4 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-30 flex flex-col overflow-hidden">
                 <div className="bg-gray-100 dark:bg-gray-900 px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
                     <span>Debugger</span>
-                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" title="Neaktivní"></div>
+                    <div className={`w-2 h-2 rounded-full ${runner && !runner.isFinished ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} title={runner && !runner.isFinished ? 'Běží' : 'Zastaveno'}></div>
                 </div>
-                <div className="p-3 text-sm text-gray-700 dark:text-gray-300 min-h-[100px]">
-                    <div className="flex justify-between font-mono text-xs border-b border-gray-200 dark:border-gray-700 pb-1 mb-2">
-                        <span className="font-semibold text-gray-500">Proměnná</span>
-                        <span className="font-semibold text-gray-500">Hodnota</span>
+                <div className="flex flex-col h-[180px] text-sm text-gray-700 dark:text-gray-300">
+                    <div className="flex-1 p-3 overflow-y-auto border-b border-gray-200 dark:border-gray-700">
+                        <div className="flex justify-between font-mono text-xs border-b border-gray-200 dark:border-gray-700 pb-1 mb-2">
+                            <span className="font-semibold text-gray-500">Proměnná</span>
+                            <span className="font-semibold text-gray-500">Hodnota</span>
+                        </div>
+                        {Object.keys(runtimeVars).length === 0 ? (
+                             <div className="flex justify-center items-center h-full text-xs text-gray-400 italic mt-6">
+                                Watch list je prázdný
+                             </div>
+                        ) : (
+                             Object.keys(runtimeVars).map(k => (
+                                 <div key={k} className="flex justify-between text-xs font-mono mb-1">
+                                     <span>{k}</span>
+                                     <span className="font-bold text-indigo-600 dark:text-indigo-400">{runtimeVars[k]}</span>
+                                 </div>
+                             ))
+                        )}
                     </div>
-                    <div className="flex justify-center items-center h-full text-xs text-gray-400 italic mt-6">
-                        Watch list je prázdný
+                    <div className="h-[70px] p-2 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+                         <div className="font-bold mb-1 text-[10px] text-gray-400 uppercase">Výstup</div>
+                         {runtimeOutput.map((o,i) => <div key={i} className="text-xs font-mono text-gray-800 dark:text-gray-200">{`> ${o}`}</div>)}
                     </div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-900 p-2 flex gap-3 justify-center border-t border-gray-200 dark:border-gray-700">
-                    <button className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors"><StepForward size={16} /></button>
-                    <button className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-green-600 dark:text-green-500 transition-colors"><Play size={16} /></button>
-                    <button className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-red-600 dark:text-red-500 transition-colors"><StopSquare size={16} /></button>
+                    <button onClick={doStep} disabled={isPlaying || (runner && runner.isFinished)} className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 disabled:opacity-30 transition-colors" title="Krok (Step)"><StepForward size={16} /></button>
+                    <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors ${isPlaying ? 'text-amber-500' : 'text-green-600 dark:text-green-500'}`} title={isPlaying ? "Pauza" : "Spustit"}>
+                        {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                    </button>
+                    <button onClick={stopDebugger} disabled={!runner} className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-red-600 dark:text-red-500 disabled:opacity-30 transition-colors" title="Zastavit (Stop)"><StopSquare size={16} /></button>
                 </div>
             </div>
           )}
@@ -386,9 +451,9 @@ export default function App() {
         >
           {parseErrors.length > 0 && (
             <div className="bg-red-50 dark:bg-red-900/30 border-b border-red-500 p-3 z-10">
-              <h4 className="text-red-700 dark:text-red-400 font-bold text-sm flex items-center gap-2 mb-1"><AlertCircle size={16} /> Upozornění</h4>
-              <ul className="text-xs text-red-600 dark:text-red-300 list-disc list-inside space-y-1">
-                {parseErrors.map((e, i) => <li key={i}>{e}</li>)}
+              <h4 className="text-red-700 dark:text-red-400 font-bold text-sm flex items-center gap-2 mb-2"><AlertCircle size={16} /> Upozornění</h4>
+              <ul className="text-xs text-red-600 dark:text-red-300 list-inside">
+                {parseErrors.map((e, i) => <ErrorItem key={i} error={e} />)}
               </ul>
             </div>
           )}
@@ -400,6 +465,7 @@ export default function App() {
             readOnly={flow === 'diagram-to-code'}
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}
             blocks={blocksToHighlight}
+            runtimeActiveLine={runtimeActiveNodeId !== null ? nodeLineMap[runtimeActiveNodeId] : null}
             highlightLines={selectedNodeIds.map(id => nodeLineMap[id]).filter(l => l !== undefined && l !== null)}
           />
         </div>
@@ -409,22 +475,8 @@ export default function App() {
 
   return (
     <div className="h-screen bg-gray-100 dark:bg-gray-950 flex flex-col font-sans overflow-hidden transition-colors" onClick={() => { setActiveDropdown(null); setSettingsDropdown(null); }}>
-
       {showTutorial && <TutorialDialog onClose={() => setShowTutorial(false)} />}
-
-      {dialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 max-w-sm w-full mx-4">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">{dialog.title}</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 leading-relaxed">{dialog.desc}</p>
-            <div className="flex justify-end gap-3">
-              <button onClick={(e) => { e.stopPropagation(); setDialog(null); }} className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors">Zrušit</button>
-              <button onClick={(e) => { e.stopPropagation(); dialog.onConfirm(); }} className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded shadow-sm transition-colors">Potvrdit</button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      
       <header className="bg-white dark:bg-gray-900 border-b border-gray-300 dark:border-gray-800 px-6 py-3 flex justify-between items-center shrink-0 shadow-sm z-10">
         <div className="flex items-baseline gap-3">
           <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">EduCode</h1>
@@ -461,10 +513,7 @@ export default function App() {
                           <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">Pravda / Nepravda alias</label>
                           <select
                             value={edgeStyle}
-                            onChange={(e) => {
-                              setEdgeStyle(e.target.value);
-                              localStorage.setItem('edgeStyle', e.target.value);
-                            }}
+                            onChange={(e) => { setEdgeStyle(e.target.value); localStorage.setItem('edgeStyle', e.target.value); }}
                             className="w-full text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none p-1.5 cursor-pointer text-gray-700 dark:text-gray-300 mb-4"
                           >
                             <option value="true-false">True / False</option>
@@ -483,7 +532,7 @@ export default function App() {
                                 Zbarvení skupin
                             </label>
                             <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                                <input type="checkbox" checked={showDebugger} onChange={e => { setShowDebugger(e.target.checked); localStorage.setItem('showDebugger', e.target.checked); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                                <input type="checkbox" checked={showDebugger} onChange={e => { setShowDebugger(e.target.checked); localStorage.setItem('showDebugger', e.target.checked); if(!e.target.checked) stopDebugger(); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
                                 Debugger (Watch list)
                             </label>
                           </div>
@@ -532,10 +581,7 @@ export default function App() {
                 </button>
                 
                 {panels.includes('python') ? (
-                  <button 
-                    className="p-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-sm text-gray-400 dark:text-gray-600 cursor-not-allowed"
-                    title="Převod do Pythonu je jednosměrný"
-                  >
+                  <button className="p-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-sm text-gray-400 dark:text-gray-600 cursor-not-allowed" title="Převod do Pythonu je jednosměrný">
                     {panels[0] === 'python' ? <ArrowLeft size={20} /> : <ArrowRight size={20} />}
                   </button>
                 ) : (

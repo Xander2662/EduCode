@@ -11,7 +11,7 @@ import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode
 const nodeTypes = { ACTION: ActionNode, IO: IONode, CONDITION: ConditionNode, START_END: StartEndNode, COMMENT: CommentNode, MERGE: MergeNode, GROUP_BG: GroupBgNode };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupColoring, onSelectionChange, externalSelectedIds, onPaneClick }) {
+function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, onPaneClick }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
@@ -29,8 +29,13 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
   const mappedNodes = useMemo(() => nodes.map(n => ({
         ...n,
         zIndex: 10,
-        data: { ...n.data, colorMode, externalHighlight: externalSelectedIds?.includes(n.id) }
-  })), [nodes, colorMode, externalSelectedIds]);
+        data: { 
+            ...n.data, 
+            colorMode, 
+            isRuntimeActive: n.id === activeRuntimeNodeId, 
+            externalHighlight: externalSelectedIds?.includes(n.id) 
+        }
+  })), [nodes, colorMode, externalSelectedIds, activeRuntimeNodeId]);
 
   const bgNodes = useMemo(() => calculateGroupNodes(nodes, edges, groupColoring), [nodes, edges, groupColoring]);
   const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
@@ -292,7 +297,10 @@ function EditorCanvas({ xml, onXmlChange, readOnly, edgeStyle, colorMode, groupC
 
   const handleImport = (e) => {
     const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader(); reader.onload = (ev) => onXmlChange(ev.target.result); reader.readAsText(file);
+    const reader = new FileReader(); reader.onload = (ev) => {
+        if(onImportXml) onImportXml(ev.target.result);
+        else onXmlChange(ev.target.result);
+    }; reader.readAsText(file);
   };
 
   const btnClass = `p-2 rounded transition-opacity disabled:opacity-25 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 ${colorMode ? "text-gray-700 dark:text-gray-300" : "text-gray-500 dark:text-gray-400"}`;
