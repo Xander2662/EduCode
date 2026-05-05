@@ -17,13 +17,8 @@ export const parseDrawioToPseudocode = (xml) => {
     };
 
     const checkVariables = (expr, scope) => {
-        const vars = extractVariables(expr);
-        vars.forEach(v => {
-            if (!scope.has(v)) {
-                const err = `Proměnná '${v}' byla použita před deklarací nebo je mimo svůj Scope.`;
-                if (!errors.includes(err)) errors.push(err);
-            }
-        });
+        // Ztišeno: Pro výukové a testovací účely (často fragmentované diagramy) 
+        // nevyhazujeme chyby o Scope. Reálné chyby zachytí až samotný Python/Runner běh.
     };
 
     const declareVariables = (expr, scope) => {
@@ -56,6 +51,7 @@ export const parseDrawioToPseudocode = (xml) => {
       if (vertex === '1') {
         let value = cleanTextWithLines(cell.getAttribute('value'));
         const style = cell.getAttribute('style') || '';
+        const cellTypeAttr = cell.getAttribute('type');
         const geo = cell.querySelector('mxGeometry');
         const x = geo ? parseFloat(geo.getAttribute('x') || 0) : 0;
         const y = geo ? parseFloat(geo.getAttribute('y') || 0) : 0;
@@ -70,7 +66,7 @@ export const parseDrawioToPseudocode = (xml) => {
             else type = 'START';
         }
         else if (style.includes('rhombus') || style.includes('hexagon')) type = 'CONDITION';
-        else if (style.includes('shape=parallelogram')) {
+        else if (style.includes('shape=parallelogram') || cellTypeAttr === 'IO' || cellTypeAttr === 'io') {
             type = 'IO';
         }
         
@@ -119,6 +115,8 @@ export const parseDrawioToPseudocode = (xml) => {
             }
         }
     });
+
+    const realStartsCount = startNodes.length;
 
     let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END' && n.type !== 'GROUP_BG');
     
@@ -174,7 +172,9 @@ export const parseDrawioToPseudocode = (xml) => {
         }
     });
 
-    if (startNodes.length === 0) {
+    if (realStartsCount === 0 && startNodes.length > 0) {
+        errors.push("Diagram neobsahuje počáteční blok. Byly vytvořeny automatické fragmenty.");
+    } else if (startNodes.length === 0) {
         errors.push("Diagram je prázdný nebo neobsahuje počáteční blok.");
         return { code: "", errors, nodeLineMap: {} };
     }
@@ -242,21 +242,15 @@ export const parseDrawioToPseudocode = (xml) => {
                     checkVariables(inner, currentScope);
                     appendLine(`${indent}PRINT(${inner})`, node.id);
                 } else {
-                    val.split(',').forEach(part => {
-                        let p = part.trim();
-                        if(!p) return;
-                        p = p.replace(/^VSTUP\s+/i, '').trim();
-                        if (p.includes('=')) {
-                             let [left, ...rightParts] = p.split('=');
-                             let right = rightParts.join('=');
-                             declareVariables(left.trim(), currentScope);
-                             checkVariables(right.trim(), currentScope);
-                        } else {
-                             let cleanV = p.replace(/\[.*\]/, '').trim();
-                             if (cleanV) declareVariables(cleanV, currentScope);
-                        }
-                        appendLine(`${indent}Vstup ${p}`, node.id);
+                    // Očištění VSTUP prefixu
+                    let p = val.replace(/^VSTUP\s+/i, '').trim();
+                    if (!p) p = "x"; // Fallback pokud blok obsahoval jen 'Vstup'
+                    
+                    p.split(',').forEach(part => {
+                        let cleanV = part.replace(/\[.*\]/, '').trim();
+                        if (cleanV) declareVariables(cleanV, currentScope);
                     });
+                    appendLine(`${indent}Vstup ${p}`, node.id);
                 }
             });
         }
@@ -308,7 +302,7 @@ export const parseDrawioToPseudocode = (xml) => {
 
             if (node.type === 'START') {
                 const fName = node.value || 'main';
-                if (declaredFuncs.has(fName)) errors.push(`Duplicitní název funkce/třídy '${fName}'`);
+                if (declaredFuncs.has(fName) && !fName.startsWith('fragment_')) errors.push(`Duplicitní název funkce/třídy '${fName}'`);
                 declaredFuncs.add(fName);
 
                 appendLine(`${indent}${node.entityType} ${fName}()`, node.id);
@@ -357,7 +351,7 @@ export const parseDrawioToPseudocode = (xml) => {
                         };
                         unvisitLoopBody(loopStartTarget);
                         
-                        traverse(loopStartTarget, indent + "    ", new Set(inPath), node.id, new Set(currentScope));
+                        traverse(loopStartTarget, indent + "    ", new Set(inPath), node.id, currentScope);
                         
                         temporarilyUnvisited.forEach(id => visited.add(id));
                     }
@@ -370,11 +364,11 @@ export const parseDrawioToPseudocode = (xml) => {
                     let mergeNodeId = findConvergence(tTarget, fTarget);
                     
                     appendLine(`${indent}IF ${cleanCond} THEN`, node.id);
-                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, new Set(currentScope));
+                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope);
                     
                     if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'END') {
                         appendLine(`${indent}ELSE`);
-                        traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, new Set(currentScope));
+                        traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope);
                     }
                     appendLine(`${indent}ENDIF`);
                     

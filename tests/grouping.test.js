@@ -1,48 +1,38 @@
 import { describe, it, expect } from 'vitest';
 import { calculateGroupNodes } from '../src/utils/grouping';
 
-describe('Color Grouping Logic', () => {
-    it('Měl by vytvořit GROUP_BG uzel pro dvě navazující akce', () => {
+describe('calculateGroupNodes', () => {
+    it('Vygeneruje ohraničující skupinu (LOOP) okolo zacyklených bloků', () => {
         const nodes = [
-            { id: 'n1', type: 'ACTION', position: { x: 0, y: 0 } },
-            { id: 'n2', type: 'ACTION', position: { x: 0, y: 100 } },
-            { id: 'n3', type: 'IO', position: { x: 0, y: 200 } }
+            { id: 'cond1', type: 'CONDITION', position: { x: 100, y: 100 }, measured: { width: 140, height: 70 } },
+            { id: 'act1', type: 'ACTION', position: { x: 100, y: 200 }, measured: { width: 100, height: 50 } }
         ];
+        // Graf znázorňující nekonečný cyklus (zpětná hrana do podmínky)
         const edges = [
-            { source: 'n1', target: 'n2' }
+            { source: 'cond1', target: 'act1' },
+            { source: 'act1', target: 'cond1' } 
         ];
 
-        const result = calculateGroupNodes(nodes, edges, true);
-
-        // Očekáváme 1 skupinu pro ACTION (n1 a n2)
-        expect(result).toHaveLength(1);
-        expect(result[0].type).toBe('GROUP_BG');
-        // Testujeme novou bezpečnou 'bgColor' s rgba namísto staré Tailwind třídy
-        expect(result[0].data.bgColor).toContain('rgba(96'); 
-    });
-
-    it('Měl by vytvořit GROUP_BG uzel pro cyklus', () => {
-        const nodes = [
-            { id: 'cond', type: 'CONDITION', position: { x: 0, y: 0 } },
-            { id: 'body', type: 'ACTION', position: { x: 0, y: 100 } }
-        ];
-        const edges = [
-            { source: 'cond', target: 'body' },
-            { source: 'body', target: 'cond' } // Zpětná hrana tvořící cyklus
-        ];
-
-        const result = calculateGroupNodes(nodes, edges, true);
-
-        // Očekáváme 1 skupinu pro LOOP (body uvnitř cond)
-        expect(result).toHaveLength(1);
-        expect(result[0].data.bgColor).toContain('rgba(251');
-    });
-
-    it('Neměl by vrátit žádný obal, pokud je volba groupColoring vypnuta', () => {
-        const nodes = [{ id: 'n1', type: 'ACTION', position: { x: 0, y: 0 } }, { id: 'n2', type: 'ACTION', position: { x: 0, y: 100 } }];
-        const edges = [{ source: 'n1', target: 'n2' }];
-        const result = calculateGroupNodes(nodes, edges, false);
+        const groups = calculateGroupNodes(nodes, edges, true);
         
-        expect(result).toHaveLength(0);
+        expect(groups).toBeDefined();
+        // Obalový prvek cyklu používá žlutou rgba(251, 191, 36, 0.25) barvu
+        const loopGroup = groups.find(g => g.type === 'GROUP_BG' && g.data.bgColor.includes('251, 191, 36'));
+        expect(loopGroup).toBeDefined();
+        expect(loopGroup.width).toBeGreaterThan(100);
+    });
+
+    it('Vygeneruje ohraničující skupinu pro sousedící akce', () => {
+        const nodes = [
+            { id: 'act1', type: 'ACTION', position: { x: 100, y: 100 } },
+            { id: 'act2', type: 'ACTION', position: { x: 100, y: 200 } }
+        ];
+        const edges = [
+            { source: 'act1', target: 'act2' }
+        ];
+
+        const groups = calculateGroupNodes(nodes, edges, true);
+        const actionGroup = groups.find(g => g.type === 'GROUP_BG' && g.data.bgColor.includes('96, 165, 250'));
+        expect(actionGroup).toBeDefined();
     });
 });

@@ -344,7 +344,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             else {
                 let isIo = false;
                 let text = line;
-                let ioType = 'input'; // Výchozí stav pro IO
+                let ioType = 'input'; 
 
                 if (upper.startsWith('PRINT(') && upper.endsWith(')')) {
                     isIo = true;
@@ -360,7 +360,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 else if (upper.startsWith('VSTUP ') || upper === 'VSTUP') {
                     isIo = true;
                     ioType = 'input';
-                    text = line.substring(6).trim(); // Odstraní 'Vstup ' z bloku
+                    text = line.replace(/^VSTUP\s*/i, '').trim();
+                    if (!text) text = 'Vstup';
                 }
                 else if (upper.startsWith('RETURN')) {
                     isIo = false;
@@ -399,7 +400,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         let style = STYLES[n.type] || n.type;
         if (n.mode) style += `mode=${n.mode};`;
         if (n.entityType) style += `entityType=${n.entityType};`;
-        if (n.ioType) style += `ioType=${n.ioType};`; // Přidáno parsování do XML
+        if (n.ioType) style += `ioType=${n.ioType};`; 
 
         const safeText = (n.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}" vertex="1" parent="1">\n`;
