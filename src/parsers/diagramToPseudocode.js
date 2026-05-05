@@ -97,58 +97,65 @@ export const parseDrawioToPseudocode = (xml) => {
     const startNodes = Object.values(nodes).filter(n => n.type === 'START');
     startNodes.sort((a, b) => a.x - b.x || a.y - b.y);
 
-    if (startNodes.length === 0) {
-        let roots = Object.values(nodes).filter(n => n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END');
-        let clusterId = 1;
-        let assigned = new Set();
-        
-        if (roots.length > 0) {
-            roots.forEach(r => {
-                const ghostId = `ghost_start_${clusterId}`;
-                nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: r.x, y: r.y - 100, next: [], prev: [], entityType: 'FUNCTION' };
-                edges.push({ source: ghostId, target: r.id, value: '' });
-                nodes[ghostId].next.push({ target: r.id, value: '' });
-                r.prev.push({ source: ghostId, value: '' });
-                startNodes.push(nodes[ghostId]);
-                clusterId++;
-                
-                let q = [r.id];
-                while(q.length > 0) {
-                    let curr = q.shift();
-                    if(!assigned.has(curr)) {
-                        assigned.add(curr);
-                        nodes[curr].next.forEach(e => q.push(e.target));
-                    }
-                }
-            });
-            errors.push(`Diagram neobsahuje počáteční blok. Bylo automaticky vygenerováno ${roots.length} funkcí (fragmentů) pro zachování vašich bloků.`);
+    let clusterId = 1;
+    let assigned = new Set();
+    
+    startNodes.forEach(sn => {
+        let q = [sn.id];
+        while(q.length > 0) {
+            let curr = q.shift();
+            if(!assigned.has(curr)) {
+                assigned.add(curr);
+                nodes[curr].next.forEach(e => q.push(e.target));
+            }
         }
+    });
 
-        Object.values(nodes).forEach(n => {
-            if (!assigned.has(n.id) && n.type !== 'COMMENT' && n.type !== 'START' && n.type !== 'END' && n.type !== 'MERGE') {
-                const ghostId = `ghost_start_${clusterId}`;
-                nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION' };
-                edges.push({ source: ghostId, target: n.id, value: '' });
-                nodes[ghostId].next.push({ target: n.id, value: '' });
-                n.prev.push({ source: ghostId, value: '' });
-                startNodes.push(nodes[ghostId]);
-                clusterId++;
-                
-                let q = [n.id];
-                while(q.length > 0) {
-                    let curr = q.shift();
-                    if(!assigned.has(curr)) {
-                        assigned.add(curr);
-                        nodes[curr].next.forEach(e => q.push(e.target));
-                    }
+    let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END' && n.type !== 'GROUP_BG');
+    
+    roots.forEach(r => {
+        const ghostId = `ghost_start_${clusterId}`;
+        nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: r.x, y: r.y - 100, next: [], prev: [], entityType: 'FUNCTION' };
+        edges.push({ source: ghostId, target: r.id, value: '' });
+        nodes[ghostId].next.push({ target: r.id, value: '' });
+        r.prev.push({ source: ghostId, value: '' });
+        startNodes.push(nodes[ghostId]);
+        clusterId++;
+        
+        let q = [r.id];
+        while(q.length > 0) {
+            let curr = q.shift();
+            if(!assigned.has(curr)) {
+                assigned.add(curr);
+                nodes[curr].next.forEach(e => q.push(e.target));
+            }
+        }
+    });
+
+    Object.values(nodes).forEach(n => {
+        if (!assigned.has(n.id) && n.type !== 'COMMENT' && n.type !== 'START' && n.type !== 'END' && n.type !== 'MERGE' && n.type !== 'GROUP_BG') {
+            const ghostId = `ghost_start_${clusterId}`;
+            nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION' };
+            edges.push({ source: ghostId, target: n.id, value: '' });
+            nodes[ghostId].next.push({ target: n.id, value: '' });
+            n.prev.push({ source: ghostId, value: '' });
+            startNodes.push(nodes[ghostId]);
+            clusterId++;
+            
+            let q = [n.id];
+            while(q.length > 0) {
+                let curr = q.shift();
+                if(!assigned.has(curr)) {
+                    assigned.add(curr);
+                    nodes[curr].next.forEach(e => q.push(e.target));
                 }
             }
-        });
-
-        if (startNodes.length === 0) {
-            errors.push("Diagram je prázdný nebo neobsahuje počáteční blok.");
-            return { code: "", errors, nodeLineMap: {} };
         }
+    });
+
+    if (startNodes.length === 0) {
+        errors.push("Diagram je prázdný nebo neobsahuje počáteční blok.");
+        return { code: "", errors, nodeLineMap: {} };
     }
 
     let codeLines = [];
@@ -216,13 +223,14 @@ export const parseDrawioToPseudocode = (xml) => {
                         let p = part.trim();
                         if(!p) return;
                         if(p.includes('=')) {
-                             let [left, right] = p.split('=');
+                             let [left, ...rightParts] = p.split('=');
+                             let right = rightParts.join('=');
                              declareVariables(left.trim(), currentScope);
                              checkVariables(right.trim(), currentScope);
                              appendLine(`${indent}${p}`, node.id);
                         } else {
                              let cleanV = p.replace(/^VSTUP\s+/i, '').trim();
-                             cleanV = cleanV.replace(/[^\w]/g, ''); // Vyčištění pro zbloudilé tečky "y."
+                             cleanV = cleanV.replace(/[^\w_]/g, ''); 
                              if (cleanV) {
                                  declareVariables(cleanV, currentScope);
                                  appendLine(`${indent}Vstup ${cleanV}`, node.id);
@@ -232,7 +240,7 @@ export const parseDrawioToPseudocode = (xml) => {
                 } else {
                     val.split(',').forEach(part => {
                         let p = part.trim().replace(/^VSTUP\s+/i, '');
-                        p = p.replace(/[^\w]/g, ''); // Vyčištění např. "y." -> "y"
+                        p = p.replace(/[^\w_]/g, ''); 
                         if(p) {
                             declareVariables(p, currentScope);
                             appendLine(`${indent}Vstup ${p}`, node.id);
@@ -381,7 +389,6 @@ export const parseDrawioToPseudocode = (xml) => {
             appendLine(endNodeVal, endNodeId);
         } else {
             appendLine("ENDFUNCTION");
-            errors.push(`Tip: Funkce '${start.value || 'main'}' neměla koncový blok. Byl automaticky vygenerován do kódu.`);
         }
         
         printCommentsBeforeY(Infinity, "");
@@ -396,4 +403,4 @@ export const parseDrawioToPseudocode = (xml) => {
   } catch (err) {
     return { code: "", errors: ["Kritická chyba parseru: " + err.message], nodeLineMap: {} };
   }
-};  
+};

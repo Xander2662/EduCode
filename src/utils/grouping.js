@@ -36,40 +36,53 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
         }
     });
 
-    // 2. Seskupení těl Cyklů (pouze větve, které se reálně vrací do podmínky)
+    // 2. Seskupení těl Cyklů (Vyhledávání cyklů pomocí DFS v orientovaném grafu)
     edges.forEach(e => {
-        const src = nodes.find(n => n.id === e.source);
         const tgt = nodes.find(n => n.id === e.target);
-        
-        // Zjistíme, zda jde o zpětnou hranu (cyklus)
-        if (src && tgt && tgt.position.y <= src.position.y && tgt.type === 'CONDITION') {
-            // BFS pozpátku: najdeme VŠECHNY uzly, které vedou do tohoto návratu
-            const lGrp = new Set([tgt.id, src.id]);
-            const queue = [src.id];
+        if (tgt && tgt.type === 'CONDITION') {
             
-            while(queue.length > 0) {
-                const curr = queue.shift();
-                edges.forEach(edge => {
-                    // Hledáme hrany jdoucí DO aktuálního uzlu (jdeme proti proudu)
-                    if (edge.target === curr) {
-                        const prevNode = edge.source;
-                        // Pokud uzel ještě nemáme a NENÍ to hlavní podmínka (zastávka)
-                        if (!lGrp.has(prevNode)) {
-                            lGrp.add(prevNode);
-                            queue.push(prevNode); 
-                        }
-                    }
-                });
+            // Ověříme, zda vede cesta z Cíle zpět do Zdroje (zda tvoří cyklus)
+            let isBackEdge = false;
+            let visitedDFS = new Set();
+            let stack = [tgt.id];
+            
+            while(stack.length > 0) {
+                let curr = stack.pop();
+                if (curr === e.source) { isBackEdge = true; break; }
+                if (!visitedDFS.has(curr)) {
+                    visitedDFS.add(curr);
+                    edges.filter(x => x.source === curr).forEach(x => stack.push(x.target));
+                }
             }
 
-            // Výpočet pro asymetrický padding (Zda se šipka vrací zleva nebo zprava)
-            const srcW = src.measured?.width || (src.type === 'CONDITION' ? 140 : (src.type === 'IO' ? 120 : 100));
-            const tgtW = tgt.measured?.width || 140;
-            const srcCenterX = src.position.x + srcW / 2;
-            const tgtCenterX = tgt.position.x + tgtW / 2;
-            const routeLeft = srcCenterX < tgtCenterX;
+            if (isBackEdge) {
+                // BFS pozpátku pro sesbírání všech uzlů uvnitř cyklu
+                const lGrp = new Set([tgt.id, e.source]);
+                const queue = [e.source];
+                
+                while(queue.length > 0) {
+                    const curr = queue.shift();
+                    edges.forEach(edge => {
+                        if (edge.target === curr) {
+                            const prevNode = edge.source;
+                            // tgt.id už v Setu je, takže hledání se přirozeně ZASTAVÍ na Podmínce
+                            if (!lGrp.has(prevNode)) {
+                                lGrp.add(prevNode);
+                                queue.push(prevNode); 
+                            }
+                        }
+                    });
+                }
 
-            groupDefs.push({ id: `bg-loop-${gId++}`, type: 'LOOP', nodes: Array.from(lGrp), routeLeft });
+                const src = nodes.find(n => n.id === e.source);
+                const srcW = src?.measured?.width || 100;
+                const tgtW = tgt.measured?.width || 140;
+                const srcCenterX = (src?.position.x || 0) + srcW / 2;
+                const tgtCenterX = tgt.position.x + tgtW / 2;
+                const routeLeft = srcCenterX < tgtCenterX;
+
+                groupDefs.push({ id: `bg-loop-${gId++}`, type: 'LOOP', nodes: Array.from(lGrp), routeLeft });
+            }
         }
     });
 
@@ -92,20 +105,18 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
          
          let padTop = 25, padBottom = 25, padLeft = 25, padRight = 25;
          
-         // Kaskádové pravidlo pro vrstvení a dynamický padding pro zpětnou šipku cyklu
          if (g.type === 'LOOP') {
              padTop = 40;
              padBottom = 40;
              if (g.routeLeft) {
-                 padLeft = 70; // Přidáno +45px doleva, aby šipka nečouhala ven
+                 padLeft = 70; 
                  padRight = 40;
              } else {
                  padLeft = 40;
-                 padRight = 70; // Přidáno +45px doprava
+                 padRight = 70; 
              }
          }
 
-         // Sytější inline barvy odolné proti smazání kompilátorem
          let bgColor = '', borderColor = '';
          if (g.type === 'ACTION') { bgColor = 'rgba(96, 165, 250, 0.25)'; borderColor = 'rgba(59, 130, 246, 0.6)'; }
          if (g.type === 'IO') { bgColor = 'rgba(52, 211, 153, 0.25)'; borderColor = 'rgba(16, 185, 129, 0.6)'; }

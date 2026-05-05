@@ -50,7 +50,7 @@ const ErrorItem = ({ error }) => {
     );
 };
 
-const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], runtimeActiveLine = null, onCursorChange }) => {
+const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], runtimeActiveLine = null, onCursorChange, onInteract }) => {
   const lineCount = value?.split('\n').length || 1;
   const textareaRef = useRef(null);
   const lineNumbersRef = useRef(null);
@@ -72,6 +72,7 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
   };
 
   const handleInteraction = (e) => {
+    if (onInteract) onInteract();
     if (onCursorChange) {
       const pos = e.target.selectionStart;
       const linesUntilCursor = value.substring(0, pos).split('\n').length - 1;
@@ -114,10 +115,10 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
         ref={textareaRef}
         className={`flex-1 w-full p-4 resize-none focus:outline-none font-mono text-sm bg-transparent leading-6 whitespace-pre relative z-10 ${hasErrors ? 'text-red-700 dark:text-red-300' : 'text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/50'}`}
         value={value}
-        onChange={onChange}
+        onChange={(e) => { if (onInteract) onInteract(); onChange(e); }}
         onScroll={handleScroll}
         onClick={handleInteraction}
-        onKeyUp={handleInteraction}
+        onKeyDown={handleInteraction}
         readOnly={readOnly}
         placeholder={placeholder}
       />
@@ -156,8 +157,7 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   
   const playIntervalRef = useRef(null);
-  
-  // Zásadní změna: Pamatuje si, kde se stala poslední změna. Zabraňuje smyčkám a řeší ztrátu focusu
+  const activeWindow = useRef('drawio'); 
   const lastEdited = useRef('drawio'); 
 
   useEffect(() => {
@@ -191,6 +191,7 @@ export default function App() {
     else setExternalSelectedIds([]);
   };
 
+  // SYNC 1: Diagram -> Pseudocode
   useEffect(() => {
     if (flow === 'code-to-diagram') return;
     if (flow === 'bidirectional' && lastEdited.current !== 'drawio') return;
@@ -198,7 +199,8 @@ export default function App() {
     const timeoutId = setTimeout(() => {
       try {
         const result = parseDrawioToPseudocode(diagramXml);
-        setPseudocode(result?.code || '');
+        // Bezpečný zápis do stavu zabraňující infinite-loopům
+        setPseudocode(prev => prev !== result?.code ? (result?.code || '') : prev);
         setParseErrors(result?.errors || []);
         setNodeLineMap(result?.nodeLineMap || {});
       } catch (err) {
@@ -208,6 +210,7 @@ export default function App() {
     return () => clearTimeout(timeoutId);
   }, [diagramXml, flow]);
 
+  // SYNC 2: Pseudocode -> Diagram
   useEffect(() => {
     if (flow === 'diagram-to-code') return;
     if (flow === 'bidirectional' && lastEdited.current !== 'pseudocode') return;
@@ -219,10 +222,24 @@ export default function App() {
             return;
         }
 
-        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode || '', diagramXml, edgeStyle);
-        if (diagramXml !== generatedXml) {
-            setDiagramXml(generatedXml);
-        }
+        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode, diagramXml, edgeStyle);
+        
+        // Zásadní čištění: Zbavení se textu "Vstup" generovaného pseudokódem, aby v bloku zůstala jen proměnná
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(generatedXml, "text/xml");
+        let changed = false;
+        doc.querySelectorAll('mxCell[style*="shape=parallelogram"]').forEach(cell => {
+            let val = cell.getAttribute('value') || '';
+            const originalVal = val;
+            val = val.replace(/(^|>)\s*Vstup\s+/gi, '$1');
+            if (val !== originalVal) {
+                cell.setAttribute('value', val);
+                changed = true;
+            }
+        });
+        const finalXml = changed ? new XMLSerializer().serializeToString(doc) : generatedXml;
+
+        setDiagramXml(prev => prev !== finalXml ? finalXml : prev);
         setParseErrors(genErrors || []);
       } catch (err) {
         setParseErrors([err.message]);
@@ -251,7 +268,6 @@ export default function App() {
     setFlow(nextFlow);
   };
 
-  // --- RUNTIME CONTROLS ---
   const stopDebugger = () => {
       setIsPlaying(false);
       if (playIntervalRef.current) clearInterval(playIntervalRef.current);
@@ -338,11 +354,13 @@ export default function App() {
             onSelectionChange={handleSelectionChange}
             externalSelectedIds={runtimeActiveNodeId ? [runtimeActiveNodeId] : externalSelectedIds}
             activeRuntimeNodeId={runtimeActiveNodeId}
+            onInteract={() => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; }}
             onXmlChange={(xml) => {
                lastEdited.current = 'drawio';
                setDiagramXml(xml);
             }}
             onImportXml={(xml) => {
+               activeWindow.current = 'drawio';
                lastEdited.current = 'drawio';
                setDiagramXml(xml);
             }}
@@ -352,7 +370,6 @@ export default function App() {
           {showDebugger && (
             <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden flex flex-col justify-between p-4">
                 <style>{`.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
-                {/* Přidáno mt-14, aby se okénko debuggeru vyhnulo export/import tlačítkům */}
                 <div className="flex justify-end w-full mt-14">
                     <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-xl w-64 pointer-events-auto flex flex-col overflow-hidden transition-all">
                        <div className="px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/50 flex justify-between items-center">
@@ -426,8 +443,10 @@ export default function App() {
             value={pseudocode}
             onChange={(e) => {
                lastEdited.current = 'pseudocode';
+               activeWindow.current = 'pseudocode';
                setPseudocode(e.target.value);
             }}
+            onInteract={() => { activeWindow.current = 'pseudocode'; lastEdited.current = 'pseudocode'; }}
             onCursorChange={handleCodeCursorChange}
             readOnly={flow === 'diagram-to-code'}
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}
@@ -457,7 +476,11 @@ export default function App() {
       <main className="flex-1 flex p-4 gap-4" style={{ overflow: 'hidden' }}>
         {panels.map((type, index) => (
           <React.Fragment key={type}>
-            <div className={`flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 relative transition-all ${activeDropdown === index || settingsDropdown === index ? 'z-50 overflow-visible' : 'z-10 overflow-hidden'}`}>
+            <div 
+              className={`flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 relative transition-all ${activeDropdown === index || settingsDropdown === index ? 'z-50 overflow-visible' : 'z-10 overflow-hidden'}`}
+              onPointerDownCapture={() => { activeWindow.current = type; }}
+              onKeyDownCapture={() => { activeWindow.current = type; }}
+            >
               <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 flex justify-between items-center relative z-50">
                 <div className="flex items-center gap-2">
                   <span>{PANEL_TYPES[type].title}</span>
