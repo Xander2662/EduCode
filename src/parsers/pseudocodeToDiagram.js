@@ -344,30 +344,32 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             else {
                 let isIo = false;
                 let text = line;
+                let ioType = 'input'; // Výchozí stav pro IO
 
                 if (upper.startsWith('PRINT(') && upper.endsWith(')')) {
-                    isIo = false;
+                    isIo = true;
+                    ioType = 'output';
                     let inner = line.substring(6, line.length - 1).trim();
-                    if (inner.startsWith('"') && inner.endsWith('"')) {
-                        text = inner;
-                    } else {
-                        isIo = true;
-                        text = line;
-                    }
+                    text = inner.startsWith('"') && inner.endsWith('"') ? inner : line;
                 }
                 else if (upper.includes('= INPUT()') || upper.includes('=INPUT()')) {
                     isIo = true;
+                    ioType = 'input';
                     text = line.replace(/\s*=\s*INPUT\(\)/i, '').trim();
                 }
-                else if (upper.startsWith('VSTUP ') || upper === 'VSTUP' || upper.startsWith('RETURN')) {
+                else if (upper.startsWith('VSTUP ') || upper === 'VSTUP') {
                     isIo = true;
-                    if (upper.startsWith('VSTUP ')) {
-                        text = line.substring(6).trim(); // Odstraní 'Vstup ' z bloku
-                    }
+                    ioType = 'input';
+                    text = line.substring(6).trim(); // Odstraní 'Vstup ' z bloku
+                }
+                else if (upper.startsWith('RETURN')) {
+                    isIo = false;
+                    text = line;
                 }
 
                 let xPos = getXPos();
-                const nodeId = addNode(text, isIo ? 'IO' : 'ACTION', xPos);
+                let nodeProps = isIo ? { ioType } : {};
+                const nodeId = addNode(text, isIo ? 'IO' : 'ACTION', xPos, nodeProps);
                 lineToNodeId[i] = nodeId;
 
                 pendingExits.forEach(exit => addEdge(exit.id, nodeId, exit.text, exit.handle, "t-top"));
@@ -397,6 +399,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         let style = STYLES[n.type] || n.type;
         if (n.mode) style += `mode=${n.mode};`;
         if (n.entityType) style += `entityType=${n.entityType};`;
+        if (n.ioType) style += `ioType=${n.ioType};`; // Přidáno parsování do XML
 
         const safeText = (n.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}" vertex="1" parent="1">\n`;

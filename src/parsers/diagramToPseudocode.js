@@ -76,8 +76,11 @@ export const parseDrawioToPseudocode = (xml) => {
         
         const entityMatch = style.match(/entityType=([^;]+)/);
         const entityType = entityMatch ? entityMatch[1] : 'FUNCTION';
+        
+        const ioMatch = style.match(/ioType=([^;]+)/);
+        const ioType = ioMatch ? ioMatch[1] : 'input';
 
-        nodes[id] = { id, value, type, x, y, next: [], prev: [], entityType };
+        nodes[id] = { id, value, type, x, y, next: [], prev: [], entityType, ioType };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
@@ -100,7 +103,6 @@ export const parseDrawioToPseudocode = (xml) => {
     let clusterId = 1;
     let assigned = new Set();
     
-    // 1. Značení všech uzlů, které bezpečně leží pod hlavními START bloky
     startNodes.forEach(sn => {
         let q = [sn.id];
         assigned.add(sn.id);
@@ -118,12 +120,11 @@ export const parseDrawioToPseudocode = (xml) => {
         }
     });
 
-    // 2. Vyhledání kořenů bez rodičů (nezapojené Akce/Vstupy nahoře) - Oprava infinite loops
     let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END' && n.type !== 'GROUP_BG');
     
     roots.forEach(r => {
         const ghostId = `ghost_start_${clusterId}`;
-        nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: r.x, y: r.y - 100, next: [], prev: [], entityType: 'FUNCTION' };
+        nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: r.x, y: r.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
         edges.push({ source: ghostId, target: r.id, value: '' });
         nodes[ghostId].next.push({ target: r.id, value: '' });
         r.prev.push({ source: ghostId, value: '' });
@@ -146,11 +147,10 @@ export const parseDrawioToPseudocode = (xml) => {
         }
     });
 
-    // 3. Totální sirotci (zacyklené bloky visící v prostoru bez kořene)
     Object.values(nodes).forEach(n => {
         if (!assigned.has(n.id) && n.type !== 'COMMENT' && n.type !== 'START' && n.type !== 'END' && n.type !== 'MERGE' && n.type !== 'GROUP_BG') {
             const ghostId = `ghost_start_${clusterId}`;
-            nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION' };
+            nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
             edges.push({ source: ghostId, target: n.id, value: '' });
             nodes[ghostId].next.push({ target: n.id, value: '' });
             n.prev.push({ source: ghostId, value: '' });
@@ -234,7 +234,7 @@ export const parseDrawioToPseudocode = (xml) => {
                 let val = line.trim();
                 if(!val) return;
                 
-                if (val.toUpperCase().startsWith('PRINT') || val.includes('"')) {
+                if (node.ioType === 'output' || val.toUpperCase().startsWith('PRINT') || val.includes('"')) {
                     let inner = val.toUpperCase().startsWith('PRINT') ? val.substring(5).trim() : val;
                     if (inner.startsWith('(') && inner.endsWith(')')) {
                         inner = inner.substring(1, inner.length - 1).trim();
@@ -242,26 +242,19 @@ export const parseDrawioToPseudocode = (xml) => {
                     checkVariables(inner, currentScope);
                     appendLine(`${indent}PRINT(${inner})`, node.id);
                 } else {
-                    // Vše ostatní v IO bloku bereme jako Vstup, aby se nám při převodu zpět nestala z bloku operace
                     val.split(',').forEach(part => {
                         let p = part.trim();
                         if(!p) return;
-                        
-                        // Odstraníme existující slovo Vstup (včetně mezer), abychom ho nezdvojili
                         p = p.replace(/^VSTUP\s+/i, '').trim();
-                        
                         if (p.includes('=')) {
                              let [left, ...rightParts] = p.split('=');
                              let right = rightParts.join('=');
                              declareVariables(left.trim(), currentScope);
                              checkVariables(right.trim(), currentScope);
                         } else {
-                             // Odstraníme závorky jen pro analýzu Scope (např. 'pole[i]' -> 'pole')
                              let cleanV = p.replace(/\[.*\]/, '').trim();
                              if (cleanV) declareVariables(cleanV, currentScope);
                         }
-                        
-                        // Zápis do kódu už probíhá s původními daty (p), takže nerozbijeme pole[i]
                         appendLine(`${indent}Vstup ${p}`, node.id);
                     });
                 }

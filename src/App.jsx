@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare } from 'lucide-react';
+import { ArrowRight, ArrowLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parsePseudocodeToPython } from './parsers/pseudocodeToPython';
@@ -173,10 +173,18 @@ export default function App() {
   const [runtimeActiveNodeId, setRuntimeActiveNodeId] = useState(null);
   const [runtimeVars, setRuntimeVars] = useState({});
   const [runtimeOutput, setRuntimeOutput] = useState([]);
-  const [isPlaying, setIsPlaying] = useState(false);
   
+  const [isPlayingState, setIsPlayingState] = useState(false);
+  const isPlayingRef = useRef(false);
+  const playTimeoutRef = useRef(null);
+  const breakpointsRef = useRef(breakpoints);
+
   const activeWindow = useRef('drawio'); 
   const lastEdited = useRef('drawio'); 
+
+  useEffect(() => {
+    breakpointsRef.current = breakpoints;
+  }, [breakpoints]);
 
   useEffect(() => {
     const seen = localStorage.getItem('eduCodeTutorialSeen');
@@ -190,6 +198,11 @@ export default function App() {
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
+
+  const setIsPlaying = useCallback((val) => {
+    setIsPlayingState(val);
+    isPlayingRef.current = val;
+  }, []);
 
   const handleSelectionChange = useCallback((ids) => {
     setSelectedNodeIds(prev => {
@@ -286,28 +299,30 @@ export default function App() {
     setFlow(nextFlow);
   };
 
-  const stopDebugger = () => {
-      setIsPlaying(false);
-      setRunner(null);
-      runnerRef.current = null;
-      setRuntimeActiveNodeId(null);
-      setRuntimeVars({});
-      setRuntimeOutput([]);
-  };
-
-  const startDebugger = () => {
+  const startDebugger = useCallback(() => {
       const { nodes, edges } = drawioToReactFlow(diagramXml);
       const newRunner = new DiagramRunner(nodes, edges);
       setRunner(newRunner);
       runnerRef.current = newRunner;
       setRuntimeVars({});
       setRuntimeOutput([]);
+      
       setRuntimeActiveNodeId(newRunner.currentNodeId);
       setIsPlaying(false);
       return newRunner;
-  };
+  }, [diagramXml, setIsPlaying]);
 
-  const doStep = useCallback(() => {
+  const stopDebugger = useCallback(() => {
+      setIsPlaying(false);
+      if (playTimeoutRef.current) clearTimeout(playTimeoutRef.current);
+      setRunner(null);
+      runnerRef.current = null;
+      setRuntimeActiveNodeId(null);
+      setRuntimeVars({});
+      setRuntimeOutput([]);
+  }, [setIsPlaying]);
+
+  const doStep = useCallback((isManualStep = false) => {
       let currentRunner = runnerRef.current;
       if (!currentRunner) { 
           currentRunner = startDebugger(); 
@@ -315,42 +330,41 @@ export default function App() {
       }
       
       const res = currentRunner.step();
-      setRuntimeVars(res.variables);
-      setRuntimeOutput(res.output);
+      setRuntimeVars({ ...res.variables });
+      setRuntimeOutput([...res.output]);
 
       if (res.finished) {
-          setRuntimeActiveNodeId(res.currentNodeId); // Ukazujeme poslední provedený krok
-          setIsPlaying(false);
-      } else if (breakpoints.includes(res.nextNodeId)) {
-          // Zastavíme se PŘED vykonáním breakpointu
-          setRuntimeActiveNodeId(res.nextNodeId); 
+          setRuntimeActiveNodeId(res.currentNodeId);
           setIsPlaying(false);
       } else {
-          // V běžném módu chceme vidět hodnoty "přímo na kroku", tzn. označíme to co právě proběhlo
-          setRuntimeActiveNodeId(res.currentNodeId);
+          setRuntimeActiveNodeId(res.nextNodeId); 
+
+          if (!isManualStep && breakpointsRef.current.includes(res.nextNodeId)) {
+              setIsPlaying(false);
+          }
       }
       
-      setRunner(currentRunner);
       runnerRef.current = currentRunner;
-  }, [breakpoints]);
+  }, [startDebugger, setIsPlaying]);
 
-  const togglePlay = () => {
-      if (!runnerRef.current) startDebugger();
-      setIsPlaying(prev => !prev);
-  };
-
-  // Bezpečný Autoplay zabraňující Stale Closures (zamrzání na vstupech a ve smyčkách)
-  useEffect(() => {
-      let timer;
-      if (isPlaying && runnerRef.current && !runnerRef.current.isFinished) {
-          timer = setTimeout(() => {
-              doStep();
-          }, 800);
-      } else if (isPlaying && runnerRef.current?.isFinished) {
-          setIsPlaying(false);
+  const executeAutoPlay = useCallback(() => {
+      if (!isPlayingRef.current) return;
+      doStep(false);
+      if (isPlayingRef.current) {
+          playTimeoutRef.current = setTimeout(executeAutoPlay, 800);
       }
-      return () => clearTimeout(timer);
-  }, [isPlaying, runtimeActiveNodeId, doStep]);
+  }, [doStep]);
+
+  const togglePlay = useCallback(() => {
+      if (!runnerRef.current) startDebugger();
+      if (isPlayingRef.current) {
+          setIsPlaying(false);
+          if (playTimeoutRef.current) clearTimeout(playTimeoutRef.current);
+      } else {
+          setIsPlaying(true);
+          playTimeoutRef.current = setTimeout(executeAutoPlay, 800);
+      }
+  }, [startDebugger, executeAutoPlay, setIsPlaying]);
 
   const blocksToHighlight = [];
   const lines = pseudocode.split('\n');
@@ -387,29 +401,28 @@ export default function App() {
             onInteract={() => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; }}
             onXmlChange={(xml) => { lastEdited.current = 'drawio'; setDiagramXml(xml); }}
             onImportXml={(xml) => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; setDiagramXml(xml); }}
-            readOnly={flow === 'code-to-diagram' || isPlaying || runner !== null}
+            readOnly={flow === 'code-to-diagram' || isPlayingState || runner !== null}
           />
           
           {showDebugger && (
             <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden flex flex-col justify-between p-4">
                 <style>{`.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
                 
-                {/* Přemístěná sekce "Paměť" vlevo nahoře hned pod nástroji */}
-                <div className="absolute top-16 left-4 pointer-events-auto">
-                    <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-xl w-64 flex flex-col overflow-hidden transition-all">
-                       <div className="px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/50 flex justify-between items-center">
+                <div className="absolute top-24 left-4 pointer-events-auto">
+                    <div className="bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700 w-64 flex flex-col transition-all">
+                       <div className="px-2 py-1.5 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center mb-2">
                           <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Paměť (Variables)</span>
                           <span className={`w-2 h-2 rounded-full ${runner && !runner.isFinished ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
                        </div>
-                       <div className="p-4 flex flex-col gap-2 max-h-[40vh] overflow-y-auto no-scrollbar">
+                       <div className="flex flex-col gap-2 max-h-[40vh] overflow-y-auto no-scrollbar px-1">
                           {Object.keys(runtimeVars).length === 0 ? (
-                              <div className="text-xs text-gray-400 italic text-center">Zatím prázdné</div>
+                              <div className="text-xs text-gray-400 italic text-center py-2">Zatím prázdné</div>
                           ) : (
                               Object.keys(runtimeVars).map(k => {
                                   const val = runtimeVars[k];
-                                  const vType = Array.isArray(val) ? 'arr' : typeof val === 'number' ? 'num' : typeof val === 'boolean' ? 'bool' : typeof val === 'string' ? 'str' : 'any';
+                                  const vType = Array.isArray(val) ? 'ARR' : typeof val === 'number' ? 'NUM' : typeof val === 'boolean' ? 'BOOL' : typeof val === 'string' ? 'STR' : 'ANY';
                                   return (
-                                    <div key={k} className="flex justify-between items-center text-sm font-mono bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 px-3 py-1.5 rounded-lg">
+                                    <div key={k} className="flex justify-between items-center text-sm font-mono bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 px-2 py-1 rounded">
                                         <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                                             {k}
                                             <span className="text-[9px] bg-gray-200 dark:bg-gray-700 px-1 rounded text-gray-500 uppercase leading-tight">{vType}</span>
@@ -425,7 +438,6 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* Spodní lišta s konzolí a ovládáním */}
                 <div className="absolute bottom-4 left-4 right-4 flex justify-between items-end pointer-events-none">
                     <div className="w-72 pointer-events-auto">
                       {runtimeOutput.length > 0 && (
@@ -439,11 +451,11 @@ export default function App() {
                     </div>
                     
                     <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2 pointer-events-auto flex gap-2">
-                        <button onClick={doStep} disabled={isPlaying || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all"><StepForward size={20} /></button>
-                        <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlaying ? 'bg-amber-100 text-amber-600 hover:bg-amber-200' : 'bg-green-100 text-green-600 hover:bg-green-200'}`}>
-                            {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+                        <button onClick={() => doStep(true)} disabled={isPlayingState || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all" title="Krokovat vpřed (ignoruje zarážky)"><StepForward size={20} /></button>
+                        <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlayingState ? 'bg-amber-100 text-amber-600 hover:bg-amber-200' : 'bg-green-100 text-green-600 hover:bg-green-200'}`} title={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
+                            {isPlayingState ? <Pause size={20} /> : <Play size={20} />}
                         </button>
-                        <button onClick={stopDebugger} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 disabled:opacity-30 transition-all"><StopSquare size={20} /></button>
+                        <button onClick={stopDebugger} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 disabled:opacity-30 transition-all" title="Ukončit debugger"><StopSquare size={20} /></button>
                     </div>
 
                     <div className="w-72" /> 
@@ -600,10 +612,6 @@ export default function App() {
 
             {index === 0 && panels.length === 2 && (
               <div className="w-12 flex flex-col items-center justify-center shrink-0 gap-4">
-                <button onClick={(e) => { e.stopPropagation(); setPanels([panels[1], panels[0]]); }} className="p-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-full hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm text-gray-600 dark:text-gray-300 transition-colors">
-                  <ArrowRightLeft size={18} />
-                </button>
-                
                 {panels.includes('python') ? (
                   <button className="p-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-sm text-gray-400 dark:text-gray-600 cursor-not-allowed" title="Převod do Pythonu je jednosměrný">
                     {panels[0] === 'python' ? <ArrowLeft size={20} /> : <ArrowRight size={20} />}

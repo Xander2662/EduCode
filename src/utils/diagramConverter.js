@@ -22,7 +22,6 @@ export const drawioToReactFlow = (xml) => {
       const y = geo ? parseFloat(geo.getAttribute('y') || 0) : 0;
 
       let type = 'ACTION';
-      // Oprava: MERGE musí mít přesně tyto vlastnosti, nesmí se to plést s prázdným START blokem!
       if (style.includes('ellipse') && style.includes('strokeColor=none') && style.includes('fillColor=none')) type = 'MERGE';
       else if (style.includes('ellipse')) type = 'START_END';
       else if (style.includes('rhombus') || style.includes('hexagon')) type = 'CONDITION';
@@ -31,13 +30,15 @@ export const drawioToReactFlow = (xml) => {
 
       const modeMatch = style.match(/mode=([^;]+)/);
       const entityMatch = style.match(/entityType=([^;]+)/);
+      const ioMatch = style.match(/ioType=([^;]+)/);
 
       nodes.push({ 
           id, type, position: { x, y }, 
           data: { 
               label: value,
               mode: modeMatch ? modeMatch[1] : undefined,
-              entityType: entityMatch ? entityMatch[1] : undefined
+              entityType: entityMatch ? entityMatch[1] : undefined,
+              ioType: ioMatch ? ioMatch[1] : (type === 'IO' ? 'input' : undefined)
           } 
       });
     } else if (edge === '1') {
@@ -87,6 +88,7 @@ export const reactFlowToDrawio = (nodes, edges) => {
     let style = STYLES[n.type] || n.type;
     if (n.data?.mode) style += `mode=${n.data.mode};`;
     if (n.data?.entityType) style += `entityType=${n.data.entityType};`;
+    if (n.data?.ioType) style += `ioType=${n.data.ioType};`;
 
     xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}" vertex="1" parent="1">\n`;
     xml += `      <mxGeometry x="${Math.round(n.position.x)}" y="${Math.round(n.position.y)}" width="${w}" height="${h}" as="geometry" />\n`;

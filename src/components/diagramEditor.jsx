@@ -8,16 +8,17 @@ import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
 import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode } from './diagram/CustomNodes';
 
-// HOC (Higher-Order Component) pro přidání klikatelné a hover breakpoint tečky k libovolnému uzlu
+// HOC (Zarážka uprostřed na levé straně od bloku)
 const withBreakpoint = (WrappedComponent) => {
   return (props) => {
-    const { data, id } = props;
+    const { data, id, type } = props;
     const isBp = data.isBreakpoint;
+    const leftOffset = type === 'ACTION' ? '-left-6' : '-left-4';
     
     return (
       <div className="relative group">
         <div
-          className={`absolute -top-3 -left-3 w-5 h-5 rounded-full cursor-pointer z-50 transition-all flex items-center justify-center ${isBp ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] scale-100' : 'bg-red-500/40 opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:!bg-red-500 hover:!opacity-100'}`}
+          className={`absolute top-1/2 ${leftOffset} -translate-y-1/2 w-4 h-4 rounded-full cursor-pointer z-50 transition-all flex items-center justify-center ${isBp ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] scale-100' : 'bg-red-500/40 opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:!bg-red-500 hover:!opacity-100'}`}
           onClick={(e) => { e.stopPropagation(); if (data.onBreakpointToggle) data.onBreakpointToggle(id); }}
         />
         <WrappedComponent {...props} />
@@ -26,7 +27,6 @@ const withBreakpoint = (WrappedComponent) => {
   };
 };
 
-// Obalujeme funkční bloky zarážkami. Merge/GroupBg atd nezahrnujeme
 const nodeTypes = { 
   ACTION: withBreakpoint(ActionNode), 
   IO: withBreakpoint(IONode), 
@@ -71,6 +71,21 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     if (onInteractRef.current) onInteractRef.current();
   }, []);
 
+  const updateNodeData = useCallback((nodeId, newData) => {
+      handleInteract();
+      setNodes((nds) => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, ...newData } } : n));
+  }, [setNodes, handleInteract]);
+
+  const updateNodeLabel = useCallback((nodeId, newLabel) => updateNodeData(nodeId, { label: newLabel }), [updateNodeData]);
+
+  const toggleIOType = useCallback((nodeId, currentType) => {
+      updateNodeData(nodeId, { ioType: currentType === 'input' ? 'output' : 'input' });
+  }, [updateNodeData]);
+
+  const toggleEntityType = useCallback((nodeId, currentType) => {
+      updateNodeData(nodeId, { entityType: currentType === 'FUNCTION' ? 'CLASS' : 'FUNCTION' });
+  }, [updateNodeData]);
+
   const mappedNodes = useMemo(() => nodes.map(n => ({
         ...n,
         zIndex: 10,
@@ -80,9 +95,11 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             isRuntimeActive: n.id === activeRuntimeNodeId, 
             externalHighlight: externalSelectedIds?.includes(n.id),
             isBreakpoint: breakpoints.includes(n.id),
-            onBreakpointToggle: onBreakpointToggle
+            onBreakpointToggle: onBreakpointToggle,
+            onToggleIOType: () => toggleIOType(n.id, n.data.ioType || 'input'),
+            onToggleEntityType: () => toggleEntityType(n.id, n.data.entityType || 'FUNCTION')
         }
-  })), [nodes, colorMode, externalSelectedIds, activeRuntimeNodeId, breakpoints, onBreakpointToggle]);
+  })), [nodes, colorMode, externalSelectedIds, activeRuntimeNodeId, breakpoints, onBreakpointToggle, toggleIOType, toggleEntityType]);
 
   const bgNodes = useMemo(() => calculateGroupNodes(nodes, edges, groupColoring), [nodes, edges, groupColoring]);
   const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
@@ -261,13 +278,6 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   };
 
   const handleDuplicate = () => { handleCopy(); setTimeout(handlePaste, 10); };
-  
-  const updateNodeData = useCallback((nodeId, newData) => {
-      handleInteract();
-      setNodes((nds) => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, ...newData } } : n));
-  }, [setNodes, handleInteract]);
-
-  const updateNodeLabel = useCallback((nodeId, newLabel) => updateNodeData(nodeId, { label: newLabel }), [updateNodeData]);
 
   const handleFilteredNodesChange = useCallback((changes) => {
     handleInteract();
@@ -388,7 +398,13 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         type, 
         position, 
         selected: false, 
-        data: { label, readOnly, ...(type === 'START_END' ? { mode: 'unassigned', entityType: 'FUNCTION' } : {}), onChange: (e) => updateNodeLabel(newId, e.target.value) } 
+        data: { 
+            label, 
+            readOnly, 
+            ...(type === 'START_END' ? { mode: 'unassigned', entityType: 'FUNCTION' } : {}), 
+            ...(type === 'IO' ? { ioType: 'input' } : {}),
+            onChange: (e) => updateNodeLabel(newId, e.target.value) 
+        } 
     }));
   };
 
@@ -402,7 +418,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const handleExportDrawioStandard = () => {
     setShowExportMenu(false);
     const doc = new DOMParser().parseFromString(xml, "text/xml");
-    doc.querySelectorAll('mxCell').forEach(c => ['type', 'mode', 'entityType', 'edgeStyle'].forEach(attr => c.removeAttribute(attr)));
+    doc.querySelectorAll('mxCell').forEach(c => ['type', 'mode', 'entityType', 'edgeStyle', 'ioType'].forEach(attr => c.removeAttribute(attr)));
     const a = document.createElement('a'); a.href = "data:text/xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(doc)); a.download = 'standard_diagram.drawio'; a.click();
   };
 
@@ -512,4 +528,4 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
 export default function DiagramEditor(props) {
   return <ReactFlowProvider><EditorCanvas {...props} /></ReactFlowProvider>;
-} 
+}

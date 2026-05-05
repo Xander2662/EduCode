@@ -37,11 +37,6 @@ export const StartEndNode = ({ id, data, selected }) => {
     setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, mode: newMode, label: newLabel } } : n));
   };
 
-  const toggleEntity = () => {
-    if(data.readOnly) return;
-    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, entityType: entityType === 'FUNCTION' ? 'CLASS' : 'FUNCTION' } } : n));
-  };
-
   const isGray = data.colorMode === false;
   const bgClass = isGray ? 'bg-gray-100 dark:bg-gray-800' : 'bg-fuchsia-50 dark:bg-fuchsia-900/30';
   const borderClass = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-fuchsia-300 dark:border-fuchsia-700';
@@ -69,7 +64,13 @@ export const StartEndNode = ({ id, data, selected }) => {
           <div className="flex justify-between items-center w-full mb-1 px-1">
             <span className={`text-[9px] font-bold w-12 text-left ${titleColor}`}>START</span>
             <div className={`custom-drag-handle w-8 h-1.5 cursor-grab rounded-full transition-colors ${isGray ? 'bg-gray-300 dark:bg-gray-600' : 'bg-fuchsia-200 dark:bg-fuchsia-800'}`} />
-            <span onClick={toggleEntity} className={`text-[9px] font-bold w-12 text-right cursor-pointer hover:opacity-75 ${titleColor} ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`}>{entityType}</span>
+            <button 
+              onClick={(e) => { e.stopPropagation(); if (data.onToggleEntityType) data.onToggleEntityType(); }} 
+              disabled={data.readOnly}
+              className={`text-[9px] font-bold px-1.5 py-0.5 rounded cursor-pointer hover:bg-fuchsia-100 dark:hover:bg-fuchsia-800/50 transition-colors ${titleColor} ${data.readOnly ? 'pointer-events-none opacity-50' : 'pointer-events-auto'}`}
+            >
+              {entityType}
+            </button>
           </div>
           <input defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono font-bold nodrag text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
         </div>
@@ -112,6 +113,7 @@ export const ActionNode = ({ id, data, selected }) => {
 
 export const IONode = ({ id, data, selected }) => {
   const isGray = data.colorMode === false;
+  const ioType = data.ioType || 'input';
 
   const fillClass = isGray ? 'fill-gray-50 dark:fill-gray-800' : 'fill-emerald-50 dark:fill-emerald-900/30';
   const defaultStroke = isGray ? 'text-gray-400 dark:text-gray-600' : 'text-emerald-400 dark:text-emerald-700';
@@ -133,18 +135,6 @@ export const IONode = ({ id, data, selected }) => {
       strokeW = "4";
   }
 
-  const handleUserChange = (e) => {
-      let val = e.target.value;
-      if (val.toLowerCase().startsWith('vstup ')) {
-          val = val.substring(6).trim();
-          e.target.value = val;
-      } else if (val.toLowerCase() === 'vstup') {
-          val = '';
-          e.target.value = val;
-      }
-      data.onChange(e);
-  };
-
   return (
     <div className={`relative min-w-[120px] min-h-[50px] flex flex-col transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
@@ -157,10 +147,16 @@ export const IONode = ({ id, data, selected }) => {
       
       <div className="pt-2 z-10"><DragHandle /></div>
       
-      {/* Opravené zarovnání: Bezpečně mimo zkosenou hranu vlevo (15% je 18px, použijeme 28px) */}
-      <span className="absolute top-[4px] left-[28px] text-[9px] font-bold text-emerald-700/60 dark:text-emerald-400/60 pointer-events-none select-none">VSTUP</span>
+      <button 
+        onClick={(e) => { e.stopPropagation(); if (data.onToggleIOType) data.onToggleIOType(); }}
+        disabled={data.readOnly}
+        className={`absolute top-[4px] right-[12px] text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors text-emerald-700/80 dark:text-emerald-400/80 cursor-pointer hover:bg-emerald-100/50 dark:hover:bg-emerald-800/50 ${data.readOnly ? 'pointer-events-none opacity-50' : 'pointer-events-auto'}`}
+        title="Kliknutím změníte typ (Vstup/Výstup)"
+      >
+        {ioType === 'input' ? 'VSTUP' : 'VÝSTUP'}
+      </button>
       
-      <textarea rows={1} defaultValue={data.label} onChange={handleUserChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 pt-1 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 pt-1 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
     </div>
   );
