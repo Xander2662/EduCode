@@ -168,23 +168,31 @@ export default function App() {
   const [nodeLineMap, setNodeLineMap] = useState({});
   const [breakpoints, setBreakpoints] = useState([]);
 
+  // Proměnné debuggeru
   const [runner, setRunner] = useState(null);
   const runnerRef = useRef(null); 
   const [runtimeActiveNodeId, setRuntimeActiveNodeId] = useState(null);
   const [runtimeVars, setRuntimeVars] = useState({});
   const [runtimeOutput, setRuntimeOutput] = useState([]);
   
+  const [debugSpeedPercent, setDebugSpeedPercent] = useState(100);
+  const [showDebugSettings, setShowDebugSettings] = useState(false);
+  const [inputRequest, setInputRequest] = useState(null);
+  
   const [isPlayingState, setIsPlayingState] = useState(false);
   const isPlayingRef = useRef(false);
   const playTimeoutRef = useRef(null);
   const breakpointsRef = useRef(breakpoints);
+  const debugSpeedRef = useRef(800);
 
   const activeWindow = useRef('drawio'); 
   const lastEdited = useRef('drawio'); 
 
-  useEffect(() => {
-    breakpointsRef.current = breakpoints;
-  }, [breakpoints]);
+  useEffect(() => { breakpointsRef.current = breakpoints; }, [breakpoints]);
+  
+  useEffect(() => { 
+      debugSpeedRef.current = debugSpeedPercent === 0 ? 3000 : Math.max(50, 800 * (100 / debugSpeedPercent)); 
+  }, [debugSpeedPercent]);
 
   useEffect(() => {
     const seen = localStorage.getItem('eduCodeTutorialSeen');
@@ -306,52 +314,66 @@ export default function App() {
       runnerRef.current = newRunner;
       setRuntimeVars({});
       setRuntimeOutput([]);
+      setInputRequest(null);
       
       setRuntimeActiveNodeId(newRunner.currentNodeId);
       setIsPlaying(false);
       return newRunner;
   }, [diagramXml, setIsPlaying]);
 
-  const stopDebugger = useCallback(() => {
+  const stopDebugger = useCallback((clearData = true) => {
       setIsPlaying(false);
       if (playTimeoutRef.current) clearTimeout(playTimeoutRef.current);
       setRunner(null);
       runnerRef.current = null;
       setRuntimeActiveNodeId(null);
-      setRuntimeVars({});
-      setRuntimeOutput([]);
+      setInputRequest(null);
+      if (clearData) {
+          setRuntimeVars({});
+          setRuntimeOutput([]);
+      }
   }, [setIsPlaying]);
 
-  const doStep = useCallback((isManualStep = false) => {
+  const doStep = useCallback((isManualStep = false, inputValue = undefined) => {
       let currentRunner = runnerRef.current;
       if (!currentRunner) { 
           currentRunner = startDebugger(); 
           if (!currentRunner) return; 
       }
       
-      const res = currentRunner.step();
+      const res = currentRunner.step(inputValue);
+
+      if (res.requiresInput) {
+          const wasPlaying = isPlayingRef.current;
+          setIsPlaying(false);
+          setInputRequest({ message: `Zadejte hodnotu proměnné: ${res.variableName || '?'}`, wasPlaying });
+          runnerRef.current = currentRunner;
+          return; 
+      }
+
       setRuntimeVars({ ...res.variables });
       setRuntimeOutput([...res.output]);
 
       if (res.finished) {
-          setRuntimeActiveNodeId(res.currentNodeId);
-          setIsPlaying(false);
+          // Instantní ukončení na konci běhu - odemkne diagram, Watcher zůstane zachován (clearData=false)
+          stopDebugger(false);
       } else {
           setRuntimeActiveNodeId(res.nextNodeId); 
-
           if (!isManualStep && breakpointsRef.current.includes(res.nextNodeId)) {
               setIsPlaying(false);
           }
       }
       
-      runnerRef.current = currentRunner;
-  }, [startDebugger, setIsPlaying]);
+      if (!res.finished) {
+          runnerRef.current = currentRunner;
+      }
+  }, [startDebugger, setIsPlaying, stopDebugger]);
 
   const executeAutoPlay = useCallback(() => {
       if (!isPlayingRef.current) return;
       doStep(false);
       if (isPlayingRef.current) {
-          playTimeoutRef.current = setTimeout(executeAutoPlay, 800);
+          playTimeoutRef.current = setTimeout(executeAutoPlay, debugSpeedRef.current);
       }
   }, [doStep]);
 
@@ -362,9 +384,26 @@ export default function App() {
           if (playTimeoutRef.current) clearTimeout(playTimeoutRef.current);
       } else {
           setIsPlaying(true);
-          playTimeoutRef.current = setTimeout(executeAutoPlay, 800);
+          playTimeoutRef.current = setTimeout(executeAutoPlay, debugSpeedRef.current);
       }
   }, [startDebugger, executeAutoPlay, setIsPlaying]);
+
+  const handleInputSubmit = (val) => {
+      const resumePlay = inputRequest.wasPlaying;
+      setInputRequest(null);
+      doStep(true, val);
+      
+      // Auto-resume pokud to předtím jelo samo
+      if (resumePlay && runnerRef.current && !runnerRef.current.isFinished) {
+          setIsPlaying(true);
+          playTimeoutRef.current = setTimeout(executeAutoPlay, debugSpeedRef.current);
+      }
+  };
+
+  const handleInputCancel = () => {
+      setInputRequest(null);
+      stopDebugger(true);
+  };
 
   const blocksToHighlight = [];
   const lines = pseudocode.split('\n');
@@ -401,31 +440,61 @@ export default function App() {
             onInteract={() => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; }}
             onXmlChange={(xml) => { lastEdited.current = 'drawio'; setDiagramXml(xml); }}
             onImportXml={(xml) => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; setDiagramXml(xml); }}
-            readOnly={flow === 'code-to-diagram' || isPlayingState || runner !== null}
+            readOnly={flow === 'code-to-diagram' || isPlayingState || runner !== null || inputRequest !== null}
           />
           
+          {inputRequest && (
+              <div className="absolute inset-0 z-[100] flex items-center justify-center bg-gray-900/40 dark:bg-black/60 backdrop-blur-sm">
+                  <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-80">
+                      <h3 className="font-bold text-lg mb-2 text-gray-800 dark:text-gray-100">Vyžadován vstup</h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{inputRequest.message}</p>
+                      <input 
+                          type="text" 
+                          autoFocus
+                          className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 mb-4 bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 outline-none focus:ring-2 focus:ring-indigo-500"
+                          onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleInputSubmit(e.target.value);
+                              if (e.key === 'Escape') handleInputCancel();
+                          }}
+                          id="debug-input-field"
+                      />
+                      <div className="flex justify-end gap-2">
+                          <button onClick={handleInputCancel} className="px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-sm text-gray-700 dark:text-gray-300 transition-colors">Zrušit běh</button>
+                          <button onClick={() => handleInputSubmit(document.getElementById('debug-input-field').value)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm transition-colors">Potvrdit</button>
+                      </div>
+                  </div>
+              </div>
+          )}
+
           {showDebugger && (
             <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden flex flex-col justify-between p-4">
                 <style>{`.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
                 
-                <div className="absolute top-24 left-4 pointer-events-auto">
+                <div className="absolute top-20 left-4 pointer-events-auto">
                     <div className="bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700 w-64 flex flex-col transition-all">
-                       <div className="px-2 py-1.5 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center mb-2">
-                          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Paměť (Variables)</span>
+                       <div className="flex justify-between items-center px-1 pb-2 mb-2 border-b border-gray-100 dark:border-gray-700">
+                          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Paměť (Variables)</span>
                           <span className={`w-2 h-2 rounded-full ${runner && !runner.isFinished ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
                        </div>
-                       <div className="flex flex-col gap-2 max-h-[40vh] overflow-y-auto no-scrollbar px-1">
+                       <div className="flex flex-col gap-1 max-h-[40vh] overflow-y-auto no-scrollbar px-1">
                           {Object.keys(runtimeVars).length === 0 ? (
                               <div className="text-xs text-gray-400 italic text-center py-2">Zatím prázdné</div>
                           ) : (
                               Object.keys(runtimeVars).map(k => {
                                   const val = runtimeVars[k];
-                                  const vType = Array.isArray(val) ? 'ARR' : typeof val === 'number' ? 'NUM' : typeof val === 'boolean' ? 'BOOL' : typeof val === 'string' ? 'STR' : 'ANY';
+                                  let vType = 'Any';
+                                  if (Array.isArray(val)) vType = 'Array';
+                                  else if (typeof val === 'number') vType = Number.isInteger(val) ? 'Int' : 'Float';
+                                  else if (typeof val === 'boolean') vType = 'Bool';
+                                  else if (typeof val === 'string') vType = 'String';
+
                                   return (
-                                    <div key={k} className="flex justify-between items-center text-sm font-mono bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 px-2 py-1 rounded">
-                                        <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
+                                    <div key={k} className="flex justify-between items-center text-sm font-mono hover:bg-gray-50 dark:hover:bg-gray-700/50 px-1 py-0.5 rounded transition-colors">
+                                        <span className="text-gray-700 dark:text-gray-300 flex items-baseline gap-1.5">
                                             {k}
-                                            <span className="text-[9px] bg-gray-200 dark:bg-gray-700 px-1 rounded text-gray-500 uppercase leading-tight">{vType}</span>
+                                            <span className="text-[10px] text-gray-400 dark:text-gray-500 italic font-normal tracking-wide">
+                                                {vType}
+                                            </span>
                                         </span>
                                         <span className="font-bold text-indigo-600 dark:text-indigo-400 max-w-[100px] truncate" title={val}>
                                             {typeof val === 'boolean' ? (val ? 'True' : 'False') : val}
@@ -450,12 +519,35 @@ export default function App() {
                       )}
                     </div>
                     
-                    <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2 pointer-events-auto flex gap-2">
-                        <button onClick={() => doStep(true)} disabled={isPlayingState || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all" title="Krokovat vpřed (ignoruje zarážky)"><StepForward size={20} /></button>
-                        <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlayingState ? 'bg-amber-100 text-amber-600 hover:bg-amber-200' : 'bg-green-100 text-green-600 hover:bg-green-200'}`} title={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
-                            {isPlayingState ? <Pause size={20} /> : <Play size={20} />}
-                        </button>
-                        <button onClick={stopDebugger} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 disabled:opacity-30 transition-all" title="Ukončit debugger"><StopSquare size={20} /></button>
+                    <div className="flex gap-2 items-end pointer-events-auto relative">
+                        <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2 flex gap-2">
+                            <button onClick={() => doStep(true)} disabled={isPlayingState || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all" title="Krokovat vpřed (ignoruje zarážky)"><StepForward size={20} /></button>
+                            <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlayingState ? 'bg-amber-100 text-amber-600 hover:bg-amber-200' : 'bg-green-100 text-green-600 hover:bg-green-200'}`} title={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
+                                {isPlayingState ? <Pause size={20} /> : <Play size={20} />}
+                            </button>
+                            <button onClick={() => stopDebugger(true)} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 disabled:opacity-30 transition-all" title="Ukončit debugger a vymazat data"><StopSquare size={20} /></button>
+                        </div>
+                        <div className="relative">
+                            <button onClick={(e) => { e.stopPropagation(); setShowDebugSettings(!showDebugSettings); }} className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" title="Nastavení rychlosti">
+                                <Settings size={18} />
+                            </button>
+                            {showDebugSettings && (
+                                <div className="absolute bottom-full right-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow p-3 w-48" onClick={e => e.stopPropagation()}>
+                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex justify-between">
+                                        Rychlost <span>{debugSpeedPercent}%</span>
+                                    </label>
+                                    <input 
+                                        type="range" 
+                                        min="0" 
+                                        max="500" 
+                                        step="10" 
+                                        value={debugSpeedPercent} 
+                                        onChange={(e) => setDebugSpeedPercent(Number(e.target.value))} 
+                                        className="w-full accent-indigo-600" 
+                                    />
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     <div className="w-72" /> 
@@ -506,7 +598,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen bg-gray-100 dark:bg-gray-950 flex flex-col font-sans overflow-hidden transition-colors" onClick={() => { setActiveDropdown(null); setSettingsDropdown(null); }}>
+    <div className="h-screen bg-gray-100 dark:bg-gray-950 flex flex-col font-sans overflow-hidden transition-colors" onClick={() => { setActiveDropdown(null); setSettingsDropdown(null); setShowDebugSettings(false); }}>
       {showTutorial && <TutorialDialog onClose={() => setShowTutorial(false)} />}
       
       <header className="bg-white dark:bg-gray-900 border-b border-gray-300 dark:border-gray-800 px-6 py-3 flex justify-between items-center shrink-0 shadow-sm z-10">

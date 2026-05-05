@@ -37,7 +37,7 @@ export class DiagramRunner {
         }
     }
 
-    step() {
+    step(inputValue = undefined) {
         if (this.isFinished || !this.currentNodeId) return { finished: true, variables: this.variables, output: this.output };
 
         const node = this.nodes.find(n => n.id === this.currentNodeId);
@@ -73,28 +73,46 @@ export class DiagramRunner {
         } 
         else if (node.type === 'IO') {
             let text = this.cleanText(node.data?.label || '').trim();
-            if (text.toUpperCase().startsWith('VSTUP')) {
-                text = text.substring(5).trim();
-            }
+            const ioType = node.data?.ioType || 'input';
 
-            if (text.toUpperCase().startsWith('PRINT')) {
-                let inner = text.substring(5).trim();
+            // Pokud blok definuje konkrétní hodnotu nebo výstup
+            if (ioType === 'output' || text.toUpperCase().startsWith('PRINT')) {
+                let inner = text.toUpperCase().startsWith('PRINT') ? text.substring(5).trim() : text;
                 if(inner.startsWith('(')) inner = inner.substring(1, inner.length-1);
                 const val = this.evalExpr(inner);
                 this.output.push(val !== undefined ? String(val) : inner);
-            } else if (text.includes('=')) {
+                if (outEdges.length > 0) nextNodeId = outEdges[0].target;
+            } 
+            else if (text.includes('=')) {
                 const [left, ...rightParts] = text.split('=');
                 const varName = left.trim();
                 const expr = rightParts.join('=').trim();
                 const val = this.evalExpr(expr);
                 if (val !== undefined) this.variables[varName] = val;
-            } else {
-                const varName = text || 'x';
-                let input = window.prompt(`Zadejte hodnotu pro proměnnou '${varName}':`, "0");
-                let parsed = parseFloat(input);
-                this.variables[varName] = isNaN(parsed) ? input : parsed;
+                if (outEdges.length > 0) nextNodeId = outEdges[0].target;
+            } 
+            else {
+                // Runner zjistí, že proměnná vyžaduje vstup, a buď ho přijme, nebo se zastaví
+                const varName = text.replace(/^VSTUP\s+/i, '').trim() || 'x';
+                
+                if (inputValue === undefined) {
+                    // Runner signalizuje UI, že potřebuje pauzu a input
+                    return {
+                        variables: { ...this.variables },
+                        output: [...this.output],
+                        currentNodeId: this.currentNodeId,
+                        nextNodeId: this.currentNodeId,
+                        finished: false,
+                        requiresInput: true,
+                        variableName: varName
+                    };
+                } else {
+                    // Runner dostal od UI input, uloží ho a pokračuje v běhu na další uzel
+                    let parsed = parseFloat(inputValue);
+                    this.variables[varName] = isNaN(parsed) ? inputValue : parsed;
+                    if (outEdges.length > 0) nextNodeId = outEdges[0].target;
+                }
             }
-            if (outEdges.length > 0) nextNodeId = outEdges[0].target;
         } 
         else if (node.type === 'CONDITION') {
             const cond = this.cleanText(node.data?.label || '');

@@ -74,12 +74,24 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
                     });
                 }
 
+                // Získání relativní trasy zpětné vazby pro dodatečný padding (kde povede šipka)
                 const src = nodes.find(n => n.id === e.source);
                 const srcW = src?.measured?.width || 100;
                 const tgtW = tgt.measured?.width || 140;
-                const srcCenterX = (src?.position.x || 0) + srcW / 2;
-                const tgtCenterX = tgt.position.x + tgtW / 2;
-                const routeLeft = srcCenterX < tgtCenterX;
+                
+                // Přidáno bezpečnější ověření pro zamezení případnému křížení na základě handle
+                const edgeOutHandle = e.sourceHandle || 's-bottom';
+                
+                let routeLeft = true;
+                if (edgeOutHandle === 's-right') {
+                    routeLeft = false;
+                } else if (edgeOutHandle === 's-left') {
+                    routeLeft = true;
+                } else {
+                     const srcCenterX = (src?.position.x || 0) + srcW / 2;
+                     const tgtCenterX = tgt.position.x + tgtW / 2;
+                     routeLeft = srcCenterX < tgtCenterX;
+                }
 
                 groupDefs.push({ id: `bg-loop-${gId++}`, type: 'LOOP', nodes: Array.from(lGrp), routeLeft });
             }
@@ -103,17 +115,18 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
          
          if (minX === Infinity) return null;
          
-         let padTop = 25, padBottom = 25, padLeft = 25, padRight = 25;
+         // Zvýšený padding, aby se hrany nahoře a dole nekřížily s okrajem
+         let padTop = 35, padBottom = 35, padLeft = 35, padRight = 35;
          
          if (g.type === 'LOOP') {
-             padTop = 40;
-             padBottom = 40;
+             padTop = 85;     // Extra místo nahoře pro vstup zpětné vazby
+             padBottom = 85;  // Extra místo dole
              if (g.routeLeft) {
-                 padLeft = 70; 
-                 padRight = 40;
+                 padLeft = 95;  // Místo pro zpětnou čáru vlevo
+                 padRight = 45;
              } else {
-                 padLeft = 40;
-                 padRight = 70; 
+                 padLeft = 45;
+                 padRight = 95; // Místo pro zpětnou čáru vpravo
              }
          }
 
