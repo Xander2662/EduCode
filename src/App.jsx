@@ -50,7 +50,7 @@ const ErrorItem = ({ error }) => {
     );
 };
 
-const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], runtimeActiveLine = null, onCursorChange, onInteract }) => {
+const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], runtimeActiveLine = null, onCursorChange, onInteract, breakpoints = [], nodeLineMap = {}, onBreakpointToggle }) => {
   const lineCount = value?.split('\n').length || 1;
   const textareaRef = useRef(null);
   const lineNumbersRef = useRef(null);
@@ -80,6 +80,11 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
     }
   };
 
+  const handleLineClick = (lineIndex) => {
+     const nodeId = Object.keys(nodeLineMap).find(id => nodeLineMap[id] === lineIndex);
+     if (nodeId && onBreakpointToggle) onBreakpointToggle(nodeId);
+  };
+
   return (
     <div className={`flex-1 flex overflow-hidden bg-white dark:bg-gray-900 relative transition-all duration-300 group ${hasErrors ? 'shadow-[0_0_20px_rgba(239,68,68,0.3)] border border-red-500 rounded-lg m-2' : ''}`}>
       <button onClick={handleCopy} className="absolute top-2 right-4 p-2 bg-white/90 dark:bg-gray-800/90 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-md shadow-sm border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 z-20">
@@ -87,7 +92,19 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
       </button>
 
       <div ref={lineNumbersRef} className="w-12 bg-gray-50 dark:bg-gray-800 text-gray-400 text-right pr-3 py-4 font-mono text-sm overflow-hidden select-none border-r border-gray-200 dark:border-gray-700 z-10">
-        {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => <div key={i} className="leading-6">{i + 1}</div>)}
+        {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => {
+          const nodeId = Object.keys(nodeLineMap).find(id => nodeLineMap[id] === i);
+          const isBp = nodeId && breakpoints.includes(nodeId);
+          const hasMapping = !!nodeId;
+
+          return (
+             <div key={i} className={`leading-6 relative group ${hasMapping ? 'cursor-pointer hover:text-gray-900 dark:hover:text-gray-100' : ''}`} onClick={() => handleLineClick(i)}>
+                {isBp && <div className="absolute left-2 top-2 w-2 h-2 bg-red-500 rounded-full shadow-[0_0_5px_rgba(239,68,68,0.8)]" />}
+                {!isBp && hasMapping && <div className="absolute left-2 top-2 w-2 h-2 bg-red-500/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />}
+                {i + 1}
+             </div>
+          );
+        })}
       </div>
 
       <div ref={highlightRef} className="absolute inset-y-0 right-0 left-12 overflow-hidden pointer-events-none z-0">
@@ -149,14 +166,15 @@ export default function App() {
   const [selectedNodeIds, setSelectedNodeIds] = useState([]);
   const [externalSelectedIds, setExternalSelectedIds] = useState([]);
   const [nodeLineMap, setNodeLineMap] = useState({});
+  const [breakpoints, setBreakpoints] = useState([]);
 
   const [runner, setRunner] = useState(null);
+  const runnerRef = useRef(null); 
   const [runtimeActiveNodeId, setRuntimeActiveNodeId] = useState(null);
   const [runtimeVars, setRuntimeVars] = useState({});
   const [runtimeOutput, setRuntimeOutput] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   
-  const playIntervalRef = useRef(null);
   const activeWindow = useRef('drawio'); 
   const lastEdited = useRef('drawio'); 
 
@@ -191,6 +209,10 @@ export default function App() {
     else setExternalSelectedIds([]);
   };
 
+  const toggleBreakpoint = useCallback((id) => {
+      setBreakpoints(prev => prev.includes(id) ? prev.filter(b => b !== id) : [...prev, id]);
+  }, []);
+
   // SYNC 1: Diagram -> Pseudocode
   useEffect(() => {
     if (flow === 'code-to-diagram') return;
@@ -199,7 +221,6 @@ export default function App() {
     const timeoutId = setTimeout(() => {
       try {
         const result = parseDrawioToPseudocode(diagramXml);
-        // Bezpečný zápis do stavu zabraňující infinite-loopům
         setPseudocode(prev => prev !== result?.code ? (result?.code || '') : prev);
         setParseErrors(result?.errors || []);
         setNodeLineMap(result?.nodeLineMap || {});
@@ -224,7 +245,6 @@ export default function App() {
 
         const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode, diagramXml, edgeStyle);
         
-        // Zásadní čištění: Zbavení se textu "Vstup" generovaného pseudokódem, aby v bloku zůstala jen proměnná
         const parser = new DOMParser();
         const doc = parser.parseFromString(generatedXml, "text/xml");
         let changed = false;
@@ -254,9 +274,7 @@ export default function App() {
         try {
           const pyCode = parsePseudocodeToPython(pseudocode || '');
           setPythonCode(pyCode);
-        } catch (err) {
-          console.error("Python parsing error:", err);
-        }
+        } catch (err) {}
       }, 400);
       return () => clearTimeout(timeoutId);
     }
@@ -270,8 +288,8 @@ export default function App() {
 
   const stopDebugger = () => {
       setIsPlaying(false);
-      if (playIntervalRef.current) clearInterval(playIntervalRef.current);
       setRunner(null);
+      runnerRef.current = null;
       setRuntimeActiveNodeId(null);
       setRuntimeVars({});
       setRuntimeOutput([]);
@@ -281,6 +299,7 @@ export default function App() {
       const { nodes, edges } = drawioToReactFlow(diagramXml);
       const newRunner = new DiagramRunner(nodes, edges);
       setRunner(newRunner);
+      runnerRef.current = newRunner;
       setRuntimeVars({});
       setRuntimeOutput([]);
       setRuntimeActiveNodeId(newRunner.currentNodeId);
@@ -288,8 +307,8 @@ export default function App() {
       return newRunner;
   };
 
-  const doStep = () => {
-      let currentRunner = runner;
+  const doStep = useCallback(() => {
+      let currentRunner = runnerRef.current;
       if (!currentRunner) { 
           currentRunner = startDebugger(); 
           if (!currentRunner) return; 
@@ -298,31 +317,40 @@ export default function App() {
       const res = currentRunner.step();
       setRuntimeVars(res.variables);
       setRuntimeOutput(res.output);
-      setRuntimeActiveNodeId(res.nextNodeId || res.currentNodeId);
 
       if (res.finished) {
+          setRuntimeActiveNodeId(res.currentNodeId); // Ukazujeme poslední provedený krok
           setIsPlaying(false);
-          if (playIntervalRef.current) clearInterval(playIntervalRef.current);
+      } else if (breakpoints.includes(res.nextNodeId)) {
+          // Zastavíme se PŘED vykonáním breakpointu
+          setRuntimeActiveNodeId(res.nextNodeId); 
+          setIsPlaying(false);
+      } else {
+          // V běžném módu chceme vidět hodnoty "přímo na kroku", tzn. označíme to co právě proběhlo
+          setRuntimeActiveNodeId(res.currentNodeId);
       }
+      
       setRunner(currentRunner);
-  };
+      runnerRef.current = currentRunner;
+  }, [breakpoints]);
 
   const togglePlay = () => {
-      if (!runner) startDebugger();
-      if (isPlaying) {
-          setIsPlaying(false);
-          clearInterval(playIntervalRef.current);
-      } else {
-          setIsPlaying(true);
-          playIntervalRef.current = setInterval(() => {
-              doStep();
-          }, 800);
-      }
+      if (!runnerRef.current) startDebugger();
+      setIsPlaying(prev => !prev);
   };
 
+  // Bezpečný Autoplay zabraňující Stale Closures (zamrzání na vstupech a ve smyčkách)
   useEffect(() => {
-      return () => { if (playIntervalRef.current) clearInterval(playIntervalRef.current); }
-  }, []);
+      let timer;
+      if (isPlaying && runnerRef.current && !runnerRef.current.isFinished) {
+          timer = setTimeout(() => {
+              doStep();
+          }, 800);
+      } else if (isPlaying && runnerRef.current?.isFinished) {
+          setIsPlaying(false);
+      }
+      return () => clearTimeout(timer);
+  }, [isPlaying, runtimeActiveNodeId, doStep]);
 
   const blocksToHighlight = [];
   const lines = pseudocode.split('\n');
@@ -354,44 +382,51 @@ export default function App() {
             onSelectionChange={handleSelectionChange}
             externalSelectedIds={runtimeActiveNodeId ? [runtimeActiveNodeId] : externalSelectedIds}
             activeRuntimeNodeId={runtimeActiveNodeId}
+            breakpoints={breakpoints}
+            onBreakpointToggle={toggleBreakpoint}
             onInteract={() => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; }}
-            onXmlChange={(xml) => {
-               lastEdited.current = 'drawio';
-               setDiagramXml(xml);
-            }}
-            onImportXml={(xml) => {
-               activeWindow.current = 'drawio';
-               lastEdited.current = 'drawio';
-               setDiagramXml(xml);
-            }}
+            onXmlChange={(xml) => { lastEdited.current = 'drawio'; setDiagramXml(xml); }}
+            onImportXml={(xml) => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; setDiagramXml(xml); }}
             readOnly={flow === 'code-to-diagram' || isPlaying || runner !== null}
           />
           
           {showDebugger && (
             <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden flex flex-col justify-between p-4">
                 <style>{`.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
-                <div className="flex justify-end w-full mt-14">
-                    <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-xl w-64 pointer-events-auto flex flex-col overflow-hidden transition-all">
+                
+                {/* Přemístěná sekce "Paměť" vlevo nahoře hned pod nástroji */}
+                <div className="absolute top-16 left-4 pointer-events-auto">
+                    <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-xl w-64 flex flex-col overflow-hidden transition-all">
                        <div className="px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/50 flex justify-between items-center">
-                          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Paměť</span>
+                          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Paměť (Variables)</span>
                           <span className={`w-2 h-2 rounded-full ${runner && !runner.isFinished ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
                        </div>
                        <div className="p-4 flex flex-col gap-2 max-h-[40vh] overflow-y-auto no-scrollbar">
                           {Object.keys(runtimeVars).length === 0 ? (
                               <div className="text-xs text-gray-400 italic text-center">Zatím prázdné</div>
                           ) : (
-                              Object.keys(runtimeVars).map(k => (
-                                  <div key={k} className="flex justify-between items-center text-sm font-mono bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 px-3 py-1.5 rounded-lg">
-                                      <span className="text-gray-600 dark:text-gray-400">{k}</span>
-                                      <span className="font-bold text-indigo-600 dark:text-indigo-400">{runtimeVars[k]}</span>
-                                  </div>
-                              ))
+                              Object.keys(runtimeVars).map(k => {
+                                  const val = runtimeVars[k];
+                                  const vType = Array.isArray(val) ? 'arr' : typeof val === 'number' ? 'num' : typeof val === 'boolean' ? 'bool' : typeof val === 'string' ? 'str' : 'any';
+                                  return (
+                                    <div key={k} className="flex justify-between items-center text-sm font-mono bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 px-3 py-1.5 rounded-lg">
+                                        <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
+                                            {k}
+                                            <span className="text-[9px] bg-gray-200 dark:bg-gray-700 px-1 rounded text-gray-500 uppercase leading-tight">{vType}</span>
+                                        </span>
+                                        <span className="font-bold text-indigo-600 dark:text-indigo-400 max-w-[100px] truncate" title={val}>
+                                            {typeof val === 'boolean' ? (val ? 'True' : 'False') : val}
+                                        </span>
+                                    </div>
+                                  );
+                              })
                           )}
                        </div>
                     </div>
                 </div>
 
-                <div className="flex justify-between items-end w-full pointer-events-none mb-2">
+                {/* Spodní lišta s konzolí a ovládáním */}
+                <div className="absolute bottom-4 left-4 right-4 flex justify-between items-end pointer-events-none">
                     <div className="w-72 pointer-events-auto">
                       {runtimeOutput.length > 0 && (
                         <div className="bg-gray-900/95 backdrop-blur-md border border-gray-700 rounded-2xl shadow-xl p-4 w-full">
@@ -441,13 +476,12 @@ export default function App() {
 
           <LineNumberedTextarea
             value={pseudocode}
-            onChange={(e) => {
-               lastEdited.current = 'pseudocode';
-               activeWindow.current = 'pseudocode';
-               setPseudocode(e.target.value);
-            }}
+            onChange={(e) => { lastEdited.current = 'pseudocode'; activeWindow.current = 'pseudocode'; setPseudocode(e.target.value); }}
             onInteract={() => { activeWindow.current = 'pseudocode'; lastEdited.current = 'pseudocode'; }}
             onCursorChange={handleCodeCursorChange}
+            breakpoints={breakpoints}
+            nodeLineMap={nodeLineMap}
+            onBreakpointToggle={toggleBreakpoint}
             readOnly={flow === 'diagram-to-code'}
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}
             blocks={blocksToHighlight}

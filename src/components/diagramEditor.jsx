@@ -8,27 +8,68 @@ import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
 import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode } from './diagram/CustomNodes';
 
-const nodeTypes = { ACTION: ActionNode, IO: IONode, CONDITION: ConditionNode, START_END: StartEndNode, COMMENT: CommentNode, MERGE: MergeNode, GROUP_BG: GroupBgNode };
+// HOC (Higher-Order Component) pro přidání klikatelné a hover breakpoint tečky k libovolnému uzlu
+const withBreakpoint = (WrappedComponent) => {
+  return (props) => {
+    const { data, id } = props;
+    const isBp = data.isBreakpoint;
+    
+    return (
+      <div className="relative group">
+        <div
+          className={`absolute -top-3 -left-3 w-5 h-5 rounded-full cursor-pointer z-50 transition-all flex items-center justify-center ${isBp ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] scale-100' : 'bg-red-500/40 opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:!bg-red-500 hover:!opacity-100'}`}
+          onClick={(e) => { e.stopPropagation(); if (data.onBreakpointToggle) data.onBreakpointToggle(id); }}
+        />
+        <WrappedComponent {...props} />
+      </div>
+    );
+  };
+};
+
+// Obalujeme funkční bloky zarážkami. Merge/GroupBg atd nezahrnujeme
+const nodeTypes = { 
+  ACTION: withBreakpoint(ActionNode), 
+  IO: withBreakpoint(IONode), 
+  CONDITION: withBreakpoint(ConditionNode), 
+  START_END: withBreakpoint(StartEndNode), 
+  COMMENT: CommentNode, 
+  MERGE: MergeNode, 
+  GROUP_BG: GroupBgNode 
+};
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, onPaneClick, onInteract }) {
+function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [contextMenu, setContextMenu] = useState(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getNode, getEdges } = useReactFlow();
   
   const hoveredEdgeRef = useRef(null);
   const lastXmlRef = useRef(''); 
+
+  const onXmlChangeRef = useRef(onXmlChange);
+  const onImportXmlRef = useRef(onImportXml);
+  const onPaneClickRef = useRef(onPaneClick);
+  const onInteractRef = useRef(onInteract);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+
+  useEffect(() => {
+    onXmlChangeRef.current = onXmlChange;
+    onImportXmlRef.current = onImportXml;
+    onPaneClickRef.current = onPaneClick;
+    onInteractRef.current = onInteract;
+    onSelectionChangeRef.current = onSelectionChange;
+  }, [onXmlChange, onImportXml, onPaneClick, onInteract, onSelectionChange]);
 
   const selectedNodes = nodes.filter(n => n.selected);
   const selectedEdges = edges.filter(e => e.selected);
 
   const handleInteract = useCallback(() => {
-    if (onInteract) onInteract();
-  }, [onInteract]);
+    if (onInteractRef.current) onInteractRef.current();
+  }, []);
 
   const mappedNodes = useMemo(() => nodes.map(n => ({
         ...n,
@@ -37,9 +78,11 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             ...n.data, 
             colorMode, 
             isRuntimeActive: n.id === activeRuntimeNodeId, 
-            externalHighlight: externalSelectedIds?.includes(n.id) 
+            externalHighlight: externalSelectedIds?.includes(n.id),
+            isBreakpoint: breakpoints.includes(n.id),
+            onBreakpointToggle: onBreakpointToggle
         }
-  })), [nodes, colorMode, externalSelectedIds, activeRuntimeNodeId]);
+  })), [nodes, colorMode, externalSelectedIds, activeRuntimeNodeId, breakpoints, onBreakpointToggle]);
 
   const bgNodes = useMemo(() => calculateGroupNodes(nodes, edges, groupColoring), [nodes, edges, groupColoring]);
   const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
@@ -83,7 +126,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         setNodes(nds => nds.map(n => ({ ...n, selected: false })));
         setEdges(eds => eds.map(edge => ({ ...edge, selected: false })));
         setContextMenu(null); setShowExportMenu(false);
-        if (onPaneClick) onPaneClick();
+        if (onPaneClickRef.current) onPaneClickRef.current();
         return;
       }
       
@@ -105,7 +148,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete, onPaneClick]);
+  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete]);
 
   const getHitEdge = (event, draggedNodes) => {
     const clientX = event.clientX || (event.touches && event.touches[0].clientX);
@@ -226,6 +269,22 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const updateNodeLabel = useCallback((nodeId, newLabel) => updateNodeData(nodeId, { label: newLabel }), [updateNodeData]);
 
+  const handleFilteredNodesChange = useCallback((changes) => {
+    handleInteract();
+    if (readOnly) return;
+    
+    const validChanges = changes.filter(c => {
+        if (c.type === 'dimensions' || c.type === 'position') {
+            return nodes.some(n => n.id === c.id);
+        }
+        return true;
+    });
+
+    if (validChanges.length > 0) {
+        onNodesChange(validChanges);
+    }
+  }, [handleInteract, readOnly, onNodesChange, nodes]);
+
   useEffect(() => {
     if (xml && xml !== lastXmlRef.current) {
       lastXmlRef.current = xml;
@@ -253,22 +312,25 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         const generatedXml = reactFlowToDrawio(exportNodes, edges);
         if (generatedXml !== lastXmlRef.current) { 
             lastXmlRef.current = generatedXml; 
-            onXmlChange(generatedXml); 
+            if (onXmlChangeRef.current) onXmlChangeRef.current(generatedXml); 
         }
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [nodes, edges, onXmlChange]);
+  }, [nodes, edges]);
 
   const isValidConnection = useCallback((connection) => {
-    const sourceNode = nodes.find(n => n.id === connection.source);
-    const targetNode = nodes.find(n => n.id === connection.target);
-    const sourceEdges = edges.filter(e => e.source === connection.source);
+    const sourceNode = getNode(connection.source);
+    const targetNode = getNode(connection.target);
+    const currentEdges = getEdges();
 
-    if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'start') return false;
-    if (sourceNode?.type === 'START_END' && sourceNode.data?.mode === 'end') return false;
-    if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'end' && connection.targetHandle !== 't-top') return false;
-    if (sourceNode?.type === 'CONDITION' ? sourceEdges.length >= 2 : sourceEdges.length >= 1) return false;
+    if (!sourceNode || !targetNode) return false;
+    const sourceEdges = currentEdges.filter(e => e.source === connection.source);
+
+    if (targetNode.type === 'START_END' && targetNode.data?.mode === 'start') return false;
+    if (sourceNode.type === 'START_END' && sourceNode.data?.mode === 'end') return false;
+    if (targetNode.type === 'START_END' && targetNode.data?.mode === 'end' && connection.targetHandle !== 't-top') return false;
+    if (sourceNode.type === 'CONDITION' ? sourceEdges.length >= 2 : sourceEdges.length >= 1) return false;
     
     if (targetNode.position.y <= sourceNode.position.y) {
         let hasCond = false, currentIds = [sourceNode.id], visited = new Set();
@@ -276,9 +338,9 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             let nextIds = [];
             for (let cid of currentIds) {
                 if (visited.has(cid)) continue; visited.add(cid);
-                const n = nodes.find(x => x.id === cid);
+                const n = getNode(cid);
                 if (n && n.type === 'CONDITION') { hasCond = true; break; }
-                nextIds.push(...edges.filter(e => e.target === cid).map(e => e.source));
+                nextIds.push(...currentEdges.filter(e => e.target === cid).map(e => e.source));
             }
             if (hasCond) break;
             currentIds = nextIds;
@@ -286,12 +348,12 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         if (!hasCond) return false;
     }
     return true;
-  }, [nodes, edges]);
+  }, [getNode, getEdges]);
 
   const onConnect = useCallback((params) => {
     handleInteract();
-    const sourceNode = nodes.find(n => n.id === params.source);
-    const targetNode = nodes.find(n => n.id === params.target);
+    const sourceNode = getNode(params.source);
+    const targetNode = getNode(params.target);
     
     if (sourceNode?.type === 'START_END' && sourceNode.data?.mode === 'unassigned') updateNodeData(params.source, { mode: 'start', label: 'main' });
     if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'unassigned') updateNodeData(params.target, { mode: 'end', label: 'ENDFUNCTION' });
@@ -302,23 +364,25 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     }
 
     setEdges(eds => {
-        // ZÁSADNÍ OPRAVA: Pokud má blok povolenou jen jednu cestu ven, automaticky starou smažeme! Zabrání se tím zmatení parseru.
         let filteredEds = eds;
         if (sourceNode && sourceNode.type !== 'CONDITION') {
             filteredEds = eds.filter(e => e.source !== params.source);
         }
         return addEdge({ ...params, type: 'customEdge', data, markerEnd: { type: MarkerType.ArrowClosed } }, filteredEds);
     });
-  }, [nodes, edgeStyle, updateNodeData, handleInteract, setEdges]);
+  }, [edgeStyle, updateNodeData, handleInteract, setEdges, getNode]);
 
   const addNodeAt = (type, label, clientPos = null) => {
     if (readOnly) return;
     handleInteract();
     const newId = 'node_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+    
+    const offset = Math.floor(Math.random() * 40) - 20;
     const position = clientPos ? screenToFlowPosition({ x: clientPos.mouseX, y: clientPos.mouseY }) : (() => {
         const bounds = document.querySelector('.react-flow').getBoundingClientRect();
-        return screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 });
+        return screenToFlowPosition({ x: bounds.left + bounds.width / 2 + offset, y: bounds.top + bounds.height / 2 + offset });
     })();
+
     setNodes((nds) => nds.concat({ 
         id: newId, 
         type, 
@@ -345,8 +409,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const handleImport = (e) => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader(); reader.onload = (ev) => {
-        if(onImportXml) onImportXml(ev.target.result);
-        else onXmlChange(ev.target.result);
+        if(onImportXmlRef.current) onImportXmlRef.current(ev.target.result);
+        else if(onXmlChangeRef.current) onXmlChangeRef.current(ev.target.result);
     }; reader.readAsText(file);
   };
 
@@ -423,14 +487,14 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       <div className="w-full h-full" onContextMenu={handlePaneContextMenu}>
         <ReactFlow 
           nodes={allNodes} edges={edges} 
-          onNodesChange={(changes) => { handleInteract(); if (!readOnly) onNodesChange(changes); }} 
+          onNodesChange={handleFilteredNodesChange} 
           onEdgesChange={(changes) => { handleInteract(); if (!readOnly) onEdgesChange(changes); }} 
           onConnect={(params) => { handleInteract(); if (!readOnly) onConnect(params); }} 
           onNodeDragStart={handleInteract}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
-          onPaneClick={() => { handleInteract(); setContextMenu(null); setShowExportMenu(false); if (onPaneClick) onPaneClick(); }}
-          onSelectionChange={({ nodes }) => { if (onSelectionChange) onSelectionChange(nodes.filter(n => n.type !== 'GROUP_BG').map(n => n.id)); }}
+          onPaneClick={() => { handleInteract(); setContextMenu(null); setShowExportMenu(false); if (onPaneClickRef.current) onPaneClickRef.current(); }}
+          onSelectionChange={({ nodes }) => { if (onSelectionChangeRef.current) onSelectionChangeRef.current(nodes.filter(n => n.type !== 'GROUP_BG').map(n => n.id)); }}
           isValidConnection={isValidConnection} 
           nodeTypes={nodeTypes} edgeTypes={edgeTypes} 
           defaultEdgeOptions={{ type: 'customEdge', markerEnd: { type: MarkerType.ArrowClosed } }}
@@ -448,4 +512,4 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
 export default function DiagramEditor(props) {
   return <ReactFlowProvider><EditorCanvas {...props} /></ReactFlowProvider>;
-}
+} 

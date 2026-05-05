@@ -236,36 +236,33 @@ export const parseDrawioToPseudocode = (xml) => {
                 
                 if (val.toUpperCase().startsWith('PRINT') || val.includes('"')) {
                     let inner = val.toUpperCase().startsWith('PRINT') ? val.substring(5).trim() : val;
-                    if (inner.startsWith('(')) inner = inner.substring(1, inner.length - 1).trim();
+                    if (inner.startsWith('(') && inner.endsWith(')')) {
+                        inner = inner.substring(1, inner.length - 1).trim();
+                    }
                     checkVariables(inner, currentScope);
                     appendLine(`${indent}PRINT(${inner})`, node.id);
-                } else if (val.includes('=')) {
+                } else {
+                    // Vše ostatní v IO bloku bereme jako Vstup, aby se nám při převodu zpět nestala z bloku operace
                     val.split(',').forEach(part => {
                         let p = part.trim();
                         if(!p) return;
-                        if(p.includes('=')) {
+                        
+                        // Odstraníme existující slovo Vstup (včetně mezer), abychom ho nezdvojili
+                        p = p.replace(/^VSTUP\s+/i, '').trim();
+                        
+                        if (p.includes('=')) {
                              let [left, ...rightParts] = p.split('=');
                              let right = rightParts.join('=');
                              declareVariables(left.trim(), currentScope);
                              checkVariables(right.trim(), currentScope);
-                             appendLine(`${indent}${p}`, node.id);
                         } else {
-                             let cleanV = p.replace(/^VSTUP\s+/i, '').trim();
-                             cleanV = cleanV.replace(/[^\w_]/g, ''); 
-                             if (cleanV) {
-                                 declareVariables(cleanV, currentScope);
-                                 appendLine(`${indent}Vstup ${cleanV}`, node.id);
-                             }
+                             // Odstraníme závorky jen pro analýzu Scope (např. 'pole[i]' -> 'pole')
+                             let cleanV = p.replace(/\[.*\]/, '').trim();
+                             if (cleanV) declareVariables(cleanV, currentScope);
                         }
-                    });
-                } else {
-                    val.split(',').forEach(part => {
-                        let p = part.trim().replace(/^VSTUP\s+/i, '');
-                        p = p.replace(/[^\w_]/g, ''); 
-                        if(p) {
-                            declareVariables(p, currentScope);
-                            appendLine(`${indent}Vstup ${p}`, node.id);
-                        }
+                        
+                        // Zápis do kódu už probíhá s původními daty (p), takže nerozbijeme pole[i]
+                        appendLine(`${indent}Vstup ${p}`, node.id);
                     });
                 }
             });
