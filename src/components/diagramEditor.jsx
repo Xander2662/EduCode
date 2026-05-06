@@ -8,41 +8,23 @@ import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
 import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode } from './diagram/CustomNodes';
 
-// HOC (Zarážka uprostřed na levé straně od bloku)
-const withBreakpoint = (WrappedComponent) => {
-  return (props) => {
-    const { data, id, type } = props;
-    const isBp = data.isBreakpoint;
-    const leftOffset = type === 'ACTION' ? '-left-6' : '-left-4';
-    
-    return (
-      <div className="relative group">
-        <div
-          className={`absolute top-1/2 ${leftOffset} -translate-y-1/2 w-4 h-4 rounded-full cursor-pointer z-50 transition-all flex items-center justify-center ${isBp ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] scale-100' : 'bg-red-500/40 opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:!bg-red-500 hover:!opacity-100'}`}
-          onClick={(e) => { e.stopPropagation(); if (data.onBreakpointToggle) data.onBreakpointToggle(id); }}
-        />
-        <WrappedComponent {...props} />
-      </div>
-    );
-  };
-};
-
 const nodeTypes = { 
-  ACTION: withBreakpoint(ActionNode), 
-  IO: withBreakpoint(IONode), 
-  CONDITION: withBreakpoint(ConditionNode), 
-  START_END: withBreakpoint(StartEndNode), 
+  ACTION: ActionNode, 
+  IO: IONode, 
+  CONDITION: ConditionNode, 
+  START_END: StartEndNode, 
   COMMENT: CommentNode, 
   MERGE: MergeNode, 
   GROUP_BG: GroupBgNode 
 };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract }) {
+function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [pendingImport, setPendingImport] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const { screenToFlowPosition, getNode, getEdges } = useReactFlow();
@@ -92,6 +74,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         data: { 
             ...n.data, 
             colorMode, 
+            showDebugger,
+            readOnly,
             isRuntimeActive: n.id === activeRuntimeNodeId, 
             externalHighlight: externalSelectedIds?.includes(n.id),
             isBreakpoint: breakpoints.includes(n.id),
@@ -99,7 +83,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             onToggleIOType: () => toggleIOType(n.id, n.data.ioType || 'input'),
             onToggleEntityType: () => toggleEntityType(n.id, n.data.entityType || 'FUNCTION')
         }
-  })), [nodes, colorMode, externalSelectedIds, activeRuntimeNodeId, breakpoints, onBreakpointToggle, toggleIOType, toggleEntityType]);
+  })), [nodes, colorMode, showDebugger, readOnly, externalSelectedIds, activeRuntimeNodeId, breakpoints, onBreakpointToggle, toggleIOType, toggleEntityType]);
 
   const bgNodes = useMemo(() => calculateGroupNodes(nodes, edges, groupColoring), [nodes, edges, groupColoring]);
   const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
@@ -422,12 +406,64 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     const a = document.createElement('a'); a.href = "data:text/xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(doc)); a.download = 'standard_diagram.drawio'; a.click();
   };
 
+  const executeImport = (mode) => {
+    const xmlData = pendingImport;
+    setPendingImport(null);
+    
+    if (mode === 'replace') {
+        if(onImportXmlRef.current) onImportXmlRef.current(xmlData);
+        else if(onXmlChangeRef.current) onXmlChangeRef.current(xmlData);
+    } else if (mode === 'add') {
+        const { nodes: newNodes, edges: newEdges } = drawioToReactFlow(xmlData);
+        
+        const idMap = {};
+        const mappedNodes = newNodes.map(n => {
+            const newId = 'node_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+            idMap[n.id] = newId;
+            return { 
+                ...n, 
+                id: newId, 
+                position: { x: n.position.x + 40, y: n.position.y + 40 }, // Offset
+                selected: true, 
+                data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(newId, e.target.value) } 
+            };
+        });
+        
+        const mappedEdges = newEdges.map(e => ({ 
+            ...e, 
+            id: 'edge_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
+            source: idMap[e.source] || e.source, 
+            target: idMap[e.target] || e.target, 
+            selected: true,
+            type: 'customEdge',
+            data: { ...e.data, readOnly, edgeStyle }, 
+            markerEnd: { type: MarkerType.ArrowClosed } 
+        }));
+
+        setNodes(prev => prev.map(n => ({...n, selected: false})).concat(mappedNodes));
+        setEdges(prev => prev.map(e => ({...e, selected: false})).concat(mappedEdges));
+        handleInteract();
+    }
+  };
+
   const handleImport = (e) => {
-    const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader(); reader.onload = (ev) => {
-        if(onImportXmlRef.current) onImportXmlRef.current(ev.target.result);
-        else if(onXmlChangeRef.current) onXmlChangeRef.current(ev.target.result);
-    }; reader.readAsText(file);
+    const file = e.target.files[0]; 
+    if (!file) return;
+    const reader = new FileReader(); 
+    reader.onload = (ev) => {
+        const content = ev.target.result;
+        const hasContent = nodes.filter(n => n.type !== 'GROUP_BG').length > 0;
+        
+        if (hasContent) {
+            setPendingImport(content);
+        } else {
+            if(onImportXmlRef.current) onImportXmlRef.current(content);
+            else if(onXmlChangeRef.current) onXmlChangeRef.current(content);
+        }
+    }; 
+    reader.readAsText(file);
+    // Programové vynulování pro možnost opakovaného importu stejného souboru (fixnutí zamrzání eventu)
+    e.target.value = ''; 
   };
 
   const btnClass = `p-2 rounded transition-opacity disabled:opacity-25 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 ${colorMode ? "text-gray-700 dark:text-gray-300" : "text-gray-500 dark:text-gray-400"}`;
@@ -437,15 +473,29 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       <style>{`.react-flow__edge.drop-target .react-flow__edge-path { stroke: #4f46e5 !important; stroke-width: 4px !important; filter: drop-shadow(0 0 6px rgba(79,70,229,0.5)); transition: all 0.2s ease; }`}</style>
       
       {deleteConfirm && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-900/20 backdrop-blur-sm rounded-lg">
-          <div className="bg-white p-4 rounded shadow-lg border border-gray-200">
-            <h3 className="font-bold mb-2">Smazat vybrané prvky?</h3>
+        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-gray-900/20 backdrop-blur-sm rounded-lg">
+          <div className="bg-white dark:bg-gray-800 p-4 rounded shadow-lg border border-gray-200 dark:border-gray-700">
+            <h3 className="font-bold mb-2 dark:text-gray-100">Smazat vybrané prvky?</h3>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleteConfirm(false)} className="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-sm">Zrušit</button>
-              <button onClick={executeDelete} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm">Smazat</button>
+              <button onClick={() => setDeleteConfirm(false)} className="px-3 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-sm dark:text-gray-300 transition-colors">Zrušit</button>
+              <button onClick={executeDelete} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm transition-colors">Smazat</button>
             </div>
           </div>
         </div>
+      )}
+
+      {pendingImport && (
+          <div className="absolute inset-0 z-[100] flex items-center justify-center bg-gray-900/40 dark:bg-black/60 backdrop-blur-sm">
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-80 text-center">
+                  <h3 className="font-bold text-lg mb-2 text-gray-800 dark:text-gray-100">Importovat diagram</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">Plátno již obsahuje diagram. Chcete jej nahradit, nebo přidat nový diagram k existujícímu?</p>
+                  <div className="flex flex-col gap-2">
+                      <button onClick={() => executeImport('replace')} className="w-full px-4 py-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-800/50 text-red-700 dark:text-red-300 font-bold rounded transition-colors">Nahradit stávající</button>
+                      <button onClick={() => executeImport('add')} className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded transition-colors">Přidat k současnému</button>
+                      <button onClick={() => setPendingImport(null)} className="w-full px-4 py-2 mt-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors">Zrušit</button>
+                  </div>
+              </div>
+          </div>
       )}
 
       {contextMenu && (

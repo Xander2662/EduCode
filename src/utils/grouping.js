@@ -5,7 +5,6 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
     let gId = 0;
     const visited = new Set();
     
-    // 1. Seskupení navazujících Akcí a Vstupů (IO)
     nodes.forEach(n => {
         if ((n.type === 'ACTION' || n.type === 'IO') && !visited.has(n.id)) {
             const grp = [];
@@ -36,12 +35,10 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
         }
     });
 
-    // 2. Seskupení těl Cyklů (Vyhledávání cyklů pomocí DFS v orientovaném grafu)
     edges.forEach(e => {
         const tgt = nodes.find(n => n.id === e.target);
         if (tgt && tgt.type === 'CONDITION') {
             
-            // Ověříme, zda vede cesta z Cíle zpět do Zdroje (zda tvoří cyklus)
             let isBackEdge = false;
             let visitedDFS = new Set();
             let stack = [tgt.id];
@@ -56,7 +53,6 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
             }
 
             if (isBackEdge) {
-                // BFS pozpátku pro sesbírání všech uzlů uvnitř cyklu
                 const lGrp = new Set([tgt.id, e.source]);
                 const queue = [e.source];
                 
@@ -65,7 +61,6 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
                     edges.forEach(edge => {
                         if (edge.target === curr) {
                             const prevNode = edge.source;
-                            // tgt.id už v Setu je, takže hledání se přirozeně ZASTAVÍ na Podmínce
                             if (!lGrp.has(prevNode)) {
                                 lGrp.add(prevNode);
                                 queue.push(prevNode); 
@@ -74,12 +69,10 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
                     });
                 }
 
-                // Získání relativní trasy zpětné vazby pro dodatečný padding (kde povede šipka)
                 const src = nodes.find(n => n.id === e.source);
-                const srcW = src?.measured?.width || 100;
-                const tgtW = tgt.measured?.width || 140;
+                const srcW = src?.measured?.width || src?.width || 100;
+                const tgtW = tgt.measured?.width || tgt.width || 140;
                 
-                // Přidáno bezpečnější ověření pro zamezení případnému křížení na základě handle
                 const edgeOutHandle = e.sourceHandle || 's-bottom';
                 
                 let routeLeft = true;
@@ -98,14 +91,13 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
         }
     });
 
-    // 3. Výpočet ohraničujících boxů (Bounding Box) pro vykreslení
     return groupDefs.map(g => {
          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
          g.nodes.forEach(nid => {
              const n = nodes.find(x => x.id === nid);
              if (n) {
-                 const w = n.measured?.width || (n.type === 'CONDITION' ? 140 : (n.type === 'IO' ? 120 : 100));
-                 const h = n.measured?.height || (n.type === 'CONDITION' ? 70 : 50);
+                 const w = n.measured?.width || n.width || (n.type === 'CONDITION' ? 140 : (n.type === 'IO' ? 120 : 100));
+                 const h = n.measured?.height || n.height || (n.type === 'CONDITION' ? 70 : 50);
                  minX = Math.min(minX, n.position.x);
                  minY = Math.min(minY, n.position.y);
                  maxX = Math.max(maxX, n.position.x + w);
@@ -115,18 +107,17 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
          
          if (minX === Infinity) return null;
          
-         // Zvýšený padding, aby se hrany nahoře a dole nekřížily s okrajem
          let padTop = 35, padBottom = 35, padLeft = 35, padRight = 35;
          
          if (g.type === 'LOOP') {
-             padTop = 85;     // Extra místo nahoře pro vstup zpětné vazby
-             padBottom = 85;  // Extra místo dole
+             padTop = 85;     
+             padBottom = 85;  
              if (g.routeLeft) {
-                 padLeft = 95;  // Místo pro zpětnou čáru vlevo
+                 padLeft = 95;  
                  padRight = 45;
              } else {
                  padLeft = 45;
-                 padRight = 95; // Místo pro zpětnou čáru vpravo
+                 padRight = 95; 
              }
          }
 

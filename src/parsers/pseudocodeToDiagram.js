@@ -346,21 +346,24 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 let text = line;
                 let ioType = 'input'; 
 
-                if (upper.startsWith('PRINT(') && upper.endsWith(')')) {
+                if (upper.startsWith('PRINT')) {
                     isIo = true;
                     ioType = 'output';
-                    let inner = line.substring(6, line.length - 1).trim();
-                    text = inner.startsWith('"') && inner.endsWith('"') ? inner : line;
+                    let inner = line.replace(/^PRINT\s*\(/i, '').replace(/\)$/, '').trim();
+                    if (upper.startsWith('PRINT ') && !upper.includes('(')) {
+                        inner = line.replace(/^PRINT\s+/i, '').trim();
+                    }
+                    text = inner;
                 }
                 else if (upper.includes('= INPUT()') || upper.includes('=INPUT()')) {
                     isIo = true;
                     ioType = 'input';
                     text = line.replace(/\s*=\s*INPUT\(\)/i, '').trim();
                 }
-                else if (upper.startsWith('VSTUP ') || upper === 'VSTUP') {
+                else if (upper.startsWith('VSTUP') || upper.startsWith('INPUT')) { 
                     isIo = true;
                     ioType = 'input';
-                    text = line.replace(/^VSTUP\s*/i, '').trim();
+                    text = line.replace(/^(?:VSTUP|INPUT)\s*/i, '').trim();
                     if (!text) text = 'Vstup';
                 }
                 else if (upper.startsWith('RETURN')) {

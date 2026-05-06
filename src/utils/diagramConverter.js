@@ -20,6 +20,8 @@ export const drawioToReactFlow = (xml) => {
       const geo = cell.querySelector('mxGeometry');
       const x = geo ? parseFloat(geo.getAttribute('x') || 0) : 0;
       const y = geo ? parseFloat(geo.getAttribute('y') || 0) : 0;
+      
+      // ÚMYSLNĚ odstraněno načítání width a height, React Flow si to dopočítá samo dle obsahu!
 
       let type = 'ACTION';
       if (style.includes('ellipse') && style.includes('strokeColor=none') && style.includes('fillColor=none')) type = 'MERGE';
@@ -33,7 +35,9 @@ export const drawioToReactFlow = (xml) => {
       const ioMatch = style.match(/ioType=([^;]+)/);
 
       nodes.push({ 
-          id, type, position: { x, y }, 
+          id, 
+          type, 
+          position: { x, y }, 
           data: { 
               label: value,
               mode: modeMatch ? modeMatch[1] : undefined,

@@ -50,7 +50,7 @@ const ErrorItem = ({ error }) => {
     );
 };
 
-const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], runtimeActiveLine = null, onCursorChange, onInteract, breakpoints = [], nodeLineMap = {}, onBreakpointToggle }) => {
+const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], runtimeActiveLine = null, onCursorChange, onInteract, breakpoints = [], nodeLineMap = {}, onBreakpointToggle, showDebugger }) => {
   const lineCount = value?.split('\n').length || 1;
   const textareaRef = useRef(null);
   const lineNumbersRef = useRef(null);
@@ -81,6 +81,7 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
   };
 
   const handleLineClick = (lineIndex) => {
+     if (!showDebugger) return;
      const nodeId = Object.keys(nodeLineMap).find(id => nodeLineMap[id] === lineIndex);
      if (nodeId && onBreakpointToggle) onBreakpointToggle(nodeId);
   };
@@ -95,7 +96,7 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
         {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => {
           const nodeId = Object.keys(nodeLineMap).find(id => nodeLineMap[id] === i);
           const isBp = nodeId && breakpoints.includes(nodeId);
-          const hasMapping = !!nodeId;
+          const hasMapping = !!nodeId && showDebugger;
 
           return (
              <div key={i} className={`leading-6 relative group ${hasMapping ? 'cursor-pointer hover:text-gray-900 dark:hover:text-gray-100' : ''}`} onClick={() => handleLineClick(i)}>
@@ -355,7 +356,6 @@ export default function App() {
       setRuntimeOutput([...res.output]);
 
       if (res.finished) {
-          // Instantní ukončení na konci běhu - odemkne diagram, Watcher zůstane zachován (clearData=false)
           stopDebugger(false);
       } else {
           setRuntimeActiveNodeId(res.nextNodeId); 
@@ -393,7 +393,6 @@ export default function App() {
       setInputRequest(null);
       doStep(true, val);
       
-      // Auto-resume pokud to předtím jelo samo
       if (resumePlay && runnerRef.current && !runnerRef.current.isFinished) {
           setIsPlaying(true);
           playTimeoutRef.current = setTimeout(executeAutoPlay, debugSpeedRef.current);
@@ -432,10 +431,11 @@ export default function App() {
             edgeStyle={edgeStyle}
             colorMode={colorMode}
             groupColoring={groupColoring}
+            showDebugger={showDebugger}
             onSelectionChange={handleSelectionChange}
             externalSelectedIds={runtimeActiveNodeId ? [runtimeActiveNodeId] : externalSelectedIds}
             activeRuntimeNodeId={runtimeActiveNodeId}
-            breakpoints={breakpoints}
+            breakpoints={showDebugger ? breakpoints : []}
             onBreakpointToggle={toggleBreakpoint}
             onInteract={() => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; }}
             onXmlChange={(xml) => { lastEdited.current = 'drawio'; setDiagramXml(xml); }}
@@ -471,7 +471,7 @@ export default function App() {
                 <style>{`.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
                 
                 <div className="absolute top-20 left-4 pointer-events-auto">
-                    <div className="bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700 w-64 flex flex-col transition-all">
+                    <div className="bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700 w-64 flex flex-col">
                        <div className="flex justify-between items-center px-1 pb-2 mb-2 border-b border-gray-100 dark:border-gray-700">
                           <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Paměť (Variables)</span>
                           <span className={`w-2 h-2 rounded-full ${runner && !runner.isFinished ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
@@ -583,7 +583,8 @@ export default function App() {
             onChange={(e) => { lastEdited.current = 'pseudocode'; activeWindow.current = 'pseudocode'; setPseudocode(e.target.value); }}
             onInteract={() => { activeWindow.current = 'pseudocode'; lastEdited.current = 'pseudocode'; }}
             onCursorChange={handleCodeCursorChange}
-            breakpoints={breakpoints}
+            showDebugger={showDebugger}
+            breakpoints={showDebugger ? breakpoints : []}
             nodeLineMap={nodeLineMap}
             onBreakpointToggle={toggleBreakpoint}
             readOnly={flow === 'diagram-to-code'}

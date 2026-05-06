@@ -61,13 +61,13 @@ export const StartEndNode = ({ id, data, selected }) => {
 
       {mode === 'start' && (
         <div className="w-full flex-1 flex flex-col px-2 relative pb-1">
-          <div className="flex justify-between items-center w-full mb-1 px-1">
-            <span className={`text-[9px] font-bold w-12 text-left ${titleColor}`}>START</span>
+          <div className="relative flex justify-center items-center w-full mb-1 h-4">
+            <span className={`absolute left-2 text-[9px] font-bold ${titleColor} pointer-events-none`}>START</span>
             <div className={`custom-drag-handle w-8 h-1.5 cursor-grab rounded-full transition-colors ${isGray ? 'bg-gray-300 dark:bg-gray-600' : 'bg-fuchsia-200 dark:bg-fuchsia-800'}`} />
             <button 
               onClick={(e) => { e.stopPropagation(); if (data.onToggleEntityType) data.onToggleEntityType(); }} 
               disabled={data.readOnly}
-              className={`text-[9px] font-bold px-1.5 py-0.5 rounded cursor-pointer hover:bg-fuchsia-100 dark:hover:bg-fuchsia-800/50 transition-colors ${titleColor} ${data.readOnly ? 'pointer-events-none opacity-50' : 'pointer-events-auto'}`}
+              className={`absolute right-1 text-[9px] font-bold px-1.5 py-0.5 rounded cursor-pointer hover:bg-fuchsia-100 dark:hover:bg-fuchsia-800/50 transition-colors ${titleColor} ${data.readOnly ? 'pointer-events-none opacity-50' : 'pointer-events-auto z-50'}`}
             >
               {entityType}
             </button>
@@ -147,14 +147,16 @@ export const IONode = ({ id, data, selected }) => {
       
       <div className="pt-2 z-10"><DragHandle /></div>
       
-      <button 
-        onClick={(e) => { e.stopPropagation(); if (data.onToggleIOType) data.onToggleIOType(); }}
-        disabled={data.readOnly}
-        className={`absolute top-[4px] right-[12px] text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors text-emerald-700/80 dark:text-emerald-400/80 cursor-pointer hover:bg-emerald-100/50 dark:hover:bg-emerald-800/50 ${data.readOnly ? 'pointer-events-none opacity-50' : 'pointer-events-auto'}`}
-        title="Kliknutím změníte typ (Vstup/Výstup)"
-      >
-        {ioType === 'input' ? 'VSTUP' : 'VÝSTUP'}
-      </button>
+      <div className="absolute top-[4px] right-[16px] z-50 flex items-center justify-center">
+        <button 
+          onClick={(e) => { e.stopPropagation(); if (data.onToggleIOType) data.onToggleIOType(); }}
+          disabled={data.readOnly}
+          className={`text-[9px] font-bold px-2 py-1 rounded transition-colors text-emerald-700/80 dark:text-emerald-400/80 cursor-pointer hover:bg-emerald-100/50 dark:hover:bg-emerald-800/50 ${data.readOnly ? 'pointer-events-none opacity-50' : 'pointer-events-auto'}`}
+          title="Kliknutím změníte typ (Vstup/Výstup)"
+        >
+          {ioType === 'input' ? 'VSTUP' : 'VÝSTUP'}
+        </button>
+      </div>
       
       <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 pt-1 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
