@@ -5,44 +5,27 @@
     <mxCell id="n1" value="checkAge" style="ellipse;whiteSpace=wrap;html=1;mode=start;entityType=FUNCTION;" vertex="1" parent="1">
       <mxGeometry x="360" y="40" width="100" height="40" as="geometry" />
     </mxCell>
-    <mxCell id="n2" value="Vstup vek, jmeno" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;" vertex="1" parent="1">
-      <mxGeometry x="360" y="160" width="120" height="60" as="geometry" />
+    <mxCell id="n2" value="vek, jmeno" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;ioType=input;" vertex="1" parent="1">
+      <mxGeometry x="360" y="140" width="120" height="50" as="geometry" />
     </mxCell>
     <mxCell id="n3" value="vek &gt;= 18" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-      <mxGeometry x="360" y="260" width="80" height="80" as="geometry" />
+      <mxGeometry x="360" y="240" width="120" height="60" as="geometry" />
     </mxCell>
-    <mxCell id="n4" value="status = &quot;dospely&quot;" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
-      <mxGeometry x="360" y="400" width="120" height="60" as="geometry" />
+    <mxCell id="n4" value="&quot;Dospely&quot;" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;ioType=output;" vertex="1" parent="1">
+      <mxGeometry x="240" y="340" width="120" height="50" as="geometry" />
     </mxCell>
-    <mxCell id="n5" value="status = &quot;dite&quot;" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
-      <mxGeometry x="600" y="500" width="120" height="60" as="geometry" />
+    <mxCell id="n5" value="&quot;Nezletily&quot;" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;ioType=output;" vertex="1" parent="1">
+      <mxGeometry x="480" y="340" width="120" height="50" as="geometry" />
     </mxCell>
-    <mxCell id="n7" value="PRINT(status)" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;" vertex="1" parent="1">
-      <mxGeometry x="360" y="600" width="120" height="60" as="geometry" />
+    <mxCell id="n6" value="ENDFUNCTION" style="ellipse;whiteSpace=wrap;html=1;mode=end;" vertex="1" parent="1">
+      <mxGeometry x="360" y="440" width="100" height="40" as="geometry" />
     </mxCell>
-    <mxCell id="n8" value="ENDFUNCTION" style="ellipse;whiteSpace=wrap;html=1;mode=end;" vertex="1" parent="1">
-      <mxGeometry x="360" y="700" width="100" height="40" as="geometry" />
-    </mxCell>
-    <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;sourceHandle=s-bottom;targetHandle=t-top;" edge="1" parent="1" source="n1" target="n2">
-      <mxGeometry relative="1" as="geometry" />
-    </mxCell>
-    <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;sourceHandle=s-bottom;targetHandle=t-top;" edge="1" parent="1" source="n2" target="n3">
-      <mxGeometry relative="1" as="geometry" />
-    </mxCell>
-    <mxCell id="e3" value="+" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;sourceHandle=s-bottom;targetHandle=t-top;" edge="1" parent="1" source="n3" target="n4">
-      <mxGeometry relative="1" as="geometry" />
-    </mxCell>
-    <mxCell id="e4" value="-" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;sourceHandle=s-right;targetHandle=t-top;" edge="1" parent="1" source="n3" target="n5">
-      <mxGeometry relative="1" as="geometry" />
-    </mxCell>
-    <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;sourceHandle=s-bottom;targetHandle=t-top;" edge="1" parent="1" source="n4" target="n7">
-      <mxGeometry relative="1" as="geometry" />
-    </mxCell>
-    <mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;sourceHandle=s-bottom;targetHandle=t-top;" edge="1" parent="1" source="n5" target="n7">
-      <mxGeometry relative="1" as="geometry" />
-    </mxCell>
-    <mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;sourceHandle=s-bottom;targetHandle=t-top;" edge="1" parent="1" source="n7" target="n8">
-      <mxGeometry relative="1" as="geometry" />
-    </mxCell>
+
+    <mxCell id="e1" source="n1" target="n2" edge="1" parent="1" style="sourceHandle=s-bottom;targetHandle=t-top;"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="e2" source="n2" target="n3" edge="1" parent="1" style="sourceHandle=s-bottom;targetHandle=t-top;"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="e3" value="Ano" source="n3" target="n4" edge="1" parent="1" style="sourceHandle=s-left;targetHandle=t-top;"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="e4" value="Ne" source="n3" target="n5" edge="1" parent="1" style="sourceHandle=s-right;targetHandle=t-top;"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="e5" source="n4" target="n6" edge="1" parent="1" style="sourceHandle=s-bottom;targetHandle=t-top;"><mxGeometry relative="1" as="geometry"/></mxCell>
+    <mxCell id="e6" source="n5" target="n6" edge="1" parent="1" style="sourceHandle=s-bottom;targetHandle=t-top;"><mxGeometry relative="1" as="geometry"/></mxCell>
   </root>
 </mxGraphModel>

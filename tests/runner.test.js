@@ -1,57 +1,60 @@
-import { describe, it, expect, vi } from 'vitest';
-import { parsePseudocodeToDrawio } from '../src/parsers/pseudocodeToDiagram';
-import { drawioToReactFlow } from '../src/utils/diagramConverter';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DiagramRunner } from '../src/utils/runner';
 
 describe('DiagramRunner - Execution Path', () => {
+    beforeEach(() => {
+        vi.stubGlobal('prompt', vi.fn().mockReturnValue('42'));
+        process.env.NODE_ENV = 'test'; // Zajišťuje, že se zavolá synchronní window.prompt místo React dialogu
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it('Měl by projít čistou sekvencí a akumulovat hodnotu v paměti', () => {
-        const code = `FUNCTION main()
-    x = 0
-    x = 1
-    x = x + x
-ENDFUNCTION`;
-        
-        const { xml } = parsePseudocodeToDrawio(code);
-        const { nodes, edges } = drawioToReactFlow(xml);
+        const nodes = [
+            { id: '1', type: 'START_END', data: { mode: 'start', label: 'main' } },
+            { id: '2', type: 'ACTION', data: { label: 'x = 10' } },
+            { id: '3', type: 'ACTION', data: { label: 'x = x + 5' } },
+            { id: '4', type: 'START_END', data: { mode: 'end', label: 'ENDFUNCTION' } }
+        ];
+        const edges = [
+            { source: '1', target: '2' },
+            { source: '2', target: '3' },
+            { source: '3', target: '4' }
+        ];
+
         const runner = new DiagramRunner(nodes, edges);
+        let res;
         
-        let steps = 0;
-        let lastVars = {};
+        res = runner.step(); // Start -> x = 10
+        res = runner.step(); // x = 10 -> x = x + 5
+        expect(res.variables['x']).toBe(10);
         
-        // Exekuce omezená pojistkou proti nekonečnému cyklu
-        while (!runner.isFinished && steps < 15) {
-            const res = runner.step();
-            lastVars = res.variables;
-            steps++;
-        }
+        res = runner.step(); // x = x + 5 -> End
+        expect(res.variables['x']).toBe(15);
         
-        expect(steps).toBeGreaterThan(0);
-        expect(lastVars['x']).toBe(2);
+        res = runner.step(); // End -> finished
+        expect(res.finished).toBe(true);
     });
 
     it('Měl by zpracovat VSTUP uzel přes window.prompt a uložit do paměti', () => {
         const nodes = [
-            { id: '1', type: 'START_END', data: { mode: 'start' } },
-            { id: '2', type: 'IO', data: { label: 'y' } }, // Hodnota očištěna parserem
-            { id: '3', type: 'START_END', data: { mode: 'end' } }
+            { id: '1', type: 'START_END', data: { mode: 'start', label: 'main' } },
+            { id: '2', type: 'IO', data: { label: 'y', ioType: 'input' } },
+            { id: '3', type: 'START_END', data: { mode: 'end', label: 'ENDFUNCTION' } }
         ];
         const edges = [
             { source: '1', target: '2' },
             { source: '2', target: '3' }
         ];
 
-        // Dočasné přesměrování (mock) systémového vstupu prohlížeče
-        const originalPrompt = window.prompt;
-        window.prompt = vi.fn(() => "42");
-
         const runner = new DiagramRunner(nodes, edges);
-        runner.step(); // START
-        runner.step(); // IO uzel -> vyžádání vstupu
-        const res = runner.step(); // END
-
-        expect(window.prompt).toHaveBeenCalled();
+        runner.step(); // Vyhodnotí start
+        
+        const res = runner.step(); // Vyhodnotí VSTUP
+        
+        expect(window.prompt).toHaveBeenCalledWith("Zadejte hodnotu pro proměnnou 'y':", "0");
         expect(res.variables['y']).toBe(42);
-
-        window.prompt = originalPrompt; // Úklid po testu
     });
 });
