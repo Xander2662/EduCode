@@ -5,6 +5,7 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
     let gId = 0;
     const visited = new Set();
     
+    // 1. Seskupení navazujících Akcí a Vstupů (IO)
     nodes.forEach(n => {
         if ((n.type === 'ACTION' || n.type === 'IO') && !visited.has(n.id)) {
             const grp = [];
@@ -35,6 +36,7 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
         }
     });
 
+    // 2. Seskupení těl Cyklů
     edges.forEach(e => {
         const tgt = nodes.find(n => n.id === e.target);
         if (tgt && tgt.type === 'CONDITION') {
@@ -53,21 +55,35 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
             }
 
             if (isBackEdge) {
-                const lGrp = new Set([tgt.id, e.source]);
-                const queue = [e.source];
-                
-                while(queue.length > 0) {
-                    const curr = queue.shift();
-                    edges.forEach(edge => {
-                        if (edge.target === curr) {
-                            const prevNode = edge.source;
-                            if (!lGrp.has(prevNode)) {
-                                lGrp.add(prevNode);
-                                queue.push(prevNode); 
-                            }
+                // Přesné nalezení těla cyklu: Vše, co je POD podmínkou (descendants) a zároveň NAD návratovým bodem (ancestors)
+                const descendants = new Set();
+                const qDesc = [tgt.id];
+                while(qDesc.length > 0) {
+                    const curr = qDesc.shift();
+                    edges.filter(x => x.source === curr).forEach(x => {
+                        if (!descendants.has(x.target)) {
+                            descendants.add(x.target);
+                            qDesc.push(x.target);
                         }
                     });
                 }
+
+                const ancestors = new Set();
+                const qAnc = [e.source];
+                while(qAnc.length > 0) {
+                    const curr = qAnc.shift();
+                    edges.filter(x => x.target === curr).forEach(x => {
+                        if (!ancestors.has(x.source)) {
+                            ancestors.add(x.source);
+                            qAnc.push(x.source);
+                        }
+                    });
+                }
+
+                const lGrp = new Set([tgt.id, e.source]);
+                descendants.forEach(d => {
+                    if (ancestors.has(d)) lGrp.add(d);
+                });
 
                 const src = nodes.find(n => n.id === e.source);
                 const srcW = src?.measured?.width || src?.width || 100;

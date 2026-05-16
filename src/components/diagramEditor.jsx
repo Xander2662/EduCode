@@ -19,7 +19,7 @@ const nodeTypes = {
 };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract }) {
+function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
@@ -88,28 +88,62 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const bgNodes = useMemo(() => calculateGroupNodes(nodes, edges, groupColoring), [nodes, edges, groupColoring]);
   const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
 
+  // Záchranný enforcer pro double False / double True
   useEffect(() => {
-    setNodes(nds => nds.map(n => n.type === 'CONDITION' && n.data.edgeStyle !== edgeStyle ? { ...n, data: { ...n.data, edgeStyle } } : n));
-    setEdges(eds => eds.map(e => {
-      const isPositive = ['+', 'Ano', 'Yes', 'True'].includes(e.data?.label);
-      const isNegative = ['-', 'Ne', 'No', 'False'].includes(e.data?.label);
-      if (isPositive || isNegative) {
-          const pref = edgeLabels[edgeStyle || 'true-false'];
-          const newLabel = isPositive ? pref.t : pref.f;
-          if (e.data?.label !== newLabel || e.data?.edgeStyle !== edgeStyle) return { ...e, data: { ...e.data, label: newLabel, edgeStyle } };
-      } else if (e.data?.edgeStyle !== edgeStyle) return { ...e, data: { ...e.data, edgeStyle } };
-      return e;
-    }));
-  }, [edgeStyle, setNodes, setEdges]);
+    setEdges(eds => {
+        let modified = false;
+        const newEds = eds.map(e => ({...e}));
+        
+        nodes.filter(n => n.type === 'CONDITION').forEach(cond => {
+            const outEdges = newEds.filter(e => e.source === cond.id);
+            if (outEdges.length === 2) {
+                const isPos1 = ['+', 'Ano', 'Yes', 'True'].includes(outEdges[0].data?.label);
+                const isPos2 = ['+', 'Ano', 'Yes', 'True'].includes(outEdges[1].data?.label);
+                const isNeg1 = ['-', 'Ne', 'No', 'False'].includes(outEdges[0].data?.label);
+                const isNeg2 = ['-', 'Ne', 'No', 'False'].includes(outEdges[1].data?.label);
+                
+                const pref = edgeLabels[edgeStyle || 'true-false'];
+                
+                if (isPos1 && isPos2) {
+                    outEdges[1].data = { ...outEdges[1].data, label: pref.f };
+                    modified = true;
+                } else if (isNeg1 && isNeg2) {
+                    outEdges[1].data = { ...outEdges[1].data, label: pref.t };
+                    modified = true;
+                }
+            }
+        });
+        
+        const formattedEds = newEds.map(e => {
+            const isPos = ['+', 'Ano', 'Yes', 'True'].includes(e.data?.label);
+            const isNeg = ['-', 'Ne', 'No', 'False'].includes(e.data?.label);
+            if (isPos || isNeg) {
+                const pref = edgeLabels[edgeStyle || 'true-false'];
+                const newLabel = isPos ? pref.t : pref.f;
+                if (e.data?.label !== newLabel || e.data?.edgeStyle !== edgeStyle) {
+                    modified = true;
+                    return { ...e, data: { ...e.data, label: newLabel, edgeStyle } };
+                }
+            } else if (e.data?.edgeStyle !== edgeStyle) {
+                modified = true;
+                return { ...e, data: { ...e.data, edgeStyle } };
+            }
+            return e;
+        });
+
+        return modified ? formattedEds : eds;
+    });
+  }, [edgeStyle, nodes, setEdges]);
 
   const executeDelete = useCallback(() => {
     handleInteract();
+    if(onLogAction) onLogAction('NODES_DELETED', { count: selectedNodes.length });
     const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
     const selectedEdgeIds = new Set(selectedEdges.map(e => e.id));
     setNodes(nds => nds.filter(n => !selectedNodeIds.has(n.id)));
     setEdges(eds => eds.filter(e => !selectedEdgeIds.has(e.id) && !selectedNodeIds.has(e.source) && !selectedNodeIds.has(e.target)));
     setDeleteConfirm(false);
-  }, [selectedNodes, selectedEdges, setNodes, setEdges, handleInteract]);
+  }, [selectedNodes, selectedEdges, setNodes, setEdges, handleInteract, onLogAction]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -217,6 +251,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         const targetEdge = edges.find(e => e.id === edgeId);
         
         if (targetEdge) {
+            if(onLogAction) onLogAction('DRAG_AND_DROP_ROUTING', { draggedCount: draggedNodes.length });
             draggedNodes.sort((a, b) => a.position.y - b.position.y);
             const firstNode = draggedNodes[0];
             const lastNode = draggedNodes[draggedNodes.length - 1];
@@ -238,18 +273,20 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             });
         }
     }
-  }, [edges, nodes, setEdges, edgeStyle, readOnly, handleInteract]);
+  }, [edges, nodes, setEdges, edgeStyle, readOnly, handleInteract, onLogAction]);
 
   const handleCopy = () => { 
     if (selectedNodes.length > 0) {
       const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
       setClipboard({ nodes: selectedNodes, edges: edges.filter(e => selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target)) });
+      if(onLogAction) onLogAction('NODES_COPIED', { count: selectedNodes.length });
     }
   };
 
   const handlePaste = () => {
     if (clipboard.nodes.length === 0) return;
     handleInteract();
+    if(onLogAction) onLogAction('NODES_PASTED', { count: clipboard.nodes.length });
     const idMap = {};
     const newNodes = clipboard.nodes.map(n => {
       const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
@@ -262,23 +299,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   };
 
   const handleDuplicate = () => { handleCopy(); setTimeout(handlePaste, 10); };
-
-  const handleFilteredNodesChange = useCallback((changes) => {
-    handleInteract();
-    if (readOnly) return;
-    
-    const validChanges = changes.filter(c => {
-        if (c.type === 'dimensions' || c.type === 'position') {
-            return nodes.some(n => n.id === c.id);
-        }
-        return true;
-    });
-
-    if (validChanges.length > 0) {
-        onNodesChange(validChanges);
-    }
-  }, [handleInteract, readOnly, onNodesChange, nodes]);
-
+  
   useEffect(() => {
     if (xml && xml !== lastXmlRef.current) {
       lastXmlRef.current = xml;
@@ -346,6 +367,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const onConnect = useCallback((params) => {
     handleInteract();
+    if(onLogAction) onLogAction('EDGE_CONNECTED', { source: params.source, target: params.target });
     const sourceNode = getNode(params.source);
     const targetNode = getNode(params.target);
     
@@ -354,7 +376,19 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
     let data = { edgeStyle };
     if (sourceNode?.type === 'CONDITION') {
-        data.label = params.sourceHandle === 's-right' ? edgeLabels[edgeStyle || 'true-false'].f : edgeLabels[edgeStyle || 'true-false'].t;
+        const currentEdges = getEdges();
+        const outEdges = currentEdges.filter(e => e.source === params.source);
+        const pref = edgeLabels[edgeStyle || 'true-false'];
+        
+        let newLabel = params.sourceHandle === 's-right' ? pref.f : pref.t;
+        
+        if (outEdges.length === 1) {
+            const existingLabel = outEdges[0].data?.label;
+            const isPos = ['+', 'Ano', 'Yes', 'True'].includes(existingLabel);
+            if (isPos) newLabel = pref.f;
+            else newLabel = pref.t;
+        }
+        data.label = newLabel;
     }
 
     setEdges(eds => {
@@ -364,11 +398,12 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         }
         return addEdge({ ...params, type: 'customEdge', data, markerEnd: { type: MarkerType.ArrowClosed } }, filteredEds);
     });
-  }, [edgeStyle, updateNodeData, handleInteract, setEdges, getNode]);
+  }, [edgeStyle, updateNodeData, handleInteract, setEdges, getNode, onLogAction, getEdges]);
 
   const addNodeAt = (type, label, clientPos = null) => {
     if (readOnly) return;
     handleInteract();
+    if(onLogAction) onLogAction('NODE_ADDED', { type, label });
     const newId = 'node_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
     
     const offset = Math.floor(Math.random() * 40) - 20;
@@ -396,11 +431,13 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const handleExportEduCode = () => {
     setShowExportMenu(false);
+    if(onLogAction) onLogAction('EXPORT_XML_EDUCODE');
     const a = document.createElement('a'); a.href = "data:text/xml;charset=utf-8," + encodeURIComponent(xml); a.download = 'educode_diagram.xml'; a.click();
   };
 
   const handleExportDrawioStandard = () => {
     setShowExportMenu(false);
+    if(onLogAction) onLogAction('EXPORT_XML_STANDARD');
     const doc = new DOMParser().parseFromString(xml, "text/xml");
     doc.querySelectorAll('mxCell').forEach(c => ['type', 'mode', 'entityType', 'edgeStyle', 'ioType'].forEach(attr => c.removeAttribute(attr)));
     const a = document.createElement('a'); a.href = "data:text/xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(doc)); a.download = 'standard_diagram.drawio'; a.click();
@@ -454,6 +491,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         const content = ev.target.result;
         const hasContent = nodes.filter(n => n.type !== 'GROUP_BG').length > 0;
         
+        if(onLogAction) onLogAction('FILE_IMPORTED');
+        
         if (hasContent) {
             setPendingImport(content);
         } else {
@@ -462,7 +501,6 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         }
     }; 
     reader.readAsText(file);
-    // Programové vynulování pro možnost opakovaného importu stejného souboru (fixnutí zamrzání eventu)
     e.target.value = ''; 
   };
 
@@ -553,9 +591,9 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       <div className="w-full h-full" onContextMenu={handlePaneContextMenu}>
         <ReactFlow 
           nodes={allNodes} edges={edges} 
-          onNodesChange={handleFilteredNodesChange} 
+          onNodesChange={(changes) => { if (!readOnly) onNodesChange(changes); }} 
           onEdgesChange={(changes) => { handleInteract(); if (!readOnly) onEdgesChange(changes); }} 
-          onConnect={(params) => { handleInteract(); if (!readOnly) onConnect(params); }} 
+          onConnect={(params) => { if (!readOnly) onConnect(params); }} 
           onNodeDragStart={handleInteract}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}

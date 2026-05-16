@@ -126,19 +126,6 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         };
     };
 
-    const findEndWhile = (linesArr, startIndex) => {
-        let depth = 0;
-        for (let i = startIndex; i < linesArr.length; i++) {
-            let upper = linesArr[i].toUpperCase();
-            if (upper.startsWith('WHILE ') || upper.startsWith('FOR ')) depth++;
-            else if (upper === 'ENDWHILE' || upper === 'ENDFOR') {
-                depth--;
-                if (depth === 0) return i;
-            }
-        }
-        return -1;
-    };
-
     let outNodes = [];
     let outEdges = [];
     let globalGroupX = 360;
@@ -275,71 +262,28 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                     isNot = true;
                 }
 
-                let isDoWhile = false;
-                let doWhileTargetId = null;
-                let endIdx = findEndWhile(blockLines, i);
-
-                if (endIdx !== -1) {
-                    let loopBody = [];
-                    let loopBodyIndices = [];
-                    for (let k = i + 1; k < endIdx; k++) {
-                        let ln = blockLines[k].trim();
-                        if (!ln.startsWith('//') && !ln.startsWith('#') && ln !== '') {
-                            loopBody.push(ln);
-                            loopBodyIndices.push(k);
-                        }
-                    }
-
-                    if (loopBody.length > 0) {
-                        let preceding = [];
-                        let precedingIndices = [];
-                        let p = i - 1;
-                        while (p >= 0 && preceding.length < loopBody.length) {
-                            let ln = blockLines[p].trim();
-                            if (!ln.startsWith('//') && !ln.startsWith('#') && ln !== '') {
-                                preceding.unshift(ln);
-                                precedingIndices.unshift(p);
-                            }
-                            p--;
-                        }
-
-                        if (preceding.length === loopBody.length && preceding.join('\n') === loopBody.join('\n') && lineToNodeId[precedingIndices[0]]) {
-                            isDoWhile = true;
-                            doWhileTargetId = lineToNodeId[precedingIndices[0]];
-                            for (let idx of loopBodyIndices) skipSet.add(idx);
-                        }
-                    }
-                }
+                // Odstraněn blok detekce "isDoWhile" pro zamezení chybového mizení bloků.
 
                 const loopId = addNode(condText, 'CONDITION', getXPos());
                 lineToNodeId[i] = loopId;
 
-                if (isDoWhile) {
-                    pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
-                    const ports = getConditionPorts(loopId, isNot);
-                    addEdge(loopId, doWhileTargetId, ports.tText, ports.tHandle, "t-top");
-                    stack.push({ type: 'DO_WHILE', id: loopId, isNot });
-                    pendingExits = [{ id: loopId, text: ports.fText, handle: ports.fHandle }];
-                } else {
-                    pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
-                    const ports = getConditionPorts(loopId, isNot);
-                    stack.push({ type: 'LOOP', id: loopId, mergeId: null, isNot });
-                    pendingExits = [{ id: loopId, text: ports.tText, handle: ports.tHandle }];
-                }
+                pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
+                const ports = getConditionPorts(loopId, isNot);
+                stack.push({ type: 'LOOP', id: loopId, mergeId: null, isNot });
+                pendingExits = [{ id: loopId, text: ports.tText, handle: ports.tHandle }];
+                
             }
             else if (upper === 'ENDWHILE' || upper === 'ENDFOR') {
                 const currentLoop = stack.pop();
 
-                if (currentLoop.type === 'DO_WHILE') {
-                    // empty
-                } else {
-                    pendingExits.forEach(exit => {
-                        let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.id, currentLoop.isNot).tHandle : exit.handle;
-                        addEdge(exit.id, currentLoop.id, exit.text, returnHandle, "t-top");
-                    });
-                    const ports = getConditionPorts(currentLoop.id, currentLoop.isNot);
-                    pendingExits = [{ id: currentLoop.id, text: ports.fText, handle: ports.fHandle }];
-                }
+                // Přidáno bezpečné připojení zpět do cyklu
+                pendingExits.forEach(exit => {
+                    let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.id, currentLoop.isNot).tHandle : exit.handle;
+                    addEdge(exit.id, currentLoop.id, exit.text, returnHandle, "t-top");
+                });
+                
+                const ports = getConditionPorts(currentLoop.id, currentLoop.isNot);
+                pendingExits = [{ id: currentLoop.id, text: ports.fText, handle: ports.fHandle }];
             }
             else {
                 let isIo = false;
@@ -383,6 +327,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
         if (hasEnd) {
             const endId = addNode(endLineText, 'START_END', globalGroupX, { mode: 'end' });
+            // Zásadní fix: pendingExits mají už na sobě navázaný text (z if/else/while iterací).
             pendingExits.forEach(exit => addEdge(exit.id, endId, exit.text, exit.handle, "t-top"));
             pendingExits = [];
         }

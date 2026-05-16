@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare, Bug } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parsePseudocodeToPython } from './parsers/pseudocodeToPython';
@@ -189,6 +189,22 @@ export default function App() {
   const activeWindow = useRef('drawio'); 
   const lastEdited = useRef('drawio'); 
 
+  // --- Záznamník akcí (Testing) ---
+  const [actionLogs, setActionLogs] = useState([]);
+  const logAction = useCallback((actionType, details = {}) => {
+      setActionLogs(prev => [...prev, { time: new Date().toISOString(), type: actionType, details }]);
+  }, []);
+
+  const downloadLogs = () => {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(actionLogs, null, 2));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", `educode_debug_log_${new Date().getTime()}.json`);
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+  };
+
   useEffect(() => { breakpointsRef.current = breakpoints; }, [breakpoints]);
   
   useEffect(() => { 
@@ -201,7 +217,8 @@ export default function App() {
       setShowTutorial(true);
       localStorage.setItem('eduCodeTutorialSeen', 'true');
     }
-  }, []);
+    logAction('SESSION_START');
+  }, [logAction]);
 
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
@@ -243,7 +260,13 @@ export default function App() {
     const timeoutId = setTimeout(() => {
       try {
         const result = parseDrawioToPseudocode(diagramXml);
-        setPseudocode(prev => prev !== result?.code ? (result?.code || '') : prev);
+        setPseudocode(prev => {
+            if (prev !== result?.code) {
+                logAction('SYNC_DRAWIO_TO_PSEUDOCODE');
+                return result?.code || '';
+            }
+            return prev;
+        });
         setParseErrors(result?.errors || []);
         setNodeLineMap(result?.nodeLineMap || {});
       } catch (err) {
@@ -251,7 +274,7 @@ export default function App() {
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [diagramXml, flow]);
+  }, [diagramXml, flow, logAction]);
 
   // SYNC 2: Pseudocode -> Diagram
   useEffect(() => {
@@ -281,14 +304,20 @@ export default function App() {
         });
         const finalXml = changed ? new XMLSerializer().serializeToString(doc) : generatedXml;
 
-        setDiagramXml(prev => prev !== finalXml ? finalXml : prev);
+        setDiagramXml(prev => {
+            if (prev !== finalXml) {
+                logAction('SYNC_PSEUDOCODE_TO_DRAWIO');
+                return finalXml;
+            }
+            return prev;
+        });
         setParseErrors(genErrors || []);
       } catch (err) {
         setParseErrors([err.message]);
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [pseudocode, flow, edgeStyle]);
+  }, [pseudocode, flow, edgeStyle, logAction]);
 
   useEffect(() => {
     if (panels.includes('python')) {
@@ -306,6 +335,7 @@ export default function App() {
     e.stopPropagation();
     const nextFlow = flow === 'bidirectional' ? 'diagram-to-code' : flow === 'diagram-to-code' ? 'code-to-diagram' : 'bidirectional';
     setFlow(nextFlow);
+    logAction('FLOW_DIRECTION_CHANGED', { flow: nextFlow });
   };
 
   const startDebugger = useCallback(() => {
@@ -319,8 +349,9 @@ export default function App() {
       
       setRuntimeActiveNodeId(newRunner.currentNodeId);
       setIsPlaying(false);
+      logAction('DEBUGGER_STARTED');
       return newRunner;
-  }, [diagramXml, setIsPlaying]);
+  }, [diagramXml, setIsPlaying, logAction]);
 
   const stopDebugger = useCallback((clearData = true) => {
       setIsPlaying(false);
@@ -333,7 +364,8 @@ export default function App() {
           setRuntimeVars({});
           setRuntimeOutput([]);
       }
-  }, [setIsPlaying]);
+      logAction('DEBUGGER_STOPPED');
+  }, [setIsPlaying, logAction]);
 
   const doStep = useCallback((isManualStep = false, inputValue = undefined) => {
       let currentRunner = runnerRef.current;
@@ -438,8 +470,9 @@ export default function App() {
             breakpoints={showDebugger ? breakpoints : []}
             onBreakpointToggle={toggleBreakpoint}
             onInteract={() => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; }}
+            onLogAction={logAction}
             onXmlChange={(xml) => { lastEdited.current = 'drawio'; setDiagramXml(xml); }}
-            onImportXml={(xml) => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; setDiagramXml(xml); }}
+            onImportXml={(xml) => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; setDiagramXml(xml); logAction('XML_IMPORTED'); }}
             readOnly={flow === 'code-to-diagram' || isPlayingState || runner !== null || inputRequest !== null}
           />
           
@@ -602,6 +635,20 @@ export default function App() {
     <div className="h-screen bg-gray-100 dark:bg-gray-950 flex flex-col font-sans overflow-hidden transition-colors" onClick={() => { setActiveDropdown(null); setSettingsDropdown(null); setShowDebugSettings(false); }}>
       {showTutorial && <TutorialDialog onClose={() => setShowTutorial(false)} />}
       
+      {/* Testing Top Bar */}
+      <div className="bg-purple-600 dark:bg-purple-800 text-white px-4 py-1.5 text-[11px] flex justify-between items-center z-50 shadow-md">
+         <div className="flex items-center gap-2">
+            <Bug size={14} />
+            <span className="font-bold tracking-wide">TESTING REŽIM</span>
+            <span className="hidden sm:inline border-l border-purple-400/50 pl-2 ml-1 text-purple-200">
+                Našli jste chybu? Stáhněte si log akcí z tohoto sezení a pošlete nám ho.
+            </span>
+         </div>
+         <button onClick={downloadLogs} className="bg-purple-800 dark:bg-purple-950 hover:bg-purple-900 text-purple-100 px-3 py-1 rounded shadow-sm border border-purple-500/30 transition-colors font-semibold flex items-center gap-1">
+             Stáhnout log akcí ({actionLogs.length})
+         </button>
+      </div>
+
       <header className="bg-white dark:bg-gray-900 border-b border-gray-300 dark:border-gray-800 px-6 py-3 flex justify-between items-center shrink-0 shadow-sm z-10">
         <div className="flex items-baseline gap-3">
           <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">EduCode</h1>
@@ -617,8 +664,8 @@ export default function App() {
           <React.Fragment key={type}>
             <div 
               className={`flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 relative transition-all ${activeDropdown === index || settingsDropdown === index ? 'z-50 overflow-visible' : 'z-10 overflow-hidden'}`}
-              onPointerDownCapture={() => { activeWindow.current = type; }}
-              onKeyDownCapture={() => { activeWindow.current = type; }}
+              onPointerDownCapture={() => { if (type === 'drawio' || type === 'pseudocode') lastEdited.current = type; }}
+              onKeyDownCapture={() => { if (type === 'drawio' || type === 'pseudocode') lastEdited.current = type; }}
             >
               <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 flex justify-between items-center relative z-50">
                 <div className="flex items-center gap-2">
@@ -638,11 +685,10 @@ export default function App() {
                       </button>
                       {settingsDropdown === index && (
                         <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 p-3" onClick={e => e.stopPropagation()}>
-                          
                           <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">Pravda / Nepravda alias</label>
                           <select
                             value={edgeStyle}
-                            onChange={(e) => { setEdgeStyle(e.target.value); localStorage.setItem('edgeStyle', e.target.value); }}
+                            onChange={(e) => { setEdgeStyle(e.target.value); localStorage.setItem('edgeStyle', e.target.value); logAction('SETTINGS_CHANGED', { edgeStyle: e.target.value }); }}
                             className="w-full text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none p-1.5 cursor-pointer text-gray-700 dark:text-gray-300 mb-4"
                           >
                             <option value="true-false">True / False</option>
@@ -653,15 +699,21 @@ export default function App() {
 
                           <div className="space-y-3">
                             <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                                <input type="checkbox" checked={colorMode} onChange={e => { setColorMode(e.target.checked); localStorage.setItem('colorMode', e.target.checked); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                                <input type="checkbox" checked={colorMode} onChange={e => { setColorMode(e.target.checked); localStorage.setItem('colorMode', e.target.checked); logAction('SETTINGS_CHANGED', { colorMode: e.target.checked }); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
                                 Barevné bloky
                             </label>
                             <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                                <input type="checkbox" checked={groupColoring} onChange={e => { setGroupColoring(e.target.checked); localStorage.setItem('groupColoring', e.target.checked); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                                <input type="checkbox" checked={groupColoring} onChange={e => { setGroupColoring(e.target.checked); localStorage.setItem('groupColoring', e.target.checked); logAction('SETTINGS_CHANGED', { groupColoring: e.target.checked }); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
                                 Zbarvení skupin
                             </label>
                             <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                                <input type="checkbox" checked={showDebugger} onChange={e => { setShowDebugger(e.target.checked); localStorage.setItem('showDebugger', e.target.checked); if(!e.target.checked) stopDebugger(); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                                <input type="checkbox" checked={showDebugger} onChange={e => { 
+                                    const checked = e.target.checked;
+                                    setShowDebugger(checked); 
+                                    localStorage.setItem('showDebugger', checked); 
+                                    logAction('SETTINGS_CHANGED', { showDebugger: checked });
+                                    if(!checked) stopDebugger(); 
+                                }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
                                 Debugger (Watch list)
                             </label>
                           </div>
@@ -680,7 +732,7 @@ export default function App() {
                           const isCurrent = panels[index] === t.id;
                           const isUsed = panels.includes(t.id) && !isCurrent;
                           return (
-                            <button key={t.id} disabled={isUsed} onClick={(e) => { e.stopPropagation(); const newPanels = [...panels]; newPanels[index] = t.id; setPanels(newPanels); setActiveDropdown(null); }} className={`w-full px-4 py-2 text-sm flex justify-between items-center transition-colors ${isUsed ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed' : 'text-gray-700 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/50'}`}>
+                            <button key={t.id} disabled={isUsed} onClick={(e) => { e.stopPropagation(); const newPanels = [...panels]; newPanels[index] = t.id; setPanels(newPanels); setActiveDropdown(null); logAction('PANEL_CHANGED', { to: t.id }); }} className={`w-full px-4 py-2 text-sm flex justify-between items-center transition-colors ${isUsed ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed' : 'text-gray-700 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/50'}`}>
                               <span>{t.label}</span>
                               {isCurrent && <span className="w-2 h-2 rounded-full bg-indigo-600 dark:bg-indigo-400"></span>}
                             </button>
