@@ -10,7 +10,8 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
   const isTargetMerge = nodes.find(n => n.id === target)?.type === 'MERGE';
   
   const [edgePath, labelX, labelY] = (() => {
-    const isBackEdge = sourceY > targetY;
+    const isBackEdge = sourceY > targetY + 25;
+    
     if (isBackEdge) {
         let maxX = Math.max(sourceX, targetX);
         let minX = Math.min(sourceX, targetX);
@@ -18,24 +19,38 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
         nodes.forEach(n => {
             if (n.position.y >= targetY - 30 && n.position.y <= sourceY + 30) {
                 const nodeX = n.position.x;
-                const nodeMaxX = nodeX + (n.measured?.width || 150);
+                const nodeMaxX = nodeX + (n.measured?.width || n.width || 150);
                 if (nodeMaxX > maxX) maxX = nodeMaxX;
                 if (nodeX < minX) minX = nodeX;
             }
         });
         
-        const loopNode = nodes.find(n => n.id === target);
-        const loopCenterX = loopNode ? loopNode.position.x + (loopNode.measured?.width || 120) / 2 : targetX;
-        const routeLeft = sourceX < loopCenterX;
-        const bottomY = sourceY + 30; 
-        const topY = targetY - 30;    
+        const srcIsLeft = (data?.sourceHandle === 's-left' || sourcePosition === Position.Left || sourcePosition === 'left');
+        const srcIsRight = (data?.sourceHandle === 's-right' || sourcePosition === Position.Right || sourcePosition === 'right');
+        
+        let routeLeft;
+        if (srcIsLeft) {
+            routeLeft = true;
+        } else if (srcIsRight) {
+            routeLeft = false;
+        } else {
+            const loopNode = nodes.find(n => n.id === target);
+            const loopCenterX = loopNode ? loopNode.position.x + (loopNode.measured?.width || loopNode.width || 120) / 2 : targetX;
+            routeLeft = sourceX < loopCenterX;
+        }
+        
+        let topY = targetY - 30;
+        if (sourceY - topY < 25) {
+            topY = sourceY - 25; 
+        }
+        
+        const bottomY = Math.max(sourceY + 30, targetY + 30); 
         const r = 10;                 
         
         let path, finalLabelX;
         
         if (routeLeft) {
-            const leftEdgeX = minX - 40;
-            const srcIsLeft = (data?.sourceHandle === 's-left' || sourcePosition === Position.Left || sourcePosition === 'left');
+            const leftEdgeX = Math.min(minX - 80, sourceX - 80, targetX - 80);
             
             if (srcIsLeft) {
                 path = `M ${sourceX} ${sourceY} L ${leftEdgeX + r} ${sourceY} A ${r} ${r} 0 0 1 ${leftEdgeX} ${sourceY - r} L ${leftEdgeX} ${topY + r} A ${r} ${r} 0 0 1 ${leftEdgeX + r} ${topY} L ${targetX - r} ${topY} A ${r} ${r} 0 0 1 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
@@ -44,8 +59,7 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
             }
             finalLabelX = leftEdgeX;
         } else {
-            const rightEdgeX = maxX + 40; 
-            const srcIsRight = (data?.sourceHandle === 's-right' || sourcePosition === Position.Right || sourcePosition === 'right');
+            const rightEdgeX = Math.max(maxX + 80, sourceX + 80, targetX + 80);
             
             if (srcIsRight) {
                 path = `M ${sourceX} ${sourceY} L ${rightEdgeX - r} ${sourceY} A ${r} ${r} 0 0 0 ${rightEdgeX} ${sourceY - r} L ${rightEdgeX} ${topY + r} A ${r} ${r} 0 0 0 ${rightEdgeX - r} ${topY} L ${targetX + r} ${topY} A ${r} ${r} 0 0 0 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
@@ -70,7 +84,8 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
       const pref = edgeLabels[data.edgeStyle || 'true-false'];
       const toggleLabel = (l) => (l === pref.t || l === 'Ano' || l === '+' || l === 'Yes' || l === 'True') ? pref.f : pref.t;
       
-      if (!sibling) return eds;
+      if (!sibling) return eds.map(edge => edge.id === id ? { ...edge, data: { ...edge.data, label: toggleLabel(edge.data.label) } } : edge);
+      
       return eds.map(edge => {
         if (edge.id === id) return { ...edge, data: { ...edge.data, label: toggleLabel(edge.data.label) } };
         if (edge.id === sibling.id) return { ...edge, data: { ...edge.data, label: toggleLabel(sibling.data.label) } };

@@ -189,7 +189,6 @@ export default function App() {
   const activeWindow = useRef('drawio'); 
   const lastEdited = useRef('drawio'); 
 
-  // --- Záznamník akcí (Testing) ---
   const [actionLogs, setActionLogs] = useState([]);
   const logAction = useCallback((actionType, details = {}) => {
       setActionLogs(prev => [...prev, { time: new Date().toISOString(), type: actionType, details }]);
@@ -641,7 +640,7 @@ export default function App() {
             <Bug size={14} />
             <span className="font-bold tracking-wide">TESTING REŽIM</span>
             <span className="hidden sm:inline border-l border-purple-400/50 pl-2 ml-1 text-purple-200">
-                Našli jste chybu? Stáhněte si log akcí z tohoto sezení a pošlete nám ho.
+                Našli jste chybu? Stáhněte si log akcí z tohoto sezení a pošlete mi ho.
             </span>
          </div>
          <button onClick={downloadLogs} className="bg-purple-800 dark:bg-purple-950 hover:bg-purple-900 text-purple-100 px-3 py-1 rounded shadow-sm border border-purple-500/30 transition-colors font-semibold flex items-center gap-1">

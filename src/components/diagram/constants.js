@@ -5,7 +5,6 @@ export const edgeLabels = {
   'true-false': { t: 'True', f: 'False' }
 };
 
-// Sjednocená funkce, která garantuje, že červená (Runtime) přebije vše ostatní
 export const getHighlightClass = (isRuntimeActive, isExternal, isSelected, baseBorder) => {
     if (isRuntimeActive) return 'ring-4 ring-red-500 border-red-600 dark:border-red-500 !shadow-[0_0_15px_rgba(239,68,68,0.8)] z-50';
     if (isExternal) return 'ring-4 ring-emerald-300 border-emerald-500 dark:border-emerald-500 !shadow-lg';

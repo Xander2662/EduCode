@@ -5,7 +5,6 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
     let gId = 0;
     const visited = new Set();
     
-    // 1. Seskupení navazujících Akcí a Vstupů (IO)
     nodes.forEach(n => {
         if ((n.type === 'ACTION' || n.type === 'IO') && !visited.has(n.id)) {
             const grp = [];
@@ -36,7 +35,6 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
         }
     });
 
-    // 2. Seskupení těl Cyklů
     edges.forEach(e => {
         const tgt = nodes.find(n => n.id === e.target);
         if (tgt && tgt.type === 'CONDITION') {
@@ -55,7 +53,6 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
             }
 
             if (isBackEdge) {
-                // Přesné nalezení těla cyklu: Vše, co je POD podmínkou (descendants) a zároveň NAD návratovým bodem (ancestors)
                 const descendants = new Set();
                 const qDesc = [tgt.id];
                 while(qDesc.length > 0) {
@@ -89,17 +86,25 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
                 const srcW = src?.measured?.width || src?.width || 100;
                 const tgtW = tgt.measured?.width || tgt.width || 140;
                 
-                const edgeOutHandle = e.sourceHandle || 's-bottom';
-                
                 let routeLeft = true;
-                if (edgeOutHandle === 's-right') {
+                
+                const entryEdge = edges.find(ed => ed.source === tgt.id && lGrp.has(ed.target));
+                
+                if (entryEdge && entryEdge.sourceHandle === 's-right') {
                     routeLeft = false;
-                } else if (edgeOutHandle === 's-left') {
+                } else if (entryEdge && entryEdge.sourceHandle === 's-left') {
                     routeLeft = true;
                 } else {
-                     const srcCenterX = (src?.position.x || 0) + srcW / 2;
-                     const tgtCenterX = tgt.position.x + tgtW / 2;
-                     routeLeft = srcCenterX < tgtCenterX;
+                    const edgeOutHandle = e.sourceHandle || 's-bottom';
+                    if (edgeOutHandle === 's-right') {
+                        routeLeft = false;
+                    } else if (edgeOutHandle === 's-left') {
+                        routeLeft = true;
+                    } else {
+                        const srcCenterX = (src?.position.x || 0) + srcW / 2;
+                        const tgtCenterX = tgt.position.x + tgtW / 2;
+                        routeLeft = srcCenterX < tgtCenterX;
+                    }
                 }
 
                 groupDefs.push({ id: `bg-loop-${gId++}`, type: 'LOOP', nodes: Array.from(lGrp), routeLeft });
@@ -126,14 +131,14 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
          let padTop = 35, padBottom = 35, padLeft = 35, padRight = 35;
          
          if (g.type === 'LOOP') {
-             padTop = 85;     
-             padBottom = 85;  
+             padTop = 50;     
+             padBottom = 50;  
              if (g.routeLeft) {
-                 padLeft = 95;  
+                 padLeft = 135; 
                  padRight = 45;
              } else {
                  padLeft = 45;
-                 padRight = 95; 
+                 padRight = 135; 
              }
          }
 
