@@ -299,7 +299,22 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   };
 
   const handleDuplicate = () => { handleCopy(); setTimeout(handlePaste, 10); };
-  
+  const handleFilteredNodesChange = useCallback((changes) => {
+    handleInteract();
+    if (readOnly) return;
+    
+    const validChanges = changes.filter(c => {
+        if (c.type === 'dimensions' || c.type === 'position') {
+            return nodes.some(n => n.id === c.id);
+        }
+        return true;
+    });
+
+    if (validChanges.length > 0) {
+        onNodesChange(validChanges);
+    }
+  }, [handleInteract, readOnly, onNodesChange, nodes]);
+
   useEffect(() => {
     if (xml && xml !== lastXmlRef.current) {
       lastXmlRef.current = xml;
@@ -591,7 +606,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       <div className="w-full h-full" onContextMenu={handlePaneContextMenu}>
         <ReactFlow 
           nodes={allNodes} edges={edges} 
-          onNodesChange={(changes) => { if (!readOnly) onNodesChange(changes); }} 
+          onNodesChange={handleFilteredNodesChange} 
           onEdgesChange={(changes) => { handleInteract(); if (!readOnly) onEdgesChange(changes); }} 
           onConnect={(params) => { if (!readOnly) onConnect(params); }} 
           onNodeDragStart={handleInteract}
