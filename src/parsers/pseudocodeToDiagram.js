@@ -1,4 +1,4 @@
-export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 'true-false') => {
+export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 'true-false', conditionShape = 'hexagon') => {
     const getNewId = () => 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 11);
 
     const edgeLabels = {
@@ -134,7 +134,9 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         START_END: "ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;",
         ACTION: "whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;",
         IO: "shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#d5e8d4;strokeColor=#82b366;",
-        CONDITION: "shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;size=0.15;fillColor=#ffe6cc;strokeColor=#d79b00;",
+        CONDITION: conditionShape === 'diamond' 
+            ? "rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" 
+            : "shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;size=0.15;fillColor=#ffe6cc;strokeColor=#d79b00;",
         COMMENT: "shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;strokeColor=#d6b656;",
         MERGE: "ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;resizable=0;movable=0;rotatable=0;",
         EDGE: "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;"
@@ -181,7 +183,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         const addNode = (text, type, defaultX, extraProps = {}) => {
             const pos = getPos(text, type, defaultX, yOffset);
             outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y, ...extraProps });
-            yOffset = Math.max(yOffset, pos.y) + (type === 'CONDITION' ? 140 : 100);
+            // Zvýšeno margin okno, protože Podmínky jsou nyní vyšší
+            yOffset = Math.max(yOffset, pos.y) + (type === 'CONDITION' ? 160 : 100);
             return pos.oldId;
         };
 
@@ -262,8 +265,6 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                     isNot = true;
                 }
 
-                // Odstraněn blok detekce "isDoWhile" pro zamezení chybového mizení bloků.
-
                 const loopId = addNode(condText, 'CONDITION', getXPos());
                 lineToNodeId[i] = loopId;
 
@@ -276,7 +277,6 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             else if (upper === 'ENDWHILE' || upper === 'ENDFOR') {
                 const currentLoop = stack.pop();
 
-                // Přidáno bezpečné připojení zpět do cyklu
                 pendingExits.forEach(exit => {
                     let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.id, currentLoop.isNot).tHandle : exit.handle;
                     addEdge(exit.id, currentLoop.id, exit.text, returnHandle, "t-top");
@@ -327,7 +327,6 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
         if (hasEnd) {
             const endId = addNode(endLineText, 'START_END', globalGroupX, { mode: 'end' });
-            // Zásadní fix: pendingExits mají už na sobě navázaný text (z if/else/while iterací).
             pendingExits.forEach(exit => addEdge(exit.id, endId, exit.text, exit.handle, "t-top"));
             pendingExits = [];
         }
@@ -340,7 +339,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
     outNodes.forEach(n => {
         let w = 100, h = 50;
         if (n.type === 'IO') { w = 120; h = 50; }
-        if (n.type === 'CONDITION') { w = 120; h = 60; }
+        // OPRAVA: Podmínka je nyní v UI větší, takže ji do Draw.io zapisujeme jako 160x80
+        if (n.type === 'CONDITION') { w = 160; h = 80; }
         if (n.type === 'START_END') { w = 100; h = 40; }
         if (n.type === 'COMMENT') { w = 160; h = 40; }
         if (n.type === 'MERGE') { w = 10; h = 10; }

@@ -19,7 +19,7 @@ const nodeTypes = {
 };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction }) {
+function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, conditionShape, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
@@ -76,6 +76,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             colorMode, 
             showDebugger,
             readOnly,
+            conditionShape,
             isRuntimeActive: n.id === activeRuntimeNodeId, 
             externalHighlight: externalSelectedIds?.includes(n.id),
             isBreakpoint: breakpoints.includes(n.id),
@@ -83,33 +84,44 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             onToggleIOType: () => toggleIOType(n.id, n.data.ioType || 'input'),
             onToggleEntityType: () => toggleEntityType(n.id, n.data.entityType || 'FUNCTION')
         }
-  })), [nodes, colorMode, showDebugger, readOnly, externalSelectedIds, activeRuntimeNodeId, breakpoints, onBreakpointToggle, toggleIOType, toggleEntityType]);
+  })), [nodes, colorMode, showDebugger, readOnly, conditionShape, externalSelectedIds, activeRuntimeNodeId, breakpoints, onBreakpointToggle, toggleIOType, toggleEntityType]);
 
   const bgNodes = useMemo(() => calculateGroupNodes(nodes, edges, groupColoring), [nodes, edges, groupColoring]);
   const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
 
-  // Záchranný enforcer pro double False / double True
   useEffect(() => {
     setEdges(eds => {
         let modified = false;
         const newEds = eds.map(e => ({...e}));
+        const conditions = new Set(nodes.filter(n => n.type === 'CONDITION').map(n => n.id));
         
-        nodes.filter(n => n.type === 'CONDITION').forEach(cond => {
-            const outEdges = newEds.filter(e => e.source === cond.id);
-            if (outEdges.length === 2) {
-                const isPos1 = ['+', 'Ano', 'Yes', 'True'].includes(outEdges[0].data?.label);
-                const isPos2 = ['+', 'Ano', 'Yes', 'True'].includes(outEdges[1].data?.label);
-                const isNeg1 = ['-', 'Ne', 'No', 'False'].includes(outEdges[0].data?.label);
-                const isNeg2 = ['-', 'Ne', 'No', 'False'].includes(outEdges[1].data?.label);
-                
-                const pref = edgeLabels[edgeStyle || 'true-false'];
-                
-                if (isPos1 && isPos2) {
-                    outEdges[1].data = { ...outEdges[1].data, label: pref.f };
-                    modified = true;
-                } else if (isNeg1 && isNeg2) {
-                    outEdges[1].data = { ...outEdges[1].data, label: pref.t };
-                    modified = true;
+        const edgesBySource = {};
+        newEds.forEach(e => {
+            if (!edgesBySource[e.source]) edgesBySource[e.source] = [];
+            edgesBySource[e.source].push(e);
+        });
+
+        Object.keys(edgesBySource).forEach(sourceId => {
+            if (conditions.has(sourceId)) {
+                const outEdges = edgesBySource[sourceId];
+                if (outEdges.length === 2) {
+                    const l1 = outEdges[0].data?.label;
+                    const l2 = outEdges[1].data?.label;
+                    
+                    const isPos1 = ['+', 'Ano', 'Yes', 'True'].includes(l1);
+                    const isPos2 = ['+', 'Ano', 'Yes', 'True'].includes(l2);
+                    const isNeg1 = ['-', 'Ne', 'No', 'False'].includes(l1);
+                    const isNeg2 = ['-', 'Ne', 'No', 'False'].includes(l2);
+                    
+                    const pref = edgeLabels[edgeStyle || 'true-false'];
+                    
+                    if (isPos1 && isPos2) {
+                        outEdges[1].data = { ...outEdges[1].data, label: pref.f };
+                        modified = true;
+                    } else if (isNeg1 && isNeg2) {
+                        outEdges[1].data = { ...outEdges[1].data, label: pref.t };
+                        modified = true;
+                    }
                 }
             }
         });
@@ -133,7 +145,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
         return modified ? formattedEds : eds;
     });
-  }, [edgeStyle, nodes, setEdges]);
+  }, [edgeStyle, nodes.length, setEdges]); 
 
   const executeDelete = useCallback(() => {
     handleInteract();
@@ -299,22 +311,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   };
 
   const handleDuplicate = () => { handleCopy(); setTimeout(handlePaste, 10); };
-  const handleFilteredNodesChange = useCallback((changes) => {
-    handleInteract();
-    if (readOnly) return;
-    
-    const validChanges = changes.filter(c => {
-        if (c.type === 'dimensions' || c.type === 'position') {
-            return nodes.some(n => n.id === c.id);
-        }
-        return true;
-    });
-
-    if (validChanges.length > 0) {
-        onNodesChange(validChanges);
-    }
-  }, [handleInteract, readOnly, onNodesChange, nodes]);
-
+  
   useEffect(() => {
     if (xml && xml !== lastXmlRef.current) {
       lastXmlRef.current = xml;
@@ -475,7 +472,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             return { 
                 ...n, 
                 id: newId, 
-                position: { x: n.position.x + 40, y: n.position.y + 40 }, // Offset
+                position: { x: n.position.x + 40, y: n.position.y + 40 }, 
                 selected: true, 
                 data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(newId, e.target.value) } 
             };
@@ -606,7 +603,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       <div className="w-full h-full" onContextMenu={handlePaneContextMenu}>
         <ReactFlow 
           nodes={allNodes} edges={edges} 
-          onNodesChange={handleFilteredNodesChange} 
+          onNodesChange={(changes) => { if (!readOnly) onNodesChange(changes); }} 
           onEdgesChange={(changes) => { handleInteract(); if (!readOnly) onEdgesChange(changes); }} 
           onConnect={(params) => { if (!readOnly) onConnect(params); }} 
           onNodeDragStart={handleInteract}

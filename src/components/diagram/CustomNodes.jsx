@@ -37,6 +37,11 @@ export const StartEndNode = ({ id, data, selected }) => {
     setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, mode: newMode, label: newLabel } } : n));
   };
 
+  const toggleEntity = () => {
+    if(data.readOnly) return;
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, entityType: entityType === 'FUNCTION' ? 'CLASS' : 'FUNCTION' } } : n));
+  };
+
   const isGray = data.colorMode === false;
   const bgClass = isGray ? 'bg-gray-100 dark:bg-gray-800' : 'bg-fuchsia-50 dark:bg-fuchsia-900/30';
   const borderClass = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-fuchsia-300 dark:border-fuchsia-700';
@@ -46,7 +51,11 @@ export const StartEndNode = ({ id, data, selected }) => {
   const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, borderClass);
 
   return (
-    <div className={`${bgClass} border-2 rounded-[2rem] min-w-[140px] min-h-[40px] flex flex-col justify-center items-center p-2 transition-all relative ${highlightClass}`}>
+    <div className={`${bgClass} border-2 rounded-[2rem] min-w-[140px] min-h-[40px] flex flex-col justify-center items-center p-2 transition-all relative ${highlightClass} ${data.isBreakpoint ? 'ring-4 ring-red-500 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : ''}`}>
+      {data.showDebugger && (
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-3 -top-3 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+      )}
+
       {mode !== 'start' && <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />}
       
       {mode === 'unassigned' && (
@@ -61,16 +70,10 @@ export const StartEndNode = ({ id, data, selected }) => {
 
       {mode === 'start' && (
         <div className="w-full flex-1 flex flex-col px-2 relative pb-1">
-          <div className="relative flex justify-center items-center w-full mb-1 h-4">
-            <span className={`absolute left-2 text-[9px] font-bold ${titleColor} pointer-events-none`}>START</span>
+          <div className="flex justify-between items-center w-full mb-1 px-1">
+            <span className={`text-[9px] font-bold w-12 text-left ${titleColor}`}>START</span>
             <div className={`custom-drag-handle w-8 h-1.5 cursor-grab rounded-full transition-colors ${isGray ? 'bg-gray-300 dark:bg-gray-600' : 'bg-fuchsia-200 dark:bg-fuchsia-800'}`} />
-            <button 
-              onClick={(e) => { e.stopPropagation(); if (data.onToggleEntityType) data.onToggleEntityType(); }} 
-              disabled={data.readOnly}
-              className={`absolute right-1 text-[9px] font-bold px-1.5 py-0.5 rounded cursor-pointer hover:bg-fuchsia-100 dark:hover:bg-fuchsia-800/50 transition-colors ${titleColor} ${data.readOnly ? 'pointer-events-none opacity-50' : 'pointer-events-auto z-50'}`}
-            >
-              {entityType}
-            </button>
+            <span onClick={data.onToggleEntityType} className={`text-[9px] font-bold w-12 text-right cursor-pointer hover:opacity-75 ${titleColor} ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`} title="Kliknutím přepnete na CLASS">{entityType}</span>
           </div>
           <input defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono font-bold nodrag text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
         </div>
@@ -99,7 +102,11 @@ export const ActionNode = ({ id, data, selected }) => {
   const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, baseBorder);
 
   return (
-    <div className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass}`}>
+    <div className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass} ${data.isBreakpoint ? 'ring-4 ring-red-500 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : ''}`}>
+      {data.showDebugger && (
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-3 -top-3 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+      )}
+      
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
       <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
       <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
@@ -113,11 +120,20 @@ export const ActionNode = ({ id, data, selected }) => {
 
 export const IONode = ({ id, data, selected }) => {
   const isGray = data.colorMode === false;
-  const ioType = data.ioType || 'input';
+  const isInput = (data.ioType || 'input') === 'input';
 
-  const fillClass = isGray ? 'fill-gray-50 dark:fill-gray-800' : 'fill-emerald-50 dark:fill-emerald-900/30';
-  const defaultStroke = isGray ? 'text-gray-400 dark:text-gray-600' : 'text-emerald-400 dark:text-emerald-700';
-  const handleClass = isGray ? '!bg-gray-400' : '!bg-emerald-600';
+  const fillClass = isGray 
+      ? 'fill-gray-50 dark:fill-gray-800' 
+      : (isInput ? 'fill-emerald-50 dark:fill-emerald-900/30' : 'fill-cyan-50 dark:fill-cyan-900/30');
+  const defaultStroke = isGray 
+      ? 'text-gray-400 dark:text-gray-600' 
+      : (isInput ? 'text-emerald-400 dark:text-emerald-700' : 'text-cyan-400 dark:text-cyan-700');
+  const handleClass = isGray 
+      ? '!bg-gray-400' 
+      : (isInput ? '!bg-emerald-600' : '!bg-cyan-600');
+  const badgeColor = isGray 
+      ? 'text-gray-500' 
+      : (isInput ? 'text-emerald-700/60 dark:text-emerald-400/60' : 'text-cyan-700/60 dark:text-cyan-400/60');
   
   let strokeClass = defaultStroke;
   let shadowClass = '';
@@ -135,11 +151,39 @@ export const IONode = ({ id, data, selected }) => {
       strokeW = "4";
   }
 
+  if (data.isBreakpoint) {
+      strokeClass = 'text-red-500';
+      shadowClass = 'drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]';
+      strokeW = "4";
+  }
+
+  const handleUserChange = (e) => {
+      let val = e.target.value;
+      if (val.toLowerCase().startsWith('vstup ')) {
+          val = val.substring(6).trim();
+          e.target.value = val;
+          if (data.ioType !== 'input') data.onToggleIOType();
+      } else if (val.toLowerCase().startsWith('vystup ') || val.toLowerCase().startsWith('výstup ')) {
+          val = val.substring(7).trim();
+          e.target.value = val;
+          if (data.ioType !== 'output') data.onToggleIOType();
+      } else if (val.toLowerCase() === 'vstup' || val.toLowerCase() === 'vystup' || val.toLowerCase() === 'výstup') {
+          val = '';
+          e.target.value = val;
+      }
+      data.onChange(e);
+  };
+
   return (
     <div className={`relative min-w-[120px] min-h-[50px] flex flex-col transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
+      {data.showDebugger && (
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-2 -top-2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+      )}
+      
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
         <polygon points="15,2 98,2 85,98 2,98" className={fillClass} stroke="currentColor" strokeWidth={strokeW} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
+      
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
       <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
       <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
@@ -147,18 +191,11 @@ export const IONode = ({ id, data, selected }) => {
       
       <div className="pt-2 z-10"><DragHandle /></div>
       
-      <div className="absolute top-[4px] right-[16px] z-50 flex items-center justify-center">
-        <button 
-          onClick={(e) => { e.stopPropagation(); if (data.onToggleIOType) data.onToggleIOType(); }}
-          disabled={data.readOnly}
-          className={`text-[9px] font-bold px-2 py-1 rounded transition-colors text-emerald-700/80 dark:text-emerald-400/80 cursor-pointer hover:bg-emerald-100/50 dark:hover:bg-emerald-800/50 ${data.readOnly ? 'pointer-events-none opacity-50' : 'pointer-events-auto'}`}
-          title="Kliknutím změníte typ (Vstup/Výstup)"
-        >
-          {ioType === 'input' ? 'VSTUP' : 'VÝSTUP'}
-        </button>
-      </div>
+      <span onClick={data.onToggleIOType} className={`absolute top-[4px] left-[28px] text-[9px] font-bold cursor-pointer hover:opacity-75 ${badgeColor} select-none z-20 ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`} title="Kliknutím přepnete typ bloku">
+          {isInput ? 'VSTUP' : 'VÝSTUP'}
+      </span>
       
-      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 pt-1 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      <textarea rows={1} defaultValue={data.label} onChange={handleUserChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-6 pt-1 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
     </div>
   );
@@ -190,6 +227,12 @@ export const ConditionNode = ({ id, data, selected }) => {
       strokeClass = 'text-indigo-600 dark:text-indigo-500';
       strokeW = "4";
   }
+
+  if (data.isBreakpoint) {
+      strokeClass = 'text-red-500';
+      shadowClass = 'drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]';
+      strokeW = "4";
+  }
   
   const pref = edgeLabels[data.edgeStyle || 'true-false'];
   const tChar = pref.t.charAt(0).toUpperCase();
@@ -214,18 +257,29 @@ export const ConditionNode = ({ id, data, selected }) => {
   const bottomBorderColor = isGray ? '!border-gray-500 !text-gray-600' : (isBottomTrue ? '!border-green-500 !text-green-600' : '!border-red-500 !text-red-600');
   const rightBorderColor = isGray ? '!border-gray-500 !text-gray-600' : (isRightTrue ? '!border-green-500 !text-green-600' : '!border-red-500 !text-red-600');
 
+  const isDiamond = data.conditionShape === 'diamond';
+  const polygonPoints = isDiamond ? "50,2 98,50 50,98 2,50" : "15,2 85,2 98,50 85,98 15,98 2,50";
+
   return (
-    <div className={`relative flex flex-col items-center justify-center min-w-[120px] min-h-[60px] transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
+    // Zvětšeno z min-w-[120px] min-h-[60px] na 160px x 80px, aby se posuvník pohodlně vešel do obou tvarů
+    <div className={`relative flex flex-col items-center justify-center min-w-[160px] min-h-[80px] transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
+      {data.showDebugger && (
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-2 -top-2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+      )}
+
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
-        <polygon points="15,2 85,2 98,50 85,98 15,98 2,50" className={fillClass} stroke="currentColor" strokeWidth={strokeW} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        <polygon points={polygonPoints} className={fillClass} stroke="currentColor" strokeWidth={strokeW} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
       <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
       <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
       <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
 
-      <div className="absolute top-1 z-10"><DragHandle /></div>
-      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`min-w-[70px] max-w-[100px] text-center outline-none bg-transparent text-sm font-mono nodrag mt-2 z-10 resize-none overflow-hidden text-gray-900 dark:text-gray-100 px-1 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      {/* Změněno z top-1 na top-2.5, aby se u kosočtverce drag handle neřezal o hranu (přidává to padding zespoda špičky) */}
+      <div className="absolute top-2.5 z-10"><DragHandle /></div>
+      
+      {/* Větší max šířka textarea, protože celý blok je nyní větší */}
+      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`min-w-[90px] max-w-[130px] text-center outline-none bg-transparent text-sm font-mono nodrag mt-3 z-10 resize-none overflow-hidden text-gray-900 dark:text-gray-100 px-1 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
       
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${bottomBorderColor} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair leading-none p-0`}>{bottomChar}</Handle>
       <Handle type="source" position={Position.Right} id="s-right" className={`!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${rightBorderColor} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair leading-none p-0`}>{rightChar}</Handle>

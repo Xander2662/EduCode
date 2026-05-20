@@ -163,6 +163,7 @@ export default function App() {
   const [colorMode, setColorMode] = useState(localStorage.getItem('colorMode') !== 'false');
   const [groupColoring, setGroupColoring] = useState(localStorage.getItem('groupColoring') === 'true');
   const [showDebugger, setShowDebugger] = useState(localStorage.getItem('showDebugger') === 'true');
+  const [conditionShape, setConditionShape] = useState(localStorage.getItem('conditionShape') || 'hexagon');
 
   const [selectedNodeIds, setSelectedNodeIds] = useState([]);
   const [externalSelectedIds, setExternalSelectedIds] = useState([]);
@@ -170,6 +171,7 @@ export default function App() {
   const [breakpoints, setBreakpoints] = useState([]);
 
   // Proměnné debuggeru
+  const [isDebuggerActive, setIsDebuggerActive] = useState(false); // OPRAVA: Chybějící deklarace
   const [runner, setRunner] = useState(null);
   const runnerRef = useRef(null); 
   const [runtimeActiveNodeId, setRuntimeActiveNodeId] = useState(null);
@@ -189,6 +191,7 @@ export default function App() {
   const activeWindow = useRef('drawio'); 
   const lastEdited = useRef('drawio'); 
 
+  // --- Záznamník akcí (Testing) ---
   const [actionLogs, setActionLogs] = useState([]);
   const logAction = useCallback((actionType, details = {}) => {
       setActionLogs(prev => [...prev, { time: new Date().toISOString(), type: actionType, details }]);
@@ -287,7 +290,7 @@ export default function App() {
             return;
         }
 
-        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode, diagramXml, edgeStyle);
+        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode, diagramXml, edgeStyle, conditionShape);
         
         const parser = new DOMParser();
         const doc = parser.parseFromString(generatedXml, "text/xml");
@@ -316,7 +319,7 @@ export default function App() {
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [pseudocode, flow, edgeStyle, logAction]);
+  }, [pseudocode, flow, edgeStyle, conditionShape, logAction]);
 
   useEffect(() => {
     if (panels.includes('python')) {
@@ -348,6 +351,7 @@ export default function App() {
       
       setRuntimeActiveNodeId(newRunner.currentNodeId);
       setIsPlaying(false);
+      setIsDebuggerActive(true);
       logAction('DEBUGGER_STARTED');
       return newRunner;
   }, [diagramXml, setIsPlaying, logAction]);
@@ -359,6 +363,7 @@ export default function App() {
       runnerRef.current = null;
       setRuntimeActiveNodeId(null);
       setInputRequest(null);
+      setIsDebuggerActive(false);
       if (clearData) {
           setRuntimeVars({});
           setRuntimeOutput([]);
@@ -463,8 +468,9 @@ export default function App() {
             colorMode={colorMode}
             groupColoring={groupColoring}
             showDebugger={showDebugger}
+            conditionShape={conditionShape}
             onSelectionChange={handleSelectionChange}
-            externalSelectedIds={runtimeActiveNodeId ? [runtimeActiveNodeId] : externalSelectedIds}
+            externalSelectedIds={isDebuggerActive && runtimeActiveNodeId ? [runtimeActiveNodeId] : externalSelectedIds}
             activeRuntimeNodeId={runtimeActiveNodeId}
             breakpoints={showDebugger ? breakpoints : []}
             onBreakpointToggle={toggleBreakpoint}
@@ -619,11 +625,11 @@ export default function App() {
             breakpoints={showDebugger ? breakpoints : []}
             nodeLineMap={nodeLineMap}
             onBreakpointToggle={toggleBreakpoint}
-            readOnly={flow === 'diagram-to-code'}
+            readOnly={flow === 'diagram-to-code' || isPlayingState || inputRequest !== null}
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}
             blocks={blocksToHighlight}
-            runtimeActiveLine={runtimeActiveNodeId !== null ? nodeLineMap[runtimeActiveNodeId] : null}
-            highlightLines={selectedNodeIds.map(id => nodeLineMap[id]).filter(l => l !== undefined && l !== null)}
+            runtimeActiveLine={isDebuggerActive && runtimeActiveNodeId !== null ? nodeLineMap[runtimeActiveNodeId] : null}
+            highlightLines={!isDebuggerActive ? selectedNodeIds.map(id => nodeLineMap[id]).filter(l => l !== undefined && l !== null) : []}
           />
         </div>
       );
@@ -640,7 +646,7 @@ export default function App() {
             <Bug size={14} />
             <span className="font-bold tracking-wide">TESTING REŽIM</span>
             <span className="hidden sm:inline border-l border-purple-400/50 pl-2 ml-1 text-purple-200">
-                Našli jste chybu? Stáhněte si log akcí z tohoto sezení a pošlete mi ho.
+                Našli jste chybu? Stáhněte si log akcí z tohoto sezení a pošlete nám ho.
             </span>
          </div>
          <button onClick={downloadLogs} className="bg-purple-800 dark:bg-purple-950 hover:bg-purple-900 text-purple-100 px-3 py-1 rounded shadow-sm border border-purple-500/30 transition-colors font-semibold flex items-center gap-1">
@@ -684,6 +690,7 @@ export default function App() {
                       </button>
                       {settingsDropdown === index && (
                         <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 p-3" onClick={e => e.stopPropagation()}>
+                          
                           <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">Pravda / Nepravda alias</label>
                           <select
                             value={edgeStyle}
@@ -694,6 +701,16 @@ export default function App() {
                             <option value="ano-ne">Ano / Ne</option>
                             <option value="yes-no">Yes / No</option>
                             <option value="+-">+ / -</option>
+                          </select>
+
+                          <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block mt-3">Tvar podmínky</label>
+                          <select
+                            value={conditionShape}
+                            onChange={(e) => { setConditionShape(e.target.value); localStorage.setItem('conditionShape', e.target.value); logAction('SETTINGS_CHANGED', { conditionShape: e.target.value }); }}
+                            className="w-full text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none p-1.5 cursor-pointer text-gray-700 dark:text-gray-300 mb-4"
+                          >
+                            <option value="hexagon">Šestiúhelník</option>
+                            <option value="diamond">Kosočtverec</option>
                           </select>
 
                           <div className="space-y-3">
@@ -756,6 +773,10 @@ export default function App() {
 
             {index === 0 && panels.length === 2 && (
               <div className="w-12 flex flex-col items-center justify-center shrink-0 gap-4">
+                <button onClick={(e) => { e.stopPropagation(); setPanels([panels[1], panels[0]]); logAction('PANELS_SWAPPED'); }} className="p-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-full hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm text-gray-600 dark:text-gray-300 transition-colors">
+                  <ArrowRightLeft size={18} />
+                </button>
+                
                 {panels.includes('python') ? (
                   <button className="p-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-sm text-gray-400 dark:text-gray-600 cursor-not-allowed" title="Převod do Pythonu je jednosměrný">
                     {panels[0] === 'python' ? <ArrowLeft size={20} /> : <ArrowRight size={20} />}
