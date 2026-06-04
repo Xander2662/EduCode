@@ -37,11 +37,19 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
 
     edges.forEach(e => {
         const tgt = nodes.find(n => n.id === e.target);
-        if (tgt && tgt.type === 'CONDITION') {
-            
+        
+        let conditionNode = null;
+        if (tgt && tgt.type === 'CONDITION') conditionNode = tgt;
+        else if (tgt && tgt.type === 'MERGE') {
+            const edgeToCond = edges.find(ed => ed.source === tgt.id);
+            const nextNode = edgeToCond ? nodes.find(n => n.id === edgeToCond.target) : null;
+            if (nextNode && nextNode.type === 'CONDITION') conditionNode = nextNode;
+        }
+
+        if (conditionNode) {
             let isBackEdge = false;
             let visitedDFS = new Set();
-            let stack = [tgt.id];
+            let stack = [conditionNode.id];
             
             while(stack.length > 0) {
                 let curr = stack.pop();
@@ -54,7 +62,7 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
 
             if (isBackEdge) {
                 const descendants = new Set();
-                const qDesc = [tgt.id];
+                const qDesc = [conditionNode.id];
                 while(qDesc.length > 0) {
                     const curr = qDesc.shift();
                     edges.filter(x => x.source === curr).forEach(x => {
@@ -77,18 +85,20 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
                     });
                 }
 
-                const lGrp = new Set([tgt.id, e.source]);
+                const lGrp = new Set([conditionNode.id, e.source]);
+                if (tgt && tgt.type === 'MERGE') lGrp.add(tgt.id);
+                
                 descendants.forEach(d => {
                     if (ancestors.has(d)) lGrp.add(d);
                 });
 
                 const src = nodes.find(n => n.id === e.source);
                 const srcW = src?.measured?.width || src?.width || 100;
-                const tgtW = tgt.measured?.width || tgt.width || 140;
+                const tgtW = conditionNode.measured?.width || conditionNode.width || 160;
                 
                 let routeLeft = true;
                 
-                const entryEdge = edges.find(ed => ed.source === tgt.id && lGrp.has(ed.target));
+                const entryEdge = edges.find(ed => ed.source === conditionNode.id && lGrp.has(ed.target));
                 
                 if (entryEdge && entryEdge.sourceHandle === 's-right') {
                     routeLeft = false;
@@ -102,7 +112,7 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
                         routeLeft = true;
                     } else {
                         const srcCenterX = (src?.position.x || 0) + srcW / 2;
-                        const tgtCenterX = tgt.position.x + tgtW / 2;
+                        const tgtCenterX = conditionNode.position.x + tgtW / 2;
                         routeLeft = srcCenterX < tgtCenterX;
                     }
                 }

@@ -14,7 +14,15 @@ export const drawioToReactFlow = (xml) => {
 
     if (vertex === '1') {
       let value = cell.getAttribute('value') || '';
-      value = value.replace(/<br\s*\/?>/gi, '\n').replace(/<\/?[^>]+(>|$)/g, "").replace(/&nbsp;/gi, ' ').replace(/&gt;/gi, '>').replace(/&lt;/gi, '<').replace(/&amp;/gi, '&').trim();
+      value = value.replace(/<br\s*\/?>/gi, '\n')
+                   .replace(/<\/div>/gi, '\n')
+                   .replace(/<\/p>/gi, '\n')
+                   .replace(/<\/?(?:b|i|u|span|font|div|p|strong|em|strike|s|sub|sup|h[1-6])(?:\s+[^>]*?)?>/gi, '')
+                   .replace(/&nbsp;/gi, ' ')
+                   .replace(/&gt;/gi, '>')
+                   .replace(/&lt;/gi, '<')
+                   .replace(/&amp;/gi, '&')
+                   .trim();
 
       const style = cell.getAttribute('style') || '';
       const geo = cell.querySelector('mxGeometry');
@@ -49,7 +57,15 @@ export const drawioToReactFlow = (xml) => {
       const source = cell.getAttribute('source');
       const target = cell.getAttribute('target');
       let value = cell.getAttribute('value') || '';
-      value = value.replace(/<[^>]*>?/gm, '').replace(/&nbsp;/gi, ' ').trim();
+      value = value.replace(/<br\s*\/?>/gi, '\n')
+                   .replace(/<\/div>/gi, '\n')
+                   .replace(/<\/p>/gi, '\n')
+                   .replace(/<\/?(?:b|i|u|span|font|div|p|strong|em|strike|s|sub|sup|h[1-6])(?:\s+[^>]*?)?>/gi, '')
+                   .replace(/&nbsp;/gi, ' ')
+                   .replace(/&gt;/gi, '>')
+                   .replace(/&lt;/gi, '<')
+                   .replace(/&amp;/gi, '&')
+                   .trim();
 
       if (source && target) {
         const style = cell.getAttribute('style') || '';
@@ -71,7 +87,7 @@ export const reactFlowToDrawio = (nodes, edges) => {
   const STYLES = {
     START_END: "ellipse;whiteSpace=wrap;html=1;",
     ACTION: "whiteSpace=wrap;html=1;",
-    IO: "shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;",
+    IO: "shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;spacingLeft=35;spacingRight=30;",
     CONDITION: "rhombus;whiteSpace=wrap;html=1;",
     COMMENT: "shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;strokeColor=#d6b656;",
     MERGE: "ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;resizable=0;movable=0;rotatable=0;",

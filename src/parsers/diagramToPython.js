@@ -1,4 +1,4 @@
-export const parseDrawioToPseudocode = (xml) => {
+export const parseDrawioToPython = (xml) => {
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(xml, "text/xml");
@@ -7,24 +7,6 @@ export const parseDrawioToPseudocode = (xml) => {
     let nodes = {};
     let edges = [];
     let errors = [];
-
-    const KEYWORDS = new Set(['AND','OR','NOT','TRUE','FALSE','INPUT','PRINT','VSTUP','MOD','DIV']);
-
-    const extractVariables = (expr) => {
-        const noStrings = expr.replace(/"[^"]*"/g, '');
-        const vars = noStrings.match(/[a-zA-Z_]\w*/g) || [];
-        return vars.filter(v => !KEYWORDS.has(v.toUpperCase()));
-    };
-
-    const checkVariables = (expr, scope) => {
-        // Ztišeno: Pro výukové a testovací účely (často fragmentované diagramy) 
-        // nevyhazujeme chyby o Scope. Reálné chyby zachytí až samotný Python/Runner běh.
-    };
-
-    const declareVariables = (expr, scope) => {
-        const vars = extractVariables(expr);
-        vars.forEach(v => scope.add(v));
-    };
 
     const cleanTextWithLines = (html) => {
       if (!html) return '';
@@ -201,7 +183,15 @@ export const parseDrawioToPseudocode = (xml) => {
         }
     };
 
-    const generateStatement = (node, indent = "", currentScope) => {
+    const formatCondition = (cond) => {
+        return cond.replace(/\bOR\b/gi, 'or')
+                   .replace(/\bAND\b/gi, 'and')
+                   .replace(/\bNOT\b/gi, 'not')
+                   .replace(/\bTRUE\b/gi, 'True')
+                   .replace(/\bFALSE\b/gi, 'False');
+    };
+
+    const generateStatement = (node, indent = "") => {
         printCommentsBeforeY(node.y, indent);
         if (node.type === 'MERGE' || !node.value) return;
 
@@ -211,20 +201,13 @@ export const parseDrawioToPseudocode = (xml) => {
                 if (!val) return;
                 
                 if (val.includes('=')) {
-                    const parts = val.split('=');
-                    const left = parts[0];
-                    const right = parts.slice(1).join('=');
-                    checkVariables(right, currentScope);
-                    declareVariables(left, currentScope);
                     appendLine(`${indent}${val}`, node.id);
                 } else if (val.startsWith('"') && val.endsWith('"')) {
-                    appendLine(`${indent}PRINT(${val})`, node.id);
+                    appendLine(`${indent}print(${val})`, node.id);
                 } else if (val.toUpperCase().startsWith('RETURN')) {
-                    checkVariables(val.substring(6), currentScope);
-                    appendLine(`${indent}${val}`, node.id);
+                    appendLine(`${indent}${val.replace(/^RETURN/i, 'return')}`, node.id);
                 } else {
                     let isFuncFormat = val.includes('(') || val.includes(')');
-                    checkVariables(val, currentScope);
                     appendLine(`${indent}${isFuncFormat ? val : val + '()'}`, node.id);
                 }
             });
@@ -239,18 +222,15 @@ export const parseDrawioToPseudocode = (xml) => {
                     if (inner.startsWith('(') && inner.endsWith(')')) {
                         inner = inner.substring(1, inner.length - 1).trim();
                     }
-                    checkVariables(inner, currentScope);
-                    appendLine(`${indent}PRINT(${inner})`, node.id);
+                    appendLine(`${indent}print(${inner})`, node.id);
                 } else {
-                    // Očištění VSTUP prefixu
                     let p = val.replace(/^VSTUP\s+/i, '').trim();
-                    if (!p) p = "x"; // Fallback pokud blok obsahoval jen 'Vstup'
+                    if (!p) p = "x";
                     
                     p.split(',').forEach(part => {
                         let cleanV = part.replace(/\[.*\]/, '').trim();
-                        if (cleanV) declareVariables(cleanV, currentScope);
+                        if (cleanV) appendLine(`${indent}${cleanV} = input()`, node.id);
                     });
-                    appendLine(`${indent}Vstup ${p}`, node.id);
                 }
             });
         }
@@ -290,9 +270,8 @@ export const parseDrawioToPseudocode = (xml) => {
 
     startNodes.forEach((start, index) => {
         let endNodeId = null;
-        let endNodeVal = `END${start.entityType || 'FUNCTION'}`;
 
-        const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null, currentScope = new Set()) => {
+        const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null) => {
             if (!nodeId || !nodes[nodeId] || visited.has(nodeId)) return;
             if (nodeId === stopId) return;
 
@@ -305,20 +284,23 @@ export const parseDrawioToPseudocode = (xml) => {
                 if (declaredFuncs.has(fName) && !fName.startsWith('fragment_')) errors.push(`Duplicitní název funkce/třídy '${fName}'`);
                 declaredFuncs.add(fName);
 
-                appendLine(`${indent}${node.entityType} ${fName}()`, node.id);
-                if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId, currentScope);
+                const defLine = node.entityType === 'CLASS' ? `class ${fName}:` : `def ${fName}():`;
+                appendLine(`${indent}${defLine}`, node.id);
+                
+                const beforeLen = codeLines.length;
+                if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId);
+                if (codeLines.length === beforeLen) appendLine(`${indent}    pass`);
+                
                 printCommentsBeforeY(Infinity, indent + "    ");
             }
             else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE') {
-                generateStatement(node, indent, currentScope);
+                generateStatement(node, indent);
                 if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
-                    traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope);
+                    traverse(node.next[0].target, indent, new Set(inPath), stopId);
                 }
             }
             else if (node.type === 'CONDITION') {
                 printCommentsBeforeY(node.y, indent);
-                
-                checkVariables(node.value, currentScope);
 
                 let trueEdge = node.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes(e.value?.toLowerCase().trim()));
                 let falseEdge = node.next.find(e => ['ne', 'no', 'false', '0', 'n', '-'].includes(e.value?.toLowerCase().trim()));
@@ -348,14 +330,17 @@ export const parseDrawioToPseudocode = (xml) => {
                 const fLoops = fTarget ? doesPathLoopBack(fTarget, node.id) : false;
 
                 let cleanCond = node.value.replace(/^(?:WHILE|IF)\s+/i, '').trim();
+                cleanCond = formatCondition(cleanCond);
 
                 if (tLoops || fLoops) {
                     const isTrueLoop = tLoops;
                     const isFor = node.value.toUpperCase().startsWith('FOR ');
-                    const condText = isTrueLoop ? cleanCond : `NOT (${cleanCond})`;
+                    const condText = isTrueLoop ? cleanCond : `not (${cleanCond})`;
                     
-                    appendLine(`${indent}${isFor ? '' : 'WHILE '}${condText} DO`, node.id);
+                    const loopCmd = isFor ? cleanCond : `while ${condText}:`;
+                    appendLine(`${indent}${loopCmd}`, node.id);
                     
+                    const beforeLen = codeLines.length;
                     const loopStartTarget = isTrueLoop ? tTarget : fTarget;
                     if (loopStartTarget) {
                         const temporarilyUnvisited = new Set();
@@ -371,49 +356,45 @@ export const parseDrawioToPseudocode = (xml) => {
                         
                         const loopInPath = new Set();
                         loopInPath.add(node.id);
-                        traverse(loopStartTarget, indent + "    ", loopInPath, node.id, currentScope);
+                        traverse(loopStartTarget, indent + "    ", loopInPath, node.id);
                         
                         temporarilyUnvisited.forEach(id => visited.add(id));
                     }
 
-                    appendLine(`${indent}${isFor ? 'ENDFOR' : 'ENDWHILE'}`);
+                    if (codeLines.length === beforeLen) appendLine(`${indent}    pass`);
 
                     const exitNode = isTrueLoop ? fTarget : tTarget;
-                    if (exitNode && exitNode !== stopId && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId, currentScope);
+                    if (exitNode && exitNode !== stopId && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId);
                 } else {
                     let mergeNodeId = findConvergence(tTarget, fTarget);
                     
-                    appendLine(`${indent}IF ${cleanCond} THEN`, node.id);
-                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope);
+                    appendLine(`${indent}if ${cleanCond}:`, node.id);
+                    const beforeTrue = codeLines.length;
+                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId);
+                    if (codeLines.length === beforeTrue) appendLine(`${indent}    pass`);
                     
                     if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'END') {
-                        appendLine(`${indent}ELSE`);
-                        traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope);
+                        appendLine(`${indent}else:`);
+                        const beforeFalse = codeLines.length;
+                        traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId);
+                        if (codeLines.length === beforeFalse) appendLine(`${indent}    pass`);
                     }
-                    appendLine(`${indent}ENDIF`);
                     
                     if (mergeNodeId && mergeNodeId !== stopId) {
-                        traverse(mergeNodeId, indent, new Set(inPath), stopId, currentScope);
+                        traverse(mergeNodeId, indent, new Set(inPath), stopId);
                     }
                 }
             }
             else if (node.type === 'END') {
                 endNodeId = node.id;
-                let val = node.value.trim();
-                if (val && val.toUpperCase() !== 'KONEC' && val.toUpperCase() !== 'END') {
-                    endNodeVal = val;
-                }
             }
             inPath.delete(nodeId);
         };
 
         traverse(start.id);
-
+        
         if (endNodeId) {
             printCommentsBeforeY(nodes[endNodeId].y, "");
-            appendLine(endNodeVal, endNodeId);
-        } else {
-            appendLine("ENDFUNCTION");
         }
         
         printCommentsBeforeY(Infinity, "");
@@ -424,8 +405,14 @@ export const parseDrawioToPseudocode = (xml) => {
     });
 
     let code = codeLines.join('\n').trim();
+    if (code.length === 0) code = "pass";
+    
+    if (startNodes.length === 1 && code.includes("def main():")) {
+        code += "\n\nif __name__ == '__main__':\n    main()";
+    }
+
     return { code, errors, nodeLineMap };
   } catch (err) {
-    return { code: "", errors: ["Kritická chyba parseru: " + err.message], nodeLineMap: {} };
+    return { code: "pass", errors: ["Kritická chyba parseru: " + err.message], nodeLineMap: {} };
   }
 };
