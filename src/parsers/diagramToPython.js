@@ -334,13 +334,13 @@ export const parseDrawioToPython = (xml) => {
 
                 if (tLoops || fLoops) {
                     const isTrueLoop = tLoops;
-                    const isFor = node.value.toUpperCase().startsWith('FOR ');
+                    let isFor = node.value.toUpperCase().startsWith('FOR ');
                     const condText = isTrueLoop ? cleanCond : `not (${cleanCond})`;
                     
+                    const headerLineIndex = codeLines.length;
                     const loopCmd = isFor ? cleanCond : `while ${condText}:`;
                     appendLine(`${indent}${loopCmd}`, node.id);
                     
-                    const beforeLen = codeLines.length;
                     const loopStartTarget = isTrueLoop ? tTarget : fTarget;
                     if (loopStartTarget) {
                         const temporarilyUnvisited = new Set();
@@ -361,7 +361,57 @@ export const parseDrawioToPython = (xml) => {
                         temporarilyUnvisited.forEach(id => visited.add(id));
                     }
 
-                    if (codeLines.length === beforeLen) appendLine(`${indent}    pass`);
+                    // Semantic FOR loop detection
+                    if (!isFor && isTrueLoop) {
+                        const condMatch = cleanCond.match(/^([a-zA-Z_]\w*)\s*(<=|>=|==|!=|<|>)\s*(.*)$/);
+                        if (condMatch) {
+                            const loopVar = condMatch[1];
+                            const op = condMatch[2];
+                            const loopLimit = condMatch[3];
+                            
+                            let initLineIdx = -1;
+                            let initVal = null;
+                            for (let i = headerLineIndex - 1; i >= 0; i--) {
+                                const match = codeLines[i].match(new RegExp(`^\\s*${loopVar}\\s*(?:=|<-)\\s*(.*)$`, 'i'));
+                                if (match) {
+                                    initVal = match[1];
+                                    initLineIdx = i;
+                                    break;
+                                }
+                            }
+                            
+                            if (initLineIdx !== -1 && codeLines.length > headerLineIndex + 1) {
+                                let lastLoopBodyIdx = codeLines.length - 1;
+                                const lastLine = codeLines[lastLoopBodyIdx];
+                                const incMatch = lastLine.match(new RegExp(`^\\s*${loopVar}\\s*(?:=|<-)\\s*${loopVar}\\s*[+\\-]\\s*.*$`, 'i')) || 
+                                                 lastLine.match(new RegExp(`^\\s*${loopVar}\\s*[+\\-]=(.*)$`, 'i'));
+                                if (incMatch) {
+                                    codeLines.splice(lastLoopBodyIdx, 1); // Remove increment
+                                    let rangeLimit = loopLimit;
+                                    if (op === '<=') {
+                                        if (!isNaN(loopLimit)) {
+                                            rangeLimit = (parseInt(loopLimit, 10) + 1).toString();
+                                        } else {
+                                            rangeLimit = `${loopLimit} + 1`;
+                                        }
+                                    }
+                                    codeLines[headerLineIndex] = `${indent}for ${loopVar} in range(${initVal}, ${rangeLimit}):`;
+                                    codeLines.splice(initLineIdx, 1); // Remove init
+                                    isFor = true;
+                                }
+                            }
+                        }
+                    }
+
+                    // headerLineIndex is now either the while or for header. If the loop body is empty, we need pass.
+                    // Wait, since we might have removed init, headerLineIndex could be off by 1 if init was removed.
+                    // Let's just check the last element.
+                    let loopHeaderIndex = isFor && codeLines[codeLines.length - 1] === codeLines[headerLineIndex - (isFor ? 1 : 0)] ? codeLines.length - 1 : headerLineIndex;
+                    if (isFor && codeLines.length > 0 && codeLines[codeLines.length - 1].trim().startsWith('for ')) {
+                        appendLine(`${indent}    pass`);
+                    } else if (!isFor && codeLines.length > 0 && codeLines[codeLines.length - 1].trim().startsWith('while ')) {
+                        appendLine(`${indent}    pass`);
+                    }
 
                     const exitNode = isTrueLoop ? fTarget : tTarget;
                     if (exitNode && exitNode !== stopId && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId);

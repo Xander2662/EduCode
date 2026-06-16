@@ -351,9 +351,10 @@ export const parseDrawioToPseudocode = (xml) => {
 
                 if (tLoops || fLoops) {
                     const isTrueLoop = tLoops;
-                    const isFor = node.value.toUpperCase().startsWith('FOR ');
+                    let isFor = node.value.toUpperCase().startsWith('FOR ');
                     const condText = isTrueLoop ? cleanCond : `NOT (${cleanCond})`;
                     
+                    const headerLineIndex = codeLines.length;
                     appendLine(`${indent}${isFor ? '' : 'WHILE '}${condText} DO`, node.id);
                     
                     const loopStartTarget = isTrueLoop ? tTarget : fTarget;
@@ -374,6 +375,39 @@ export const parseDrawioToPseudocode = (xml) => {
                         traverse(loopStartTarget, indent + "    ", loopInPath, node.id, currentScope);
                         
                         temporarilyUnvisited.forEach(id => visited.add(id));
+                    }
+
+                    // Semantic FOR loop detection
+                    if (!isFor && isTrueLoop) {
+                        const condMatch = cleanCond.match(/^([a-zA-Z_]\w*)\s*(?:<=|>=|==|!=|<|>)\s*(.*)$/);
+                        if (condMatch) {
+                            const loopVar = condMatch[1];
+                            const loopLimit = condMatch[2];
+                            
+                            let initLineIdx = -1;
+                            let initVal = null;
+                            for (let i = headerLineIndex - 1; i >= 0; i--) {
+                                const match = codeLines[i].match(new RegExp(`^\\s*(?:SET\\s+)?${loopVar}\\s*(?:=|<-)\\s*(.*)$`, 'i'));
+                                if (match) {
+                                    initVal = match[1];
+                                    initLineIdx = i;
+                                    break;
+                                }
+                            }
+                            
+                            if (initLineIdx !== -1 && codeLines.length > headerLineIndex + 1) {
+                                let lastLoopBodyIdx = codeLines.length - 1;
+                                const lastLine = codeLines[lastLoopBodyIdx];
+                                const incMatch = lastLine.match(new RegExp(`^\\s*${loopVar}\\s*(?:=|<-)\\s*${loopVar}\\s*[+\\-]\\s*.*$`, 'i')) || 
+                                                 lastLine.match(new RegExp(`^\\s*${loopVar}\\s*[+\\-]=(.*)$`, 'i'));
+                                if (incMatch) {
+                                    codeLines.splice(lastLoopBodyIdx, 1); // Remove increment
+                                    codeLines[headerLineIndex] = `${indent}FOR ${loopVar} = ${initVal} TO ${loopLimit} DO`;
+                                    codeLines.splice(initLineIdx, 1); // Remove init
+                                    isFor = true;
+                                }
+                            }
+                        }
                     }
 
                     appendLine(`${indent}${isFor ? 'ENDFOR' : 'ENDWHILE'}`);

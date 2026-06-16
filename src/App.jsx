@@ -277,7 +277,7 @@ export default function App() {
   useEffect(() => {
     if (!panels.includes('pseudocode')) return;
     if (flow === 'code-to-diagram') return;
-    if (flow === 'bidirectional' && lastEdited.current !== 'drawio') return;
+    if (flow === 'bidirectional' && lastEdited.current === 'pseudocode') return;
 
     const timeoutId = setTimeout(() => {
       try {
@@ -376,7 +376,7 @@ export default function App() {
   useEffect(() => {
     if (panels.includes('python')) {
       if (flow === 'code-to-diagram') return;
-      if (flow === 'bidirectional' && (lastEdited.current === 'python' || lastEdited.current === 'pseudocode')) return;
+      if (flow === 'bidirectional' && lastEdited.current === 'python') return;
 
       const timeoutId = setTimeout(() => {
         try {
@@ -540,7 +540,7 @@ export default function App() {
           {inputRequest && (
               <div className="absolute inset-0 z-[100] flex items-center justify-center bg-gray-900/40 dark:bg-black/60 backdrop-blur-sm">
                   <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-80">
-                      <h3 className="font-bold text-lg mb-2 text-gray-800 dark:text-gray-100">Vyžadován vstup</h3>
+                      <h2 className="font-bold text-lg mb-2 text-gray-800 dark:text-gray-100">Vyžadován vstup</h2>
                       <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{inputRequest.message}</p>
                       <input 
                           type="text" 
@@ -615,14 +615,14 @@ export default function App() {
                     
                     <div className="flex gap-2 items-end pointer-events-auto relative">
                         <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2 flex gap-2">
-                            <button onClick={() => doStep(true)} disabled={isPlayingState || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all" title="Krokovat vpřed (ignoruje zarážky)"><StepForward size={20} /></button>
-                            <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlayingState ? 'bg-amber-100 text-amber-600 hover:bg-amber-200' : 'bg-green-100 text-green-600 hover:bg-green-200'}`} title={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
+                            <button onClick={() => doStep(true)} disabled={isPlayingState || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all" aria-label="Krokovat vpřed (ignoruje zarážky)" title="Krokovat vpřed (ignoruje zarážky)"><StepForward size={20} /></button>
+                            <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlayingState ? 'bg-amber-100 text-amber-600 hover:bg-amber-200' : 'bg-green-100 text-green-600 hover:bg-green-200'}`} aria-label={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"} title={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
                                 {isPlayingState ? <Pause size={20} /> : <Play size={20} />}
                             </button>
-                            <button onClick={() => stopDebugger(true)} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 disabled:opacity-30 transition-all" title="Ukončit debugger a vymazat data"><StopSquare size={20} /></button>
+                            <button onClick={() => stopDebugger(true)} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 disabled:opacity-30 transition-all" aria-label="Ukončit debugger a vymazat data" title="Ukončit debugger a vymazat data"><StopSquare size={20} /></button>
                         </div>
                         <div className="relative">
-                            <button onClick={(e) => { e.stopPropagation(); setShowDebugSettings(!showDebugSettings); }} className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" title="Nastavení rychlosti">
+                            <button onClick={(e) => { e.stopPropagation(); setShowDebugSettings(!showDebugSettings); }} className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" aria-label="Nastavení rychlosti" title="Nastavení rychlosti">
                                 <Settings size={18} />
                             </button>
                             {showDebugSettings && (
@@ -695,7 +695,7 @@ export default function App() {
         <div className="flex-1 flex flex-col overflow-hidden relative bg-white dark:bg-gray-900">
           {parseErrors.length > 0 && (
             <div className="bg-red-50 dark:bg-red-900/30 border-b border-red-500 p-3 z-10">
-              <h4 className="text-red-700 dark:text-red-400 font-bold text-sm flex items-center gap-2 mb-2"><AlertCircle size={16} /> Upozornění</h4>
+              <h2 className="text-red-700 dark:text-red-400 font-bold text-sm flex items-center gap-2 mb-2"><AlertCircle size={16} /> Upozornění</h2>
               <ul className="text-xs text-red-600 dark:text-red-300 list-inside">
                 {parseErrors.map((e, i) => <ErrorItem key={i} error={e} />)}
               </ul>
@@ -748,7 +748,7 @@ export default function App() {
             {panels.map(p => PANEL_TYPES[p].label).join(' ⇄ ')}
           </span>
         </div>
-        <button onClick={(e) => { e.stopPropagation(); setIsDarkMode(!isDarkMode); }} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"><Sun size={20} /></button>
+        <button onClick={(e) => { e.stopPropagation(); setIsDarkMode(!isDarkMode); }} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors" aria-label={isDarkMode ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"}><Sun size={20} /></button>
       </header>
 
       <main className="flex-1 flex p-4 gap-4" style={{ overflow: 'hidden' }}>

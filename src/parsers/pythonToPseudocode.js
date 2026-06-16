@@ -122,7 +122,30 @@ export const parsePythonToPseudocode = (pythonCode) => {
 
         if (trimmed.startsWith('for ')) {
             let cond = trimmed.substring(4).replace(/:$/, '').trim();
-            cond = formatCondition(cond);
+            
+            const rangeMatch = cond.match(/^([a-zA-Z_]\w*)\s+in\s+range\((.*)\)$/i);
+            if (rangeMatch) {
+                const loopVar = rangeMatch[1];
+                const args = rangeMatch[2].split(',').map(s => s.trim());
+                let initVal = '0';
+                let toVal = args[0];
+                if (args.length > 1) {
+                    initVal = args[0];
+                    toVal = args[1];
+                }
+                
+                let limit = toVal;
+                if (limit.endsWith('+ 1') || limit.endsWith('+1')) {
+                    limit = limit.replace(/\+\s*1$/, '').trim();
+                } else if (!isNaN(limit)) {
+                    limit = (parseInt(limit) - 1).toString();
+                }
+                
+                cond = `${loopVar} = ${initVal} TO ${limit}`;
+            } else {
+                cond = formatCondition(cond);
+            }
+            
             pseudocodeLines.push(`${getIndentString(indentSpaces)}FOR ${cond} DO`);
             scopeStack.push({ type: 'FOR', triggerIndent: indentSpaces, visualIndent: indentSpaces });
             continue;

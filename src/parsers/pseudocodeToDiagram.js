@@ -257,6 +257,24 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 const isFor = upper.startsWith('FOR ');
                 let condText = isFor ? line.substring(0, upper.lastIndexOf(' DO')).trim() : line.substring(6, upper.lastIndexOf(' DO')).trim();
 
+                let forVar = null;
+                let forStep = '1';
+                if (isFor) {
+                    const forMatch = condText.match(/^FOR\s+([a-zA-Z_]\w*)\s*(?:=|<-)\s*(.*?)\s+TO\s+(.*)$/i);
+                    if (forMatch) {
+                        forVar = forMatch[1];
+                        const initVal = forMatch[2];
+                        const toVal = forMatch[3];
+                        
+                        const initId = addNode(`${forVar} = ${initVal}`, 'ACTION', getXPos());
+                        lineToNodeId[i] = initId;
+                        pendingExits.forEach(exit => addEdge(exit.id, initId, exit.text, exit.handle, "t-top"));
+                        pendingExits = [{ id: initId, text: "", handle: "s-bottom" }];
+                        
+                        condText = `${forVar} <= ${toVal}`;
+                    }
+                }
+
                 let isNot = false;
                 let notMatch = condText.match(/^NOT\s*\((.*)\)$/i);
                 if (!notMatch) notMatch = condText.match(/^NOT\s+(.*)$/i);
@@ -266,21 +284,31 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 }
 
                 const loopId = addNode(condText, 'CONDITION', getXPos());
-                lineToNodeId[i] = loopId;
+                if (!isFor) lineToNodeId[i] = loopId;
 
                 pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
                 const ports = getConditionPorts(loopId, isNot);
-                stack.push({ type: 'LOOP', id: loopId, mergeId: null, isNot });
+                stack.push({ type: 'LOOP', id: loopId, mergeId: null, isNot, isFor, forVar, forStep });
                 pendingExits = [{ id: loopId, text: ports.tText, handle: ports.tHandle }];
                 
             }
             else if (upper === 'ENDWHILE' || upper === 'ENDFOR') {
                 const currentLoop = stack.pop();
 
-                pendingExits.forEach(exit => {
-                    let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.id, currentLoop.isNot).tHandle : exit.handle;
-                    addEdge(exit.id, currentLoop.id, exit.text, returnHandle, "t-top");
-                });
+                if (currentLoop.isFor && currentLoop.forVar) {
+                    const incId = addNode(`${currentLoop.forVar} = ${currentLoop.forVar} + ${currentLoop.forStep}`, 'ACTION', getXPos());
+                    lineToNodeId[i] = incId;
+                    pendingExits.forEach(exit => {
+                        let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.id, currentLoop.isNot).tHandle : exit.handle;
+                        addEdge(exit.id, incId, exit.text, returnHandle, "t-top");
+                    });
+                    addEdge(incId, currentLoop.id, "", "s-bottom", "t-top");
+                } else {
+                    pendingExits.forEach(exit => {
+                        let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.id, currentLoop.isNot).tHandle : exit.handle;
+                        addEdge(exit.id, currentLoop.id, exit.text, returnHandle, "t-top");
+                    });
+                }
                 
                 const ports = getConditionPorts(currentLoop.id, currentLoop.isNot);
                 pendingExits = [{ id: currentLoop.id, text: ports.fText, handle: ports.fHandle }];
