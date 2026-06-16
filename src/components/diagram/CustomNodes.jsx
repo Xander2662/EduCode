@@ -53,7 +53,7 @@ export const StartEndNode = ({ id, data, selected }) => {
   return (
     <div className={`${bgClass} border-2 rounded-[2rem] min-w-[140px] min-h-[40px] flex flex-col justify-center items-center p-2 transition-all relative ${highlightClass} ${data.isBreakpoint ? 'ring-4 ring-red-500 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-3 -top-3 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
       )}
 
       {mode !== 'start' && <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />}
@@ -104,7 +104,7 @@ export const ActionNode = ({ id, data, selected }) => {
   return (
     <div className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass} ${data.isBreakpoint ? 'ring-4 ring-red-500 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-3 -top-3 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
       )}
       
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
@@ -177,7 +177,7 @@ export const IONode = ({ id, data, selected }) => {
   return (
     <div className={`relative min-w-[120px] min-h-[50px] flex flex-col transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-2 -top-2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
       )}
       
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
@@ -191,7 +191,7 @@ export const IONode = ({ id, data, selected }) => {
       
       <div className="pt-2 z-10"><DragHandle /></div>
       
-      <span onClick={data.onToggleIOType} className={`absolute top-[4px] left-[28px] text-[9px] font-bold cursor-pointer hover:opacity-75 ${badgeColor} select-none z-20 ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`} title="Kliknutím přepnete typ bloku">
+      <span onClick={data.onToggleIOType} className={`absolute top-[4px] left-[35px] text-[9px] font-bold cursor-pointer hover:opacity-75 ${badgeColor} select-none z-20 ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`} title="Kliknutím přepnete typ bloku">
           {isInput ? 'VSTUP' : 'VÝSTUP'}
       </span>
       
@@ -264,7 +264,7 @@ export const ConditionNode = ({ id, data, selected }) => {
     // Zvětšeno z min-w-[120px] min-h-[60px] na 160px x 80px, aby se posuvník pohodlně vešel do obou tvarů
     <div className={`relative flex flex-col items-center justify-center min-w-[160px] min-h-[80px] transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-2 -top-2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-6 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
       )}
 
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
