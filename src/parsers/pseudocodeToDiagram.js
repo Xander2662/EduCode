@@ -118,12 +118,20 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             fHandle = tHandle === 's-bottom' ? 's-right' : 's-bottom';
         }
 
-        return {
-            tText: isNot ? EL.f : EL.t,
-            fText: isNot ? EL.t : EL.f,
-            tHandle: isNot ? fHandle : tHandle,
-            fHandle: isNot ? tHandle : fHandle
-        };
+        let tText = EL.t;
+        let fText = EL.f;
+
+        if (isNot) {
+            let tempH = tHandle;
+            tHandle = fHandle;
+            fHandle = tempH;
+            
+            let tempT = tText;
+            tText = fText;
+            fText = tempT;
+        }
+
+        return { tHandle, fHandle, tText, fText };
     };
 
     let outNodes = [];
@@ -341,6 +349,11 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 else if (upper.startsWith('RETURN')) {
                     isIo = false;
                     text = line;
+                }
+                else {
+                    if (text.endsWith('()')) {
+                        text = text.substring(0, text.length - 2).trim();
+                    }
                 }
 
                 let xPos = getXPos();

@@ -1,11 +1,12 @@
 import React from 'react';
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useReactFlow, useNodes, Position, MarkerType } from '@xyflow/react';
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useReactFlow, useNodes, useEdges, Position, MarkerType } from '@xyflow/react';
 import { RefreshCcw } from 'lucide-react';
 import { edgeLabels } from './constants';
 
 export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data, selected }) => {
   const { setEdges } = useReactFlow();
   const nodes = useNodes();
+  const edges = useEdges();
   const isCondition = nodes.find(n => n.id === source)?.type === 'CONDITION';
   const isTargetMerge = nodes.find(n => n.id === target)?.type === 'MERGE';
   
@@ -16,7 +17,32 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
         let maxX = Math.max(sourceX, targetX);
         let minX = Math.min(sourceX, targetX);
         
+        const adj = {};
+        edges.forEach(e => {
+            if (!adj[e.source]) adj[e.source] = [];
+            if (!adj[e.target]) adj[e.target] = [];
+            adj[e.source].push(e.target);
+            adj[e.target].push(e.source);
+        });
+        
+        const connectedNodes = new Set();
+        const queue = [source];
+        connectedNodes.add(source);
+        
+        while (queue.length > 0) {
+            const curr = queue.shift();
+            if (adj[curr]) {
+                adj[curr].forEach(neighbor => {
+                    if (!connectedNodes.has(neighbor)) {
+                        connectedNodes.add(neighbor);
+                        queue.push(neighbor);
+                    }
+                });
+            }
+        }
+        
         nodes.forEach(n => {
+            if (!connectedNodes.has(n.id)) return;
             if (n.position.y >= targetY - 30 && n.position.y <= sourceY + 30) {
                 const nodeX = n.position.x;
                 const nodeMaxX = nodeX + (n.measured?.width || n.width || 150);

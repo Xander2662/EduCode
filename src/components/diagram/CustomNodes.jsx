@@ -159,15 +159,18 @@ export const IONode = ({ id, data, selected }) => {
 
   const handleUserChange = (e) => {
       let val = e.target.value;
-      if (val.toLowerCase().startsWith('vstup ')) {
-          val = val.substring(6).trim();
+      let lowerVal = val.toLowerCase();
+      if (lowerVal.startsWith('vstup ') || lowerVal.startsWith('input ') || lowerVal.startsWith('input(')) {
+          val = val.replace(/^(vstup|input)\s*\(/i, '').replace(/^(vstup|input)\s+/i, '').trim();
+          if (lowerVal.startsWith('input(') && val.endsWith(')')) val = val.substring(0, val.length - 1);
           e.target.value = val;
           if (data.ioType !== 'input') data.onToggleIOType();
-      } else if (val.toLowerCase().startsWith('vystup ') || val.toLowerCase().startsWith('výstup ')) {
-          val = val.substring(7).trim();
+      } else if (lowerVal.startsWith('vystup ') || lowerVal.startsWith('výstup ') || lowerVal.startsWith('print ') || lowerVal.startsWith('print(')) {
+          val = val.replace(/^(vystup|výstup|print)\s*\(/i, '').replace(/^(vystup|výstup|print)\s+/i, '').trim();
+          if (lowerVal.startsWith('print(') && val.endsWith(')')) val = val.substring(0, val.length - 1);
           e.target.value = val;
           if (data.ioType !== 'output') data.onToggleIOType();
-      } else if (val.toLowerCase() === 'vstup' || val.toLowerCase() === 'vystup' || val.toLowerCase() === 'výstup') {
+      } else if (lowerVal === 'vstup' || lowerVal === 'vystup' || lowerVal === 'výstup' || lowerVal === 'print' || lowerVal === 'input') {
           val = '';
           e.target.value = val;
       }
@@ -242,13 +245,16 @@ export const ConditionNode = ({ id, data, selected }) => {
   const rightEdge = edges.find(e => e.source === id && e.sourceHandle === 's-right');
 
   let isBottomTrue = true;
+  let isRightTrue = false;
+
   if (bottomEdge && bottomEdge.data?.label) {
       isBottomTrue = (bottomEdge.data.label === pref.t || bottomEdge.data.label === 'Ano' || bottomEdge.data.label === '+' || bottomEdge.data.label === 'Yes' || bottomEdge.data.label === 'True');
+      if (!rightEdge) isRightTrue = !isBottomTrue;
   }
 
-  let isRightTrue = false;
   if (rightEdge && rightEdge.data?.label) {
       isRightTrue = (rightEdge.data.label === pref.t || rightEdge.data.label === 'Ano' || rightEdge.data.label === '+' || rightEdge.data.label === 'Yes' || rightEdge.data.label === 'True');
+      if (!bottomEdge) isBottomTrue = !isRightTrue;
   }
 
   const bottomChar = isBottomTrue ? tChar : fChar;

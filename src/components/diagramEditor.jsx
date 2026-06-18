@@ -19,7 +19,7 @@ const nodeTypes = {
 };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, conditionShape, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction }) {
+function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, conditionShape, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction, onRequestTutorial }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
@@ -31,6 +31,49 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   
   const hoveredEdgeRef = useRef(null);
   const lastXmlRef = useRef(''); 
+
+  const [hoveredToolbarItem, setHoveredToolbarItem] = useState(null);
+  const [hoverProgress, setHoverProgress] = useState(0);
+  const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
+  const hoverStartTimeRef = useRef(0);
+  const animationFrameRef = useRef(null);
+  
+  const clearHover = useCallback(() => {
+    setHoveredToolbarItem(null);
+    setHoverProgress(0);
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+  }, []);
+
+  const handlePointerDown = (type, e) => {
+    if (readOnly) return;
+    setHoveredToolbarItem(type);
+    setCursorPos({ x: e.clientX, y: e.clientY });
+    hoverStartTimeRef.current = performance.now();
+    
+    const animate = (time) => {
+        const elapsed = time - hoverStartTimeRef.current;
+        if (elapsed < 500) {
+            setHoverProgress(0);
+        } else {
+            const p = Math.min((elapsed - 500) / 1000, 1);
+            setHoverProgress(p * 100);
+            if (p >= 1) {
+                clearHover();
+                if (onRequestTutorial) onRequestTutorial(type);
+                return;
+            }
+        }
+        animationFrameRef.current = requestAnimationFrame(animate);
+    };
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    animationFrameRef.current = requestAnimationFrame(animate);
+  };
+
+  const handlePointerMove = (e) => {
+    if (hoveredToolbarItem) {
+        setCursorPos({ x: e.clientX, y: e.clientY });
+    }
+  };
 
   const onXmlChangeRef = useRef(onXmlChange);
   const onImportXmlRef = useRef(onImportXml);
@@ -49,7 +92,16 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const selectedNodes = nodes.filter(n => n.selected);
   const selectedEdges = edges.filter(e => e.selected);
 
+  // =========================================================================================
+  // CRITICAL WARNING: FOCUS STEALING PREVENTION
+  // isUserInteractionRef is absolutely necessary. It prevents the diagram from echoing incoming
+  // XML updates back to App.jsx and forcefully stealing `lastEdited.current`.
+  // DO NOT REMOVE THIS FLAG. DO NOT remove `handleInteract()` from `onNodesChange`.
+  // =========================================================================================
+  const isUserInteractionRef = useRef(false);
+
   const handleInteract = useCallback(() => {
+    isUserInteractionRef.current = true;
     if (onInteractRef.current) onInteractRef.current();
   }, []);
 
@@ -332,19 +384,26 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     }
   }, [xml, readOnly, edgeStyle, setNodes, setEdges, updateNodeLabel]);
 
+  // =========================================================================================
+  // CRITICAL WARNING: XML EMISSION & INTERACTION FLAG
+  // DO NOT modify `isUserInteractionRef.current` logic here. It guarantees priority is only
+  // shifted in App.jsx when the user *physically interacted* with the diagram.
+  // =========================================================================================
   useEffect(() => {
+    if (readOnly) return;
     if (nodes.length > 0 || edges.length > 0) {
       const timer = setTimeout(() => {
         const exportNodes = nodes.filter(n => n.type !== 'GROUP_BG');
         const generatedXml = reactFlowToDrawio(exportNodes, edges);
         if (generatedXml !== lastXmlRef.current) { 
             lastXmlRef.current = generatedXml; 
-            if (onXmlChangeRef.current) onXmlChangeRef.current(generatedXml); 
+            if (onXmlChangeRef.current) onXmlChangeRef.current(generatedXml, isUserInteractionRef.current); 
+            isUserInteractionRef.current = false;
         }
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [nodes, edges]);
+  }, [nodes, edges, readOnly]);
 
   const isValidConnection = useCallback((connection) => {
     const sourceNode = getNode(connection.source);
@@ -519,8 +578,20 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const btnClass = `p-2 rounded transition-opacity disabled:opacity-25 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 ${colorMode ? "text-gray-700 dark:text-gray-300" : "text-gray-500 dark:text-gray-400"}`;
 
   return (
-    <div className="w-full h-full relative outline-none" tabIndex={0} onClick={() => { setContextMenu(null); setShowExportMenu(false); }}>
+    <div className="w-full h-full relative outline-none" tabIndex={0} onClick={() => { setContextMenu(null); setShowExportMenu(false); }} onPointerMove={handlePointerMove} onPointerUp={clearHover} onPointerLeave={clearHover}>
       <style>{`.react-flow__edge.drop-target .react-flow__edge-path { stroke: #4f46e5 !important; stroke-width: 4px !important; filter: drop-shadow(0 0 6px rgba(79,70,229,0.5)); transition: all 0.2s ease; }`}</style>
+      
+      {hoveredToolbarItem && hoverProgress > 0 && (
+          <div className="fixed z-[200] pointer-events-none flex items-center justify-center" style={{ left: cursorPos.x + 15, top: cursorPos.y + 15 }}>
+              <div className="relative w-8 h-8 bg-white dark:bg-gray-800 rounded-full shadow-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center">
+                  <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 36 36">
+                      <path className="text-gray-200 dark:text-gray-700" strokeWidth="3" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                      <path className="text-indigo-500" strokeWidth="3" strokeDasharray={`${hoverProgress}, 100`} stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                  </svg>
+                  <span className="text-indigo-600 dark:text-indigo-400 font-bold text-sm relative z-10">?</span>
+              </div>
+          </div>
+      )}
       
       {deleteConfirm && (
         <div className="absolute inset-0 z-[100] flex items-center justify-center bg-gray-900/20 backdrop-blur-sm rounded-lg">
@@ -569,11 +640,11 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       )}
 
       <div className="absolute top-4 left-4 z-10 flex gap-2 bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700">
-        <button onClick={() => addNodeAt('START_END', '')} disabled={readOnly} className={btnClass}><Circle size={18} className={colorMode ? "text-fuchsia-600" : ""} /></button>
-        <button onClick={() => addNodeAt('ACTION', 'Operace')} disabled={readOnly} className={btnClass}><Square size={18} className={colorMode ? "text-blue-600" : ""} /></button>
-        <button onClick={() => addNodeAt('IO', 'x')} disabled={readOnly} className={btnClass}><AlignLeft size={18} className={colorMode ? "text-emerald-600" : ""} style={{transform: 'skew(-15deg)'}} /></button>
-        <button onClick={() => addNodeAt('CONDITION', 'x > 0')} disabled={readOnly} className={btnClass}><Diamond size={18} className={colorMode ? "text-orange-600" : ""} /></button>
-        <button onClick={() => addNodeAt('COMMENT', '# Komentář')} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
+        <button onClick={() => { clearHover(); addNodeAt('START_END', ''); }} onMouseEnter={(e) => handlePointerDown('START_END', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('START_END', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Circle size={18} className={colorMode ? "text-fuchsia-600" : ""} /></button>
+        <button onClick={() => { clearHover(); addNodeAt('ACTION', 'Operace'); }} onMouseEnter={(e) => handlePointerDown('ACTION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('ACTION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Square size={18} className={colorMode ? "text-blue-600" : ""} /></button>
+        <button onClick={() => { clearHover(); addNodeAt('IO', 'x'); }} onMouseEnter={(e) => handlePointerDown('IO', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('IO', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><AlignLeft size={18} className={colorMode ? "text-emerald-600" : ""} style={{transform: 'skew(-15deg)'}} /></button>
+        <button onClick={() => { clearHover(); addNodeAt('CONDITION', 'x > 0'); }} onMouseEnter={(e) => handlePointerDown('CONDITION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('CONDITION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Diamond size={18} className={colorMode ? "text-orange-600" : ""} /></button>
+        <button onClick={() => { clearHover(); addNodeAt('COMMENT', '# Komentář'); }} onMouseEnter={(e) => handlePointerDown('COMMENT', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('COMMENT', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
       </div>
 
       {(selectedNodes.length > 0 || selectedEdges.length > 0) && !readOnly && (
@@ -603,8 +674,16 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       <div className="w-full h-full" onContextMenu={handlePaneContextMenu}>
         <ReactFlow 
           nodes={allNodes} edges={edges} 
-          onNodesChange={(changes) => { if (!readOnly) onNodesChange(changes); }} 
-          onEdgesChange={(changes) => { handleInteract(); if (!readOnly) onEdgesChange(changes); }} 
+          onNodesChange={(changes) => { 
+              const isUserChange = changes.some(c => c.type !== 'dimensions' && c.type !== 'replace');
+              if (isUserChange) handleInteract(); 
+              if (!readOnly) onNodesChange(changes); 
+          }} 
+          onEdgesChange={(changes) => { 
+              const isUserChange = changes.some(c => c.type !== 'replace');
+              if (isUserChange) handleInteract(); 
+              if (!readOnly) onEdgesChange(changes); 
+          }} 
           onConnect={(params) => { if (!readOnly) onConnect(params); }} 
           onNodeDragStart={handleInteract}
           onNodeDrag={onNodeDrag}

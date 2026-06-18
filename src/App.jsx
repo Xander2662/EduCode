@@ -73,11 +73,30 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
   };
 
   const handleInteraction = (e) => {
+    if (e.type === 'keydown' && e.key === 'Tab') {
+      e.preventDefault();
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+      const spaces = '    ';
+      const newValue = value.substring(0, start) + spaces + value.substring(end);
+      if (onChange) onChange({ target: { value: newValue } });
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = textareaRef.current.selectionEnd = start + spaces.length;
+        }
+      }, 0);
+      return;
+    }
+
     if (onInteract) onInteract();
     if (onCursorChange) {
-      const pos = e.target.selectionStart;
-      const linesUntilCursor = value.substring(0, pos).split('\n').length - 1;
-      onCursorChange(linesUntilCursor);
+      setTimeout(() => {
+        if (textareaRef.current) {
+          const pos = textareaRef.current.selectionStart;
+          const linesUntilCursor = textareaRef.current.value.substring(0, pos).split('\n').length - 1;
+          onCursorChange(linesUntilCursor);
+        }
+      }, 0);
     }
   };
 
@@ -161,6 +180,7 @@ export default function App() {
   const [dialog, setDialog] = useState(null);
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialType, setTutorialType] = useState('drawio');
+  const [tutorialFocusedBlock, setTutorialFocusedBlock] = useState(null);
   const [syncTrigger, setSyncTrigger] = useState(0);
 
   const [edgeStyle, setEdgeStyle] = useState(localStorage.getItem('edgeStyle') || 'true-false');
@@ -198,8 +218,24 @@ export default function App() {
 
   // --- Záznamník akcí (Testing) ---
   const [actionLogs, setActionLogs] = useState([]);
+  const lastLogRef = useRef({ time: 0, type: '' });
+  const currentStateRef = useRef({ panels: [], diagramXml: '', pseudocode: '', pythonCode: '' });
+  
+  useEffect(() => {
+      currentStateRef.current = { panels, diagramXml, pseudocode, pythonCode };
+  }, [panels, diagramXml, pseudocode, pythonCode]);
+
   const logAction = useCallback((actionType, details = {}) => {
-      setActionLogs(prev => [...prev, { time: new Date().toISOString(), type: actionType, details }]);
+      const now = Date.now();
+      if (lastLogRef.current.type === actionType && (now - lastLogRef.current.time) < 50) return;
+      lastLogRef.current = { time: now, type: actionType };
+      
+      const fullDetails = {
+          ...details,
+          appState: currentStateRef.current
+      };
+      
+      setActionLogs(prev => [...prev, { time: new Date().toISOString(), type: actionType, details: fullDetails }]);
   }, []);
 
   const downloadLogs = () => {
@@ -273,6 +309,18 @@ export default function App() {
       setBreakpoints(prev => prev.includes(id) ? prev.filter(b => b !== id) : [...prev, id]);
   }, []);
 
+  // =========================================================================================
+  // CRITICAL WARNING: SYNC STATE ENGINE
+  // =========================================================================================
+  // The following sync effects (SYNC 1, SYNC 2, SYNC 3) manage the bidirectional state of the app.
+  // DO NOT REMOVE, SIMPLIFY, OR "CLEAN UP" THE PANEL INCLUDES CHECKS OR THE LAST-EDITED CHECKS.
+  // If the `panels.includes(...)` checks are removed, the app will instantly wipe the diagram
+  // with empty text when entering code-to-diagram mode.
+  // Modifying `lastEdited.current` here will cause race conditions where passive incoming
+  // XML updates steal the user's focus and delete incomplete code input.
+  // DO NOT MODIFY THIS LOGIC WITHOUT A THOROUGH UNDERSTANDING OF THE BIDIRECTIONAL SYNC.
+  // =========================================================================================
+
   // SYNC 1: Diagram -> Pseudocode
   useEffect(() => {
     if (!panels.includes('pseudocode')) return;
@@ -300,8 +348,10 @@ export default function App() {
 
   // SYNC 2: Pseudocode -> Diagram
   useEffect(() => {
+    if (!panels.includes('pseudocode')) return;
     if (flow === 'diagram-to-code') return;
     if (flow === 'bidirectional' && lastEdited.current !== 'pseudocode') return;
+    if (flow === 'code-to-diagram' && panels.includes('python') && lastEdited.current === 'python') return; // let python win if it was last edited
 
     const timeoutId = setTimeout(() => {
       try {
@@ -340,12 +390,14 @@ export default function App() {
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [pseudocode, flow, edgeStyle, conditionShape, logAction, syncTrigger]);
+  }, [pseudocode, flow, edgeStyle, conditionShape, logAction, syncTrigger, panels]);
 
   // SYNC 3: Python -> Diagram
   useEffect(() => {
+    if (!panels.includes('python')) return;
     if (flow === 'diagram-to-code') return;
     if (flow === 'bidirectional' && lastEdited.current !== 'python') return;
+    if (flow === 'code-to-diagram' && panels.includes('pseudocode') && lastEdited.current !== 'python') return; // let pseudocode win unless python was explicitly last edited
 
     const timeoutId = setTimeout(() => {
       try {
@@ -371,7 +423,7 @@ export default function App() {
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [pythonCode, flow, edgeStyle, conditionShape, logAction, syncTrigger]);
+  }, [pythonCode, flow, edgeStyle, conditionShape, logAction, syncTrigger, panels]);
 
   useEffect(() => {
     if (panels.includes('python')) {
@@ -389,9 +441,33 @@ export default function App() {
     }
   }, [diagramXml, panels, flow, syncTrigger]);
 
+  // =========================================================================================
+  // CRITICAL WARNING: PRIORITIZING NON-EMPTY STATE
+  // DO NOT REMOVE THIS LOGIC. If a user switches to bidirectional mode, the source of truth
+  // must shift to a panel that actually has data, otherwise existing work will be wiped.
+  // =========================================================================================
   const requestFlowChange = (e) => {
     e.stopPropagation();
     const nextFlow = flow === 'bidirectional' ? 'diagram-to-code' : flow === 'diagram-to-code' ? 'code-to-diagram' : 'bidirectional';
+    
+    if (nextFlow === 'bidirectional') {
+        const isDrawioEmpty = !diagramXml || diagramXml.includes('<mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>');
+        const isPseudoEmpty = !pseudocode || pseudocode.trim() === '';
+        const isPythonEmpty = !pythonCode || pythonCode.trim() === '';
+
+        if (lastEdited.current === 'pseudocode' && isPseudoEmpty && !isDrawioEmpty) {
+            lastEdited.current = 'drawio';
+        } else if (lastEdited.current === 'python' && isPythonEmpty && !isDrawioEmpty) {
+            lastEdited.current = 'drawio';
+        } else if (lastEdited.current === 'drawio' && isDrawioEmpty) {
+            if (panels.includes('pseudocode') && !isPseudoEmpty) {
+                lastEdited.current = 'pseudocode';
+            } else if (panels.includes('python') && !isPythonEmpty) {
+                lastEdited.current = 'python';
+            }
+        }
+    }
+    
     setFlow(nextFlow);
     logAction('FLOW_DIRECTION_CHANGED', { flow: nextFlow });
   };
@@ -532,9 +608,17 @@ export default function App() {
             onBreakpointToggle={toggleBreakpoint}
             onInteract={() => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; }}
             onLogAction={logAction}
-            onXmlChange={(xml) => { lastEdited.current = 'drawio'; setDiagramXml(xml); }}
+            onXmlChange={(xml, isUserInteraction) => { 
+                if (isUserInteraction) lastEdited.current = 'drawio'; 
+                setDiagramXml(xml); 
+            }}
             onImportXml={(xml) => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; setDiagramXml(xml); logAction('XML_IMPORTED'); }}
             readOnly={flow === 'code-to-diagram' || isPlayingState || runner !== null || inputRequest !== null}
+            onRequestTutorial={(blockType) => {
+                setTutorialType('drawio');
+                setTutorialFocusedBlock(blockType);
+                setShowTutorial(true);
+            }}
           />
           
           {inputRequest && (
@@ -561,7 +645,7 @@ export default function App() {
           )}
 
           {showDebugger && (
-            <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden flex flex-col justify-between p-4">
+            <div className="absolute inset-0 pointer-events-none z-[100] overflow-hidden flex flex-col justify-between p-4">
                 <style>{`.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
                 
                 <div className="absolute top-20 left-4 pointer-events-auto">
@@ -725,10 +809,30 @@ export default function App() {
 
   return (
     <div className="h-screen bg-gray-100 dark:bg-gray-950 flex flex-col font-sans overflow-hidden transition-colors" onClick={() => { setActiveDropdown(null); setSettingsDropdown(null); setShowDebugSettings(false); }}>
-      {showTutorial && <TutorialDialog type={tutorialType} onClose={() => setShowTutorial(false)} />}
+      {/* Zpráva o nepodporovaném zobrazení na malých displejích */}
+      <div className="flex md:hidden fixed inset-0 bg-gray-900 text-white z-[9999] flex-col items-center justify-center p-6 text-center">
+        <AlertCircle size={48} className="text-red-500 mb-4" />
+        <h2 className="text-2xl font-bold mb-2">Nepodporované zařízení</h2>
+        <p className="text-gray-400">EduCode vyžaduje větší obrazovku. Otevřete prosím aplikaci na tabletu nebo počítači.</p>
+      </div>
+
+      <div className="hidden md:flex flex-col h-full overflow-hidden w-full">
+      {showTutorial && <TutorialDialog type={tutorialType} focusedBlock={tutorialFocusedBlock} onClose={() => { setShowTutorial(false); setTutorialFocusedBlock(null); }} />}
+      {dialog && (
+        <div className="fixed inset-0 bg-black/50 z-[300] flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-sm w-full border border-gray-200 dark:border-gray-700">
+            <h3 className="text-lg font-bold mb-2 text-gray-900 dark:text-white">{dialog.title}</h3>
+            <p className="text-gray-600 dark:text-gray-300 mb-6 text-sm">{dialog.desc}</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setDialog(null)} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors text-sm font-semibold">Zrušit</button>
+              <button onClick={dialog.onConfirm} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded transition-colors text-sm font-semibold">Zavřít</button>
+            </div>
+          </div>
+        </div>
+      )}
       
-      {/* Testing Top Bar */}
-      <div className="bg-purple-600 dark:bg-purple-800 text-white px-4 py-1.5 text-[11px] flex justify-between items-center z-50 shadow-md">
+      {/* BETA BANNERS & HEADER */}
+      <div className="bg-purple-600 dark:bg-purple-800 text-white px-4 py-1.5 text-[11px] flex justify-between items-center z-30 shadow-md">
          <div className="flex items-center gap-2">
             <Bug size={14} />
             <span className="font-bold tracking-wide">TESTING REŽIM</span>
@@ -741,17 +845,17 @@ export default function App() {
          </button>
       </div>
 
-      <header className="bg-white dark:bg-gray-900 border-b border-gray-300 dark:border-gray-800 px-6 py-3 flex justify-between items-center shrink-0 shadow-sm z-10">
-        <div className="flex items-baseline gap-3">
-          <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">EduCode</h1>
-          <span className="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded border border-gray-200 dark:border-gray-700 inline-block">
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-300 dark:border-gray-800 px-4 lg:px-6 py-2 lg:py-3 flex justify-between items-center shrink-0 shadow-sm z-30">
+        <div className="flex items-baseline gap-2 lg:gap-3">
+          <h1 className="text-lg lg:text-xl font-bold text-gray-800 dark:text-gray-100">EduCode</h1>
+          <span className="text-xs lg:text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded border border-gray-200 dark:border-gray-700 inline-block">
             {panels.map(p => PANEL_TYPES[p].label).join(' ⇄ ')}
           </span>
         </div>
         <button onClick={(e) => { e.stopPropagation(); setIsDarkMode(!isDarkMode); }} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors" aria-label={isDarkMode ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"}><Sun size={20} /></button>
       </header>
 
-      <main className="flex-1 flex p-4 gap-4" style={{ overflow: 'hidden' }}>
+      <main className="flex-1 flex flex-col lg:flex-row p-2 lg:p-4 gap-2 lg:gap-4" style={{ overflow: 'hidden' }}>
         {panels.map((type, index) => (
           <React.Fragment key={type}>
             <div 
@@ -759,7 +863,7 @@ export default function App() {
               onPointerDownCapture={() => { if (type === 'drawio' || type === 'pseudocode') lastEdited.current = type; }}
               onKeyDownCapture={() => { if (type === 'drawio' || type === 'pseudocode') lastEdited.current = type; }}
             >
-              <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 flex justify-between items-center relative z-50">
+              <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-semibold text-gray-700 dark:text-gray-300 flex justify-between items-center relative z-50">
                 <div className="flex items-center gap-2">
                   <span>{PANEL_TYPES[type].title}</span>
                   <button onClick={(e) => { e.stopPropagation(); setTutorialType(type); setShowTutorial(true); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-1 ml-1" title={`Nápověda pro ${PANEL_TYPES[type].title}`}>
@@ -828,7 +932,7 @@ export default function App() {
                       <ChevronDown size={16} />
                     </button>
                     {activeDropdown === index && (
-                      <div className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-20 py-1 overflow-visible">
+                      <div className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 py-1 overflow-visible">
                         {Object.values(PANEL_TYPES).map(t => {
                           const isCurrent = panels[index] === t.id;
                           const isUsed = panels.includes(t.id) && !isCurrent;
@@ -840,6 +944,16 @@ export default function App() {
                                 setPanels(newPanels); 
                                 setActiveDropdown(null); 
                                 
+                                if (t.id === 'python' && (!pythonCode || pythonCode.trim() === '')) {
+                                    const result = parseDrawioToPython(diagramXml);
+                                    setPythonCode(result?.code || '');
+                                    setPythonNodeLineMap(result?.nodeLineMap || {});
+                                } else if (t.id === 'pseudocode' && (!pseudocode || pseudocode.trim() === '')) {
+                                    const result = parseDrawioToPseudocode(diagramXml);
+                                    setPseudocode(result?.code || '');
+                                    setPseudoNodeLineMap(result?.nodeLineMap || {});
+                                }
+
                                 if (t.id === 'python' || t.id === 'pseudocode') {
                                     lastEdited.current = t.id;
                                     activeWindow.current = t.id;
@@ -866,6 +980,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
+
                   {panels.length > 1 && (
                     <button onClick={() => {
                       const isEmpty = type === 'pseudocode' ? pseudocode.trim() === '' : false;
@@ -881,13 +996,9 @@ export default function App() {
             </div>
 
             {index === 0 && panels.length === 2 && (
-              <div className="w-12 flex flex-col items-center justify-center shrink-0 gap-4">
-                <button onClick={(e) => { e.stopPropagation(); setPanels([panels[1], panels[0]]); logAction('PANELS_SWAPPED'); }} className="p-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-full hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm text-gray-600 dark:text-gray-300 transition-colors">
-                  <ArrowRightLeft size={18} />
-                </button>
-                
-                <button onClick={requestFlowChange} className="p-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-full hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm text-gray-600 dark:text-gray-300 transition-colors">
-                  {flow === 'bidirectional' ? <ArrowRightLeft size={18} className="text-indigo-600 dark:text-indigo-400" /> : flow === 'diagram-to-code' ? <ArrowRight size={20} className="text-blue-500" /> : <ArrowLeft size={20} className="text-blue-500" />}
+              <div className="w-full lg:w-12 flex justify-center lg:flex-col items-center shrink-0 py-2 lg:py-0">
+                <button onClick={requestFlowChange} className="p-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-full hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm text-gray-600 dark:text-gray-300 transition-colors mx-auto">
+                  {flow === 'bidirectional' ? <ArrowRightLeft size={18} className="text-indigo-600 dark:text-indigo-400 lg:rotate-0 rotate-90" /> : flow === 'diagram-to-code' ? <ArrowRight size={20} className="text-blue-500 lg:rotate-0 rotate-90" /> : <ArrowLeft size={20} className="text-blue-500 lg:rotate-0 rotate-90" />}
                 </button>
               </div>
             )}
@@ -899,12 +1010,24 @@ export default function App() {
             <button onClick={() => {
               const available = Object.keys(PANEL_TYPES).find(t => !panels.includes(t)) || 'pseudocode';
               setPanels([...panels, available]);
+              lastEdited.current = panels[0]; // Prioritize existing panel over the new empty one
+
+              if (available === 'python' && (!pythonCode || pythonCode.trim() === '')) {
+                  const result = parseDrawioToPython(diagramXml);
+                  setPythonCode(result?.code || '');
+                  setPythonNodeLineMap(result?.nodeLineMap || {});
+              } else if (available === 'pseudocode' && (!pseudocode || pseudocode.trim() === '')) {
+                  const result = parseDrawioToPseudocode(diagramXml);
+                  setPseudocode(result?.code || '');
+                  setPseudoNodeLineMap(result?.nodeLineMap || {});
+              }
             }} className="p-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 border-dashed rounded-full hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm text-gray-500 dark:text-gray-400 transition-colors">
               <Plus size={24} />
             </button>
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }
