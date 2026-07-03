@@ -23,10 +23,4 @@ dist-ssr
 *.sln
 *.sw?
 
-EduCode Edubox
-.agents
-TEST_READY.md
-TEST_INFRA.md
-tests/run_tests.py
-PROJECT.md
-ORIGINAL_REQUEST.md
+other
