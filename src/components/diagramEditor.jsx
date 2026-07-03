@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, Background, MarkerType, useReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Download, Upload, Square, Circle, Diamond, AlignLeft, Copy, Trash2, MessageSquare, FileJson, FileCode } from 'lucide-react';
+import { Download, Upload, Square, Circle, Diamond, AlignLeft, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box } from 'lucide-react';
 import { drawioToReactFlow, reactFlowToDrawio } from '../utils/diagramConverter';
 import { calculateGroupNodes } from '../utils/grouping';
 import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
-import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode } from './diagram/CustomNodes';
+import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode, LoopContainerNode } from './diagram/CustomNodes';
 
 const nodeTypes = { 
   ACTION: ActionNode, 
@@ -15,11 +15,12 @@ const nodeTypes = {
   START_END: StartEndNode, 
   COMMENT: CommentNode, 
   MERGE: MergeNode, 
-  GROUP_BG: GroupBgNode 
+  GROUP_BG: GroupBgNode,
+  LOOP_CONTAINER: LoopContainerNode
 };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, conditionShape, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction, onRequestTutorial }) {
+function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, conditionShape, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction, onRequestTutorial, editorMode = 'advanced' }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
@@ -122,7 +123,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const mappedNodes = useMemo(() => nodes.map(n => ({
         ...n,
-        zIndex: 10,
+        zIndex: n.type === 'LOOP_CONTAINER' ? -1 : 10,
         data: { 
             ...n.data, 
             colorMode, 
@@ -492,9 +493,11 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             label, 
             readOnly, 
             ...(type === 'START_END' ? { mode: 'unassigned', entityType: 'FUNCTION' } : {}), 
+            ...(type === 'LOOP_CONTAINER' ? { isNew: true, doWhile: false } : {}),
             ...(type === 'IO' ? { ioType: 'input' } : {}),
             onChange: (e) => updateNodeLabel(newId, e.target.value) 
-        } 
+        },
+        ...(type === 'LOOP_CONTAINER' ? { style: { width: 300, height: 150 } } : {})
     }));
   };
 
@@ -629,12 +632,13 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
                   {type: 'ACTION', label: 'Operace', icon: Square, color: colorMode ? "text-blue-500" : "text-gray-500"},
                   {type: 'IO', label: 'Vstup/Výstup', icon: AlignLeft, color: colorMode ? "text-emerald-500" : "text-gray-500"},
                   {type: 'CONDITION', label: 'Podmínka', icon: Diamond, color: colorMode ? "text-orange-500" : "text-gray-500"},
+                  {type: 'LOOP_CONTAINER', label: 'Cyklus (Skupina)', icon: Box, color: colorMode ? "text-purple-500" : "text-gray-500"},
                   {type: 'COMMENT', label: 'Komentář', icon: MessageSquare, color: colorMode ? "text-yellow-500" : "text-gray-500"}
                 ].map(item => (
-                  <button key={item.type} onClick={() => { addNodeAt(item.type, item.type === 'COMMENT'?'#':(item.type==='CONDITION'?'x>0':(item.type==='IO'?'x':'')), contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                  <button key={item.type} onClick={() => { addNodeAt(item.type, item.type === 'COMMENT'?'#':(item.type==='CONDITION'?'x>0':(item.type==='IO'?'x':(item.type==='LOOP_CONTAINER'?'':''))), contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
                     <item.icon size={14} className={item.color}/> {item.label}
                   </button>
-                ))}
+                ))}  
             </div>
         </>
       )}
@@ -644,12 +648,13 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         <button onClick={() => { clearHover(); addNodeAt('ACTION', 'Operace'); }} onMouseEnter={(e) => handlePointerDown('ACTION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('ACTION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Square size={18} className={colorMode ? "text-blue-600" : ""} /></button>
         <button onClick={() => { clearHover(); addNodeAt('IO', 'x'); }} onMouseEnter={(e) => handlePointerDown('IO', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('IO', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><AlignLeft size={18} className={colorMode ? "text-emerald-600" : ""} style={{transform: 'skew(-15deg)'}} /></button>
         <button onClick={() => { clearHover(); addNodeAt('CONDITION', 'x > 0'); }} onMouseEnter={(e) => handlePointerDown('CONDITION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('CONDITION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Diamond size={18} className={colorMode ? "text-orange-600" : ""} /></button>
+        <button onClick={() => { clearHover(); addNodeAt('LOOP_CONTAINER', ''); }} onMouseEnter={(e) => handlePointerDown('LOOP_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('LOOP_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass} title="Cyklus (Skupina)"><Box size={18} className={colorMode ? "text-purple-600" : ""} /></button>
         <button onClick={() => { clearHover(); addNodeAt('COMMENT', '# Komentář'); }} onMouseEnter={(e) => handlePointerDown('COMMENT', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('COMMENT', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
       </div>
 
       {(selectedNodes.length > 0 || selectedEdges.length > 0) && !readOnly && (
         <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 flex gap-2 bg-indigo-600 p-1.5 rounded-lg shadow-lg">
-           <button onClick={handleDuplicate} className="flex items-center gap-1 text-white hover:bg-indigo-500 px-3 py-1.5 rounded text-sm font-medium"><Copy size={16}/> Duplikovat</button>
+           <button onClick={handleDuplicate} disabled={selectedNodes.length === 0} className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium ${selectedNodes.length === 0 ? 'text-indigo-200 opacity-50 cursor-not-allowed' : 'text-white hover:bg-indigo-500'}`}><Copy size={16}/> Duplikovat</button>
            <div className="w-px bg-indigo-400 mx-1"></div>
            <button onClick={() => setDeleteConfirm(true)} className="flex items-center gap-1 text-red-100 hover:bg-red-500 hover:text-white px-3 py-1.5 rounded text-sm font-medium"><Trash2 size={16}/> Smazat</button>
         </div>

@@ -5,3 +5,35 @@
 body {
   @apply bg-gray-50;
 }
+
+/* Zabráníme tomu, aby React Flow při kliknutí na LOOP_CONTAINER zvednul z-index a překryl bloky */
+.react-flow__node-LOOP_CONTAINER.selected {
+  z-index: -1 !important;
+}
+
+/* Úprava ovládacího panelu React Flow pro Dark Mode */
+.dark .react-flow__controls-button {
+  background-color: #1f2937 !important; /* bg-gray-800 */
+  border-color: #374151 !important; /* border-gray-700 */
+  color: #e5e7eb !important; /* text-gray-200 */
+}
+
+.dark .react-flow__controls-button:hover {
+  background-color: #374151 !important; /* bg-gray-700 */
+}
+
+.dark .react-flow__controls-button svg {
+  fill: #e5e7eb !important;
+}
+
+/* Oprava vzhledu vodoznaku/kreditů React Flow v Dark Mode */
+.dark .react-flow__attribution {
+  background: transparent !important;
+  color: #9ca3af !important; /* text-gray-400 */
+  opacity: 0.7;
+}
+
+.react-flow__attribution {
+  backdrop-filter: none !important;
+  text-shadow: none !important;
+}

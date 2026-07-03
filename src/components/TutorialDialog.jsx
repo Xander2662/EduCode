@@ -1,5 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { X, HelpCircle, Move, MousePointer, RefreshCcw, Circle, Square, AlignLeft, Diamond } from 'lucide-react';
+import { X, HelpCircle, Move, MousePointer, RefreshCcw, Circle, Square, AlignLeft, Diamond, Copy, Check, MessageSquare } from 'lucide-react';
+
+const CodeBlock = ({ code }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div className="relative group">
+      <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
+        {code}
+      </pre>
+      <button onClick={handleCopy} className="absolute top-2 right-2 p-1.5 bg-gray-800 text-gray-300 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-700 hover:text-white" title="Kopírovat kód">
+        {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+      </button>
+    </div>
+  );
+};
 
 export default function TutorialDialog({ type = 'drawio', focusedBlock = null, onClose }) {
   const [tab, setTab] = useState('zaklady');
@@ -265,7 +284,7 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
             <div className="flex border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 overflow-x-auto">
           <button onClick={() => setTab('zaklady')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'zaklady' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>Základní syntaxe</button>
           <button onClick={() => setTab('spojovani')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'spojovani' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>{type === 'drawio' ? 'Spojování & Cykly' : 'Podmínky (IF / ELSE)'}</button>
-          <button onClick={() => setTab('klavesy')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'klavesy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>{type === 'drawio' ? 'Klávesové zkratky' : 'Cykly (WHILE)'}</button>
+          <button onClick={() => setTab('klavesy')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'klavesy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>{type === 'drawio' ? 'Klávesové zkratky' : 'Cykly (WHILE / FOR)'}</button>
         </div>
         <div className="p-6 overflow-y-auto max-h-[60vh] text-gray-700 dark:text-gray-300 text-sm leading-relaxed space-y-6">
           
@@ -297,6 +316,13 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                 <div>
                   <h4 className="font-bold text-orange-800 dark:text-orange-400">Podmínka (IF / WHILE)</h4>
                   <p className="text-xs mt-1">Obsahuje logický test (např. <code>x &gt; 0</code>). Vychází z ní vždy dvě cesty (Pravda / Nepravda).</p>
+                </div>
+              </div>
+              <div onClick={() => setActiveDeepDive('COMMENT')} className="border border-yellow-200 bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
+                <MessageSquare size={24} className="text-yellow-600 mt-1 shrink-0" />
+                <div>
+                  <h4 className="font-bold text-yellow-800 dark:text-yellow-400">Komentář</h4>
+                  <p className="text-xs mt-1">Textové poznámky, které debugger kompletně ignoruje. Slouží k vysvětlení kódu lidem.</p>
                 </div>
               </div>
             </div>
@@ -351,36 +377,30 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
             <div className="space-y-4">
               <h3 className="font-bold text-lg mb-2">Struktura programu</h3>
               <p>Každý program by měl být definován jako funkce. Konec funkce se pozná tak, že se zmenší odsazení zleva.</p>
-              <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-xs">
-{`def hlavni():
+              <CodeBlock code={`def hlavni():
     print("Spouštím program...")
     x = 10
     y = x + 5
-    print(y)`}
-              </pre>
+    print(y)`} />
               <h3 className="font-bold text-lg mt-4 mb-2">Vstup (VSTUP)</h3>
               <p>Pro vytvoření Vstupního bloku použijte funkci <code>input()</code>.</p>
-              <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-xs">
-{`def nacti_vek():
+              <CodeBlock code={`def nacti_vek():
     vek = input()
-    jmeno = input()`}
-              </pre>
+    jmeno = input()`} />
             </div>
           )}
           {type === 'python' && tab === 'spojovani' && (
             <div className="space-y-4">
               <h3 className="font-bold text-lg mb-2">Rozhodování (IF/ELSE)</h3>
               <p>Větvení programu provedete pomocí <code>if</code> a <code>else</code>. Můžete využít i <code>elif</code> pro zřetězení více podmínek. Odsazení řídí, co do bloku patří.</p>
-              <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-xs">
-{`def zkontroluj_vek():
+              <CodeBlock code={`def zkontroluj_vek():
     vek = input()
     if vek >= 18:
         print("Dospělý")
     elif vek >= 15:
         print("Mladistvý")
     else:
-        print("Dítě")`}
-              </pre>
+        print("Dítě")`} />
               <p className="text-xs text-gray-500 mt-2">Tip: Pokud chcete větev nechat prázdnou (např. prázdné else), napište do ní slovo <code>pass</code>.</p>
             </div>
           )}
@@ -388,14 +408,12 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
             <div className="space-y-4">
               <h3 className="font-bold text-lg mb-2">Cykly (WHILE)</h3>
               <p>Cyklus s podmínkou na začátku vytvoříte pomocí klíčového slova <code>while</code>. Nezapomeňte uvnitř cyklu měnit proměnnou, jinak vznikne nekonečná smyčka!</p>
-              <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-xs">
-{`def odpocet():
+              <CodeBlock code={`def odpocet():
     i = 10
     while i > 0:
         print(i)
         i = i - 1
-    print("Start!")`}
-              </pre>
+    print("Start!")`} />
               <p className="text-xs text-gray-500 mt-2">Tip: Operátory AND, OR a NOT v Pythonu se píší malými písmeny (např. <code>while x &gt; 0 and y &lt; 10:</code>).</p>
             </div>
           )}
@@ -405,37 +423,33 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
             <div className="space-y-4">
               <h3 className="font-bold text-lg mb-2">Struktura programu</h3>
               <p>Pseudokód používá blokovou strukturu ohraničenou klíčovými slovy. Funkci vždy zahájíme a zakončíme příslušným slovem.</p>
-              <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-xs">
-{`FUNCTION hlavni()
+              <CodeBlock code={`FUNCTION hlavni()
     x = 10
     y = x + 5
     PRINT(y)
-ENDFUNCTION`}
-              </pre>
+ENDFUNCTION`} />
               <h3 className="font-bold text-lg mt-4 mb-2">Vstup od uživatele</h3>
               <p>Použijte klíčové slovo <code>VSTUP</code> následované názvem proměnné. Můžete načíst i více proměnných naráz přes čárku.</p>
-              <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-xs">
-{`FUNCTION nacti()
+              <CodeBlock code={`FUNCTION nacti()
     VSTUP vek
     VSTUP jmeno, heslo
-ENDFUNCTION`}
-              </pre>
+ENDFUNCTION`} />
+              <h3 className="font-bold text-lg mt-4 mb-2">Vytváření proměnných</h3>
+              <p>Každá nová proměnná by měla mít přiřazenou hodnotu (např. <code>x = 10</code>) nebo načtena od uživatele (<code>x = INPUT()</code>). Pokud napíšete pouze název proměnné (např. <code>x</code>), debugger si automaticky vyžádá vstup od uživatele, ale editor zobrazí varování, abyste přiřazení zapsali explicitně.</p>
             </div>
           )}
           {type === 'pseudocode' && tab === 'spojovani' && (
             <div className="space-y-4">
               <h3 className="font-bold text-lg mb-2">Rozhodování (IF/ELSE)</h3>
               <p>Větvení programu používá syntaxi <code>IF ... THEN</code>. Konec celého bloku se vždy musí označit jako <code>ENDIF</code>.</p>
-              <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-xs">
-{`FUNCTION zkontroluj_vek()
+              <CodeBlock code={`FUNCTION zkontroluj_vek()
     VSTUP vek
     IF vek >= 18 THEN
         PRINT("Dospělý")
     ELSE
         PRINT("Nezletilý")
     ENDIF
-ENDFUNCTION`}
-              </pre>
+ENDFUNCTION`} />
               <p className="text-xs text-gray-500 mt-2">Poznámka: Pseudokód nepodporuje ELIF, vícenásobné podmínky tvoříte vnořením dalšího IF do větve ELSE.</p>
             </div>
           )}
@@ -443,17 +457,23 @@ ENDFUNCTION`}
             <div className="space-y-4">
               <h3 className="font-bold text-lg mb-2">Cykly (WHILE)</h3>
               <p>Pro opakování dokud platí podmínka využijte <code>WHILE ... DO</code>. Konec cyklu se uzavírá pomocí <code>ENDWHILE</code>.</p>
-              <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-xs">
-{`FUNCTION odpocet()
+              <CodeBlock code={`FUNCTION odpocet()
     i = 10
     WHILE i > 0 DO
         PRINT(i)
         i = i - 1
     ENDWHILE
     PRINT("Start!")
-ENDFUNCTION`}
-              </pre>
+ENDFUNCTION`} />
               <p className="text-xs text-gray-500 mt-2">Tip: Operátory pište velkými písmeny (AND, OR, NOT, TRUE, FALSE).</p>
+              
+              <h3 className="font-bold text-lg mt-4 mb-2">Cykly (FOR)</h3>
+              <p>Pokud víte, kolikrát se má cyklus opakovat, využijte <code>FOR ... TO ... DO</code>. Konec cyklu se uzavírá pomocí <code>ENDFOR</code>.</p>
+              <CodeBlock code={`FUNCTION pocitani()
+    FOR i = 1 TO 10 DO
+        PRINT(i)
+    ENDFOR
+ENDFUNCTION`} />
             </div>
           )}
 

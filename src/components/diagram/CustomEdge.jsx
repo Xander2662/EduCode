@@ -10,7 +10,7 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
   const isCondition = nodes.find(n => n.id === source)?.type === 'CONDITION';
   const isTargetMerge = nodes.find(n => n.id === target)?.type === 'MERGE';
   
-  const [edgePath, labelX, labelY] = (() => {
+  const [edgePath, labelX, labelY, catcher] = (() => {
     const isBackEdge = sourceY > targetY + 25;
     
     if (isBackEdge) {
@@ -120,23 +120,30 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
     });
   };
 
-  const labelText = data?.label || '';
-  const pref = edgeLabels[data.edgeStyle || 'true-false'];
-  const isPositive = labelText === pref.t || labelText === 'Ano' || labelText === '+' || labelText === 'Yes' || labelText === 'True';
+  const labelText = data?.label;
+  const isPos = ['+', 'Ano', 'Yes', 'True'].includes(labelText);
+  const isNeg = ['-', 'Ne', 'No', 'False'].includes(labelText);
+  const colorClass = isPos ? 'text-emerald-600' : (isNeg ? 'text-rose-600' : 'text-gray-500 dark:text-gray-400');
+  const bgClass = isPos ? 'bg-emerald-50 border-emerald-200' : (isNeg ? 'bg-rose-50 border-rose-200' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700');
+
+  const showRefresh = data?.edgeStyle === 'while-do';
 
   return (
     <>
-      <path d={edgePath} fill="none" strokeOpacity={0} strokeWidth={30} className="react-flow__edge-interaction cursor-crosshair" />
-      <BaseEdge path={edgePath} markerEnd={isTargetMerge ? undefined : markerEnd} className={`react-flow__edge-path custom-edge-${id} ${selected ? "!stroke-indigo-500" : "!stroke-gray-800 dark:!stroke-gray-400"}`} style={{ strokeWidth: selected ? 3 : 2 }} />
-      {isCondition && labelText && (
+      <BaseEdge path={edgePath} markerEnd={isTargetMerge ? undefined : markerEnd} style={{ ...style, strokeWidth: selected ? 3 : 2, stroke: selected ? '#6366f1' : (isCondition ? (isPos ? '#10b981' : '#f43f5e') : (style?.stroke || '#94a3b8')) }} />
+      {catcher && <g className="pointer-events-none">{catcher}</g>}
+      {labelText && (
         <EdgeLabelRenderer>
-          <div style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, pointerEvents: 'all' }}
-               className={`group bg-white dark:bg-gray-800 border ${selected ? 'border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900' : 'border-gray-300 dark:border-gray-600'} rounded px-2 py-1 text-xs font-bold shadow-sm flex items-center gap-1 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700`}>
-            <span className={isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>{labelText}</span>
-            {!data?.readOnly && (
-              <button onClick={onSwap} className="hidden group-hover:block text-gray-500 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400">
-                  <RefreshCcw size={12} />
-              </button>
+          <div
+            style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, pointerEvents: 'all' }}
+            className={`px-2 py-0.5 rounded text-[10px] font-bold border shadow-sm flex items-center gap-1 cursor-pointer transition-transform hover:scale-110 ${bgClass} ${colorClass}`}
+          >
+            {showRefresh && <RefreshCcw size={10} className="text-orange-500" />}
+            {labelText}
+            {!data?.readOnly && isCondition && (
+                <div onClick={onSwap} className="cursor-pointer hover:text-indigo-600">
+                  <RefreshCcw size={10} />
+                </div>
             )}
           </div>
         </EdgeLabelRenderer>

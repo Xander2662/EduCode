@@ -244,13 +244,18 @@ export const parseDrawioToPseudocode = (xml) => {
                 } else {
                     // Očištění VSTUP prefixu
                     let p = val.replace(/^VSTUP\s+/i, '').trim();
-                    if (!p) p = "x"; // Fallback pokud blok obsahoval jen 'Vstup'
+                    if (!p) p = "x";
                     
                     p.split(',').forEach(part => {
                         let cleanV = part.replace(/\[.*\]/, '').trim();
                         if (cleanV) declareVariables(cleanV, currentScope);
                     });
-                    appendLine(`${indent}Vstup ${p}`, node.id);
+                    
+                    if (p.includes(',')) {
+                        appendLine(`${indent}VSTUP ${p}`, node.id);
+                    } else {
+                        appendLine(`${indent}${p} = INPUT()`, node.id);
+                    }
                 }
             });
         }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare, Bug } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare, Bug, RefreshCcw, Download } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parseDrawioToPython } from './parsers/diagramToPython';
@@ -15,21 +15,83 @@ const PANEL_TYPES = {
   python: { id: 'python', label: 'Python', title: 'Python Kód' }
 };
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    this.setState({ errorInfo });
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+  
+  handleDownloadLogs = () => {
+    const errorStr = this.state.error ? (this.state.error.stack || this.state.error.toString()) : 'Unknown Error';
+    const errorInfoStr = this.state.errorInfo && this.state.errorInfo.componentStack ? this.state.errorInfo.componentStack : 'No stack trace';
+    
+    const crashData = {
+        crashTime: new Date().toISOString(),
+        userAgent: navigator.userAgent,
+        error: errorStr,
+        componentStack: errorInfoStr,
+        actionLogs: window.__LAST_ACTION_LOGS__ || []
+    };
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(crashData, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `educode_crash_log_${new Date().getTime()}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-screen bg-red-50 dark:bg-gray-950 text-red-900 dark:text-red-400 p-6">
+          <AlertCircle size={48} className="mb-4 text-red-500" />
+          <h1 className="text-2xl font-bold mb-2">Něco se pokazilo</h1>
+          <p className="text-sm mb-6 opacity-80 max-w-md text-center">V aplikaci došlo k neočekávané chybě. Omlouváme se za potíže.</p>
+          <div className="flex gap-4">
+            <button onClick={() => window.location.reload()} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium">Znovu načíst aplikaci</button>
+            <button onClick={this.handleDownloadLogs} className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-medium flex items-center gap-2">
+              <Download size={16} />
+              Stáhnout záznam o chybě
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const ErrorItem = ({ error }) => {
     const [expanded, setExpanded] = useState(false);
     
-    const getErrorExplanation = (err) => {
-        if (err.includes("mimo svůj Scope") || err.includes("před deklarací")) {
+    const errorText = typeof error === 'object' && error !== null ? error.message : error;
+    const errorPrefix = (typeof error === 'object' && error !== null && error.line) ? `Řádek ${error.line}: ` : '';
+    
+    const getErrorExplanation = (errText) => {
+        if (!errText) return "";
+        if (errText.includes("mimo svůj Scope") || errText.includes("před deklarací")) {
             return "Proměnná (např. 'x') musí být vytvořena (např. 'x = 5' nebo 'Vstup x'), než s ní začnete pracovat v podmínce nebo pro výpis. Pokud proměnnou vytvoříte uvnitř větve (např. uvnitř IF), přestane po skončení větve existovat (tzv. Scope). Mimo tento blok už proměnnou nelze použít.";
         }
-        if (err.includes("počáteční blok")) {
+        if (errText.includes("počáteční blok")) {
             return "Algoritmus musí mít vždy jasně definovaný začátek. Přidejte na plátno fialový blok START a napojte ho na první krok vašeho programu.";
         }
-        if (err.includes("neměla koncový blok")) {
+        if (errText.includes("neměla koncový blok")) {
             return "Program by měl být korektně ukončen blokem KONEC, aby bylo jasné, kde končí jeho běh.";
         }
-        if (err.includes("Duplicitní název")) {
+        if (errText.includes("Duplicitní název")) {
             return "Každá funkce nebo třída musí mít unikátní název. Použili jste stejný název vícekrát.";
+        }
+        if (errText.includes("Očekáváno přiřazení")) {
+            return "Napsali jste název proměnné bez =. Pokud se má načíst hodnota, napište např. x = INPUT().";
         }
         return "Zkontrolujte logiku vašeho diagramu a ujistěte se, že všechny bloky jsou správně propojené a dávají smysl.";
     };
@@ -37,14 +99,14 @@ const ErrorItem = ({ error }) => {
     return (
         <li className="flex flex-col gap-1 mb-1">
             <div className="flex justify-between items-start gap-2">
-                <span className="flex-1">{error}</span>
+                <span className="flex-1">{errorPrefix}{errorText}</span>
                 <button onClick={() => setExpanded(!expanded)} className="text-red-500 hover:text-red-700 bg-red-100/50 dark:bg-red-800/30 p-1 rounded transition-colors shrink-0" title="Vysvětlení chyby">
                     <HelpCircle size={14} />
                 </button>
             </div>
             {expanded && (
-                <div className="text-[11px] bg-red-100 dark:bg-red-900/60 p-2 rounded border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200 mt-1 leading-relaxed">
-                    {getErrorExplanation(error)}
+                <div className="text-[11px] bg-red-100/80 dark:bg-red-900/50 p-2 rounded text-red-800 dark:text-red-200 mt-1 leading-relaxed">
+                    {getErrorExplanation(errorText)}
                 </div>
             )}
         </li>
@@ -165,7 +227,7 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
   );
 };
 
-export default function App() {
+function AppContent() {
   const [flow, setFlow] = useState('bidirectional');
   const [panels, setPanels] = useState(['drawio', 'pseudocode']);
 
@@ -188,6 +250,7 @@ export default function App() {
   const [groupColoring, setGroupColoring] = useState(localStorage.getItem('groupColoring') === 'true');
   const [showDebugger, setShowDebugger] = useState(localStorage.getItem('showDebugger') === 'true');
   const [conditionShape, setConditionShape] = useState(localStorage.getItem('conditionShape') || 'hexagon');
+  const [editorMode, setEditorMode] = useState(localStorage.getItem('editorMode') || 'advanced');
 
   const [selectedNodeIds, setSelectedNodeIds] = useState([]);
   const [externalSelectedIds, setExternalSelectedIds] = useState([]);
@@ -234,8 +297,11 @@ export default function App() {
           ...details,
           appState: currentStateRef.current
       };
-      
-      setActionLogs(prev => [...prev, { time: new Date().toISOString(), type: actionType, details: fullDetails }]);
+      setActionLogs(prev => {
+          const newLogs = [...prev, { time: new Date().toISOString(), type: actionType, details: fullDetails }];
+          window.__LAST_ACTION_LOGS__ = newLogs;
+          return newLogs;
+      });
   }, []);
 
   const downloadLogs = () => {
@@ -595,6 +661,7 @@ export default function App() {
       return (
         <div className="flex-1 flex flex-col relative w-full h-full">
           <DiagramEditor
+            editorMode={editorMode}
             xml={diagramXml}
             edgeStyle={edgeStyle}
             colorMode={colorMode}
@@ -903,6 +970,11 @@ export default function App() {
                           </select>
 
                           <div className="space-y-3">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1 block">Režim editoru</label>
+                            <div className="flex bg-gray-100 dark:bg-gray-900 rounded p-1 mb-3">
+                                <button onClick={() => { setEditorMode('simple'); localStorage.setItem('editorMode', 'simple'); logAction('SETTINGS_CHANGED', { editorMode: 'simple' }); }} className={`flex-1 text-xs py-1 px-2 rounded font-medium transition-colors ${editorMode === 'simple' ? 'bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Začátečník</button>
+                                <button onClick={() => { setEditorMode('advanced'); localStorage.setItem('editorMode', 'advanced'); logAction('SETTINGS_CHANGED', { editorMode: 'advanced' }); }} className={`flex-1 text-xs py-1 px-2 rounded font-medium transition-colors ${editorMode === 'advanced' ? 'bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Pokročilý</button>
+                            </div>
                             <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
                                 <input type="checkbox" checked={colorMode} onChange={e => { setColorMode(e.target.checked); localStorage.setItem('colorMode', e.target.checked); logAction('SETTINGS_CHANGED', { colorMode: e.target.checked }); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
                                 Barevné bloky
@@ -937,10 +1009,20 @@ export default function App() {
                           const isCurrent = panels[index] === t.id;
                           const isUsed = panels.includes(t.id) && !isCurrent;
                           return (
-                            <button key={t.id} disabled={isUsed} onClick={(e) => { 
+                            <button key={t.id} onClick={(e) => { 
                                 e.stopPropagation(); 
+                                if (isCurrent) {
+                                    setActiveDropdown(null);
+                                    return;
+                                }
                                 const newPanels = [...panels]; 
-                                newPanels[index] = t.id; 
+                                if (isUsed) {
+                                    const oldIndex = panels.indexOf(t.id);
+                                    newPanels[oldIndex] = panels[index];
+                                    newPanels[index] = t.id;
+                                } else {
+                                    newPanels[index] = t.id; 
+                                }
                                 setPanels(newPanels); 
                                 setActiveDropdown(null); 
                                 
@@ -970,10 +1052,11 @@ export default function App() {
                                 setSyncTrigger(s => s + 1);
                                 setSelectedNodeIds([]);
                                 setExternalSelectedIds([]);
-                                logAction('PANEL_CHANGED', { to: t.id }); 
-                            }} className={`w-full px-4 py-2 text-sm flex justify-between items-center transition-colors ${isUsed ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed' : 'text-gray-700 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/50'}`}>
+                                logAction('PANEL_CHANGED', { to: t.id, swapped: isUsed }); 
+                            }} className={`w-full px-4 py-2 text-sm flex justify-between items-center transition-colors ${isCurrent ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 font-bold' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`} title={isUsed ? 'Prohodit okna' : ''}>
                               <span>{t.label}</span>
                               {isCurrent && <span className="w-2 h-2 rounded-full bg-indigo-600 dark:bg-indigo-400"></span>}
+                              {isUsed && <RefreshCcw size={14} className="opacity-70" />}
                             </button>
                           );
                         })}
@@ -1029,5 +1112,13 @@ export default function App() {
       </main>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 }

@@ -7,5 +7,10 @@ export default defineConfig({
   base: '/EduCode/',
   test: {
     environment: 'jsdom',
+  },
+  server: {
+    watch: {
+      ignored: ['**/EduCode EduBox/**']
+    }
   }
 })

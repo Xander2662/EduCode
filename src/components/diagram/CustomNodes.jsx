@@ -1,5 +1,6 @@
 import React from 'react';
-import { Handle, Position, useReactFlow, useEdges } from '@xyflow/react';
+import { Handle, Position, useReactFlow, useEdges, NodeResizeControl, useStoreApi } from '@xyflow/react';
+import { RefreshCcw } from 'lucide-react';
 import { edgeLabels, getHighlightClass } from './constants';
 
 const DragHandle = () => <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors mx-auto mb-1" title="Chytit a přesunout" />;
@@ -194,8 +195,9 @@ export const IONode = ({ id, data, selected }) => {
       
       <div className="pt-2 z-10"><DragHandle /></div>
       
-      <span onClick={data.onToggleIOType} className={`absolute top-[4px] left-[35px] text-[9px] font-bold cursor-pointer hover:opacity-75 ${badgeColor} select-none z-20 ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`} title="Kliknutím přepnete typ bloku">
+      <span onClick={data.onToggleIOType} className={`absolute top-[4px] left-[35px] text-[9px] font-bold cursor-pointer hover:opacity-75 ${badgeColor} select-none z-20 ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'} flex items-center gap-1`} title="Kliknutím přepnete typ bloku">
           {isInput ? 'VSTUP' : 'VÝSTUP'}
+          <RefreshCcw size={8} className="opacity-80" />
       </span>
       
       <textarea rows={1} defaultValue={data.label} onChange={handleUserChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-[35px] pt-1 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
@@ -315,3 +317,209 @@ export const MergeNode = () => (
         <Handle type="source" position={Position.Bottom} id="s-bottom" className="opacity-0" />
     </div>
 );
+
+export const LoopContainerNode = ({ id, data, selected, dragging }) => {
+  const isGray = data.colorMode === false;
+  const borderColor = (selected || data.isRuntimeActive) ? 'border-indigo-500' : (isGray ? 'border-gray-400 dark:border-gray-600' : 'border-purple-400 dark:border-purple-600');
+  const bgColor = isGray ? 'bg-gray-50/50 dark:bg-gray-900/50' : 'bg-purple-50/30 dark:bg-purple-900/10';
+  
+  const { setNodes, getNodes } = useReactFlow();
+  const store = useStoreApi();
+  
+  const isDoWhile = data.doWhile === true;
+  const [isResizing, setIsResizing] = React.useState(false);
+  const wasDragging = React.useRef(false);
+
+  // Auto-fit height na začátku nebo po puštění (když se blok přesunul)
+  const triggerAutoFit = React.useCallback(() => {
+    setNodes(nds => {
+        const myNode = nds.find(n => n.id === id);
+        if (!myNode) return nds;
+        
+        const myX = myNode.position.x;
+        const myY = myNode.position.y;
+        const candidateNodes = nds.filter(n => n.id !== id && !['LOOP_CONTAINER', 'GROUP_BG'].includes(n.type));
+        
+        const nodesBelow = candidateNodes.filter(n => 
+            n.position.y >= myY && 
+            n.position.x >= myX - 100 && 
+            n.position.x <= myX + 400
+        ).sort((a, b) => a.position.y - b.position.y);
+        
+        if (nodesBelow.length > 0) {
+            const nodesToInclude = nodesBelow.slice(0, 3);
+            const lastNode = nodesToInclude[nodesToInclude.length - 1];
+            const h = lastNode.measured?.height || lastNode.height || (lastNode.type === 'CONDITION' ? 70 : 50);
+            const newHeight = (lastNode.position.y + h - myY) + 50;
+            
+            return nds.map(n => {
+                if (n.id === id) {
+                    return { ...n, data: { ...n.data, isNew: false }, style: { ...n.style, height: Math.max(150, newHeight) } };
+                }
+                return n;
+            });
+        }
+        
+        return nds.map(n => n.id === id ? { ...n, data: { ...n.data, isNew: false } } : n);
+    });
+  }, [id, setNodes]);
+
+  React.useEffect(() => {
+    if (data.isNew) {
+      setTimeout(triggerAutoFit, 50);
+    }
+  }, [data.isNew, triggerAutoFit]);
+
+  // Sticky chování - reset po přesunu
+  React.useEffect(() => {
+      if (dragging) {
+          wasDragging.current = true;
+      } else if (wasDragging.current) {
+          wasDragging.current = false;
+          triggerAutoFit();
+      }
+  }, [dragging, triggerAutoFit]);
+
+  const containerRef = useRef(null);
+
+  // Fluent Dynamic Width, X and auto-Height adjustment (bez lagu)
+  React.useEffect(() => {
+      let animationFrameId;
+      const checkBounds = () => {
+          setNodes(nds => {
+              const myNode = nds.find(n => n.id === id);
+              if (!myNode) return nds;
+
+              const myY = myNode.position.y;
+              const myX = myNode.position.x;
+              const myHeight = myNode.style?.height || 150;
+              const myWidth = myNode.style?.width || 300;
+              
+              const candidateNodes = nds.filter(n => n.id !== id && !['LOOP_CONTAINER', 'GROUP_BG'].includes(n.type));
+              
+              // Blok je uvnitř, pokud se jeho "vnitřní jádro" (50% plochy) překrývá s cyklem
+              const nodesInside = candidateNodes.filter(n => {
+                  const nX = n.position.x;
+                  const nY = n.position.y;
+                  const nW = n.measured?.width || n.width || 100;
+                  const nH = n.measured?.height || n.height || 50;
+                  
+                  // Hitbox pro vložení je větší než středový bod, ale menší než celý blok (50% velikosti bloku)
+                  const coreW = nW * 0.5;
+                  const coreH = nH * 0.5;
+                  const coreX = nX + (nW - coreW) / 2;
+                  const coreY = nY + (nH - coreH) / 2;
+                  
+                  return (
+                      coreX < myX + myWidth &&
+                      coreX + coreW > myX &&
+                      coreY < myY + myHeight &&
+                      coreY + coreH > myY
+                  );
+              });
+
+              // --- Zvýraznění při přetahování (Drop Preview) ---
+              if (containerRef.current) {
+                  const isHoveredByDrag = nodesInside.some(n => n.dragging);
+                  if (isHoveredByDrag) {
+                      containerRef.current.classList.add('bg-purple-100', 'dark:bg-purple-900/30', 'ring-4', 'ring-purple-400');
+                  } else {
+                      containerRef.current.classList.remove('bg-purple-100', 'dark:bg-purple-900/30', 'ring-4', 'ring-purple-400');
+                  }
+              }
+              // ------------------------------------------------
+              
+              // Pokud je cyklus prázdný (buď jsme bloky vytáhli, nebo cyklus odtáhli pryč), zmenší se na default
+              if (nodesInside.length === 0) {
+                  if (myWidth !== 300 || myHeight !== 150) {
+                      return nds.map(n => n.id === id ? { ...n, style: { ...n.style, width: 300, height: 150 } } : n);
+                  }
+                  return nds;
+              }
+
+              // Zmrazení jakékoliv změny velikosti, pokud taháme buď samotný cyklus, NEBO nějaký blok uvnitř/venku
+              const anyNodeDragging = myNode.dragging || candidateNodes.some(n => n.dragging);
+              if (anyNodeDragging) {
+                  return nds;
+              }
+
+              // Pokud je uvnitř jen 1 blok, velikost a pozice se neupravují
+              if (nodesInside.length === 1) {
+                  return nds;
+              }
+
+              // Automatické napasování na více bloků
+              let minX = Infinity;
+              let maxX = -Infinity;
+              let maxY = myY;
+
+              nodesInside.forEach(n => {
+                  const w = n.measured?.width || n.width || (n.type === 'CONDITION' ? 140 : 100);
+                  const h = n.measured?.height || n.height || (n.type === 'CONDITION' ? 70 : 50);
+                  if (n.position.x < minX) minX = n.position.x;
+                  if (n.position.x + w > maxX) maxX = n.position.x + w;
+                  if (n.position.y + h > maxY) maxY = n.position.y + h;
+              });
+
+              const PAD = 50; 
+              const newX = minX - PAD;
+              const newWidth = (maxX - minX) + (PAD * 2);
+              const autoHeight = (maxY - myY) + PAD;
+
+              const targetHeight = autoHeight;
+
+              if (Math.abs(myNode.position.x - newX) > 2 || 
+                  Math.abs(myWidth - newWidth) > 2 || 
+                  Math.abs(myHeight - targetHeight) > 2) {
+                  return nds.map(n => {
+                      if (n.id === id) {
+                          return { ...n, position: { ...n.position, x: newX }, style: { ...n.style, width: newWidth, height: targetHeight } };
+                      }
+                      return n;
+                  });
+              }
+              return nds;
+          });
+          animationFrameId = requestAnimationFrame(checkBounds);
+      };
+      
+      animationFrameId = requestAnimationFrame(checkBounds);
+      return () => cancelAnimationFrame(animationFrameId);
+  }, [id, setNodes]);
+  
+  const toggleDoWhile = (e) => {
+    e.stopPropagation();
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, doWhile: !isDoWhile } } : n));
+  };
+
+  return (
+    <div ref={containerRef} className={`relative w-full h-full rounded-lg border-2 border-dashed ${borderColor} ${bgColor} flex flex-col overflow-visible pointer-events-none`}>
+      {/* Hlavička cyklu - Zde přidáme custom-drag-handle pro React Flow */}
+      <div className={`custom-drag-handle absolute -top-4 left-4 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing`}>
+        <RefreshCcw size={12} className="text-purple-500" />
+        <span className="text-purple-700 dark:text-purple-300">WHILE</span>
+        
+        <input 
+            type="text" 
+            defaultValue={data.label} 
+            onChange={data.onChange}
+            onMouseDown={e => e.stopPropagation()}
+            className="outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-xs font-mono w-24 border border-transparent focus:border-purple-300 cursor-text"
+            placeholder="Podmínka"
+        />
+
+        {/* Toggle přesunutý napravo od inputu */}
+        <div className="flex items-center gap-1 ml-1 pl-2 border-l border-gray-200 dark:border-gray-600">
+            <span className="text-[10px] font-bold text-gray-500">DO</span>
+            <div 
+            onClick={toggleDoWhile}
+            className={`w-7 h-3.5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors ${isDoWhile ? 'bg-purple-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            title="Přepnout na testování podmínky na konci cyklu (Do-While)"
+            >
+            <div className={`bg-white w-2.5 h-2.5 rounded-full shadow-md transform transition-transform ${isDoWhile ? 'translate-x-3.5' : 'translate-x-0'}`}></div>
+            </div>
+        </div>
+      </div>
+    </div>
+  );
+};
