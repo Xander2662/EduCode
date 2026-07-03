@@ -221,6 +221,9 @@ export default function App() {
   const lastLogRef = useRef({ time: 0, type: '' });
   const currentStateRef = useRef({ panels: [], diagramXml: '', pseudocode: '', pythonCode: '' });
   
+  const isExperimental = window.location.pathname.includes('/experimental');
+  const appVersion = isExperimental ? 'experimental' : 'safe';
+  
   useEffect(() => {
       currentStateRef.current = { panels, diagramXml, pseudocode, pythonCode };
   }, [panels, diagramXml, pseudocode, pythonCode]);
@@ -232,6 +235,7 @@ export default function App() {
       
       const fullDetails = {
           ...details,
+          appVersion,
           appState: currentStateRef.current
       };
       
@@ -852,7 +856,12 @@ export default function App() {
             {panels.map(p => PANEL_TYPES[p].label).join(' ⇄ ')}
           </span>
         </div>
-        <button onClick={(e) => { e.stopPropagation(); setIsDarkMode(!isDarkMode); }} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors" aria-label={isDarkMode ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"}><Sun size={20} /></button>
+        <div className="flex items-center gap-3">
+          <a href={isExperimental ? '/EduCode/safe/' : '/EduCode/experimental/'} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors shadow-sm ${isExperimental ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border border-amber-300/50 hover:bg-amber-200' : 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 border border-green-300/50 hover:bg-green-200'}`}>
+            {isExperimental ? 'Experimental' : 'Safe Mode'}
+          </a>
+          <button onClick={(e) => { e.stopPropagation(); setIsDarkMode(!isDarkMode); }} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors" aria-label={isDarkMode ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"}><Sun size={20} /></button>
+        </div>
       </header>
 
       <main className="flex-1 flex flex-col lg:flex-row p-2 lg:p-4 gap-2 lg:gap-4" style={{ overflow: 'hidden' }}>

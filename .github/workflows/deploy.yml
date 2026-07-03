@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+      - experimental
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,20 +24,48 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      # Checkout and build Safe (main)
+      - name: Checkout Safe (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: safe
+        continue-on-error: true
 
-      - name: Build
-        run: npm run build
+      - name: Build Safe
+        if: hashFiles('safe/package.json') != ''
+        working-directory: ./safe
+        run: |
+          npm ci
+          npx vite build --base=/EduCode/safe/
+
+      # Checkout and build Experimental
+      - name: Checkout Experimental
+        uses: actions/checkout@v4
+        with:
+          ref: experimental
+          path: experimental
+        continue-on-error: true
+
+      - name: Build Experimental
+        if: hashFiles('experimental/package.json') != ''
+        working-directory: ./experimental
+        run: |
+          npm ci
+          npx vite build --base=/EduCode/experimental/
+
+      # Combine Builds
+      - name: Combine Builds
+        run: |
+          mkdir dist
+          if [ -d "safe/dist" ]; then cp -r safe/dist dist/safe; fi
+          if [ -d "experimental/dist" ]; then cp -r experimental/dist dist/experimental; fi
+          echo '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=/EduCode/safe/"></head><body>Redirecting to safe version...</body></html>' > dist/index.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
