@@ -5,6 +5,27 @@ import { edgeLabels, getHighlightClass } from './constants';
 
 const DragHandle = () => <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors mx-auto mb-1" title="Chytit a přesunout" />;
 
+const useDoubleClickEdit = (readOnly) => {
+    const [isEditing, setIsEditing] = React.useState(false);
+    const inputRef = React.useRef(null);
+    React.useEffect(() => {
+        if (isEditing && inputRef.current) {
+            inputRef.current.focus();
+            if (inputRef.current.select) inputRef.current.select();
+        }
+    }, [isEditing]);
+    const onDoubleClick = React.useCallback((e) => {
+        if (!readOnly) {
+            e.stopPropagation();
+            setIsEditing(true);
+        }
+    }, [readOnly]);
+    const onBlur = React.useCallback(() => {
+        setIsEditing(false);
+    }, []);
+    return { isEditing, inputRef, onDoubleClick, onBlur };
+};
+
 const handleInputMouseDown = (e, selected) => {
   if (!selected && document.activeElement !== e.target) e.preventDefault();
 };
@@ -31,6 +52,8 @@ export const StartEndNode = ({ id, data, selected }) => {
   const { setNodes } = useReactFlow();
   let mode = data.mode || 'unassigned';
   let entityType = data.entityType || 'FUNCTION';
+  
+  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
 
   const setMode = (newMode) => {
     let newLabel = data.label;
@@ -70,13 +93,13 @@ export const StartEndNode = ({ id, data, selected }) => {
       )}
 
       {mode === 'start' && (
-        <div className="w-full flex-1 flex flex-col px-2 relative pb-1">
+        <div className="w-full flex-1 flex flex-col px-2 relative pb-1" onDoubleClick={onDoubleClick}>
           <div className="flex justify-between items-center w-full mb-1 px-1">
             <span className={`text-[9px] font-bold w-12 text-left ${titleColor}`}>START</span>
             <div className={`custom-drag-handle w-8 h-1.5 cursor-grab rounded-full transition-colors ${isGray ? 'bg-gray-300 dark:bg-gray-600' : 'bg-fuchsia-200 dark:bg-fuchsia-800'}`} />
             <span onClick={data.onToggleEntityType} className={`text-[9px] font-bold w-12 text-right cursor-pointer hover:opacity-75 ${titleColor} ${data.readOnly ? 'pointer-events-none' : 'pointer-events-auto'}`} title="Kliknutím přepnete na CLASS">{entityType}</span>
           </div>
-          <input defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono font-bold nodrag text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+          <input ref={inputRef} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono font-bold nodrag text-gray-900 dark:text-gray-100 ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} />
         </div>
       )}
 
@@ -100,10 +123,11 @@ export const ActionNode = ({ id, data, selected }) => {
   const baseBorder = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-blue-300 dark:border-blue-700';
   const handleClass = isGray ? '!bg-gray-400' : '!bg-blue-600';
   
+  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
   const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, baseBorder);
 
   return (
-    <div className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass} ${data.isBreakpoint ? 'ring-4 ring-red-500 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : ''}`}>
+    <div onDoubleClick={onDoubleClick} className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass} ${data.isBreakpoint ? 'ring-4 ring-red-500 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : ''}`}>
       {data.showDebugger && (
           <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
       )}
@@ -113,7 +137,7 @@ export const ActionNode = ({ id, data, selected }) => {
       <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
       <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
       <DragHandle />
-      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-900 dark:text-gray-100 ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} />
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
     </div>
   );
@@ -122,6 +146,8 @@ export const ActionNode = ({ id, data, selected }) => {
 export const IONode = ({ id, data, selected }) => {
   const isGray = data.colorMode === false;
   const isInput = (data.ioType || 'input') === 'input';
+
+  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
 
   const fillClass = isGray 
       ? 'fill-gray-50 dark:fill-gray-800' 
@@ -179,7 +205,7 @@ export const IONode = ({ id, data, selected }) => {
   };
 
   return (
-    <div className={`relative min-w-[120px] min-h-[50px] flex flex-col transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
+    <div onDoubleClick={onDoubleClick} className={`relative min-w-[120px] min-h-[50px] flex flex-col transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       {data.showDebugger && (
           <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
       )}
@@ -200,7 +226,7 @@ export const IONode = ({ id, data, selected }) => {
           <RefreshCcw size={8} className="opacity-80" />
       </span>
       
-      <textarea rows={1} defaultValue={data.label} onChange={handleUserChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-[35px] pt-1 z-10 text-gray-900 dark:text-gray-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={handleUserChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-[35px] pt-1 z-10 text-gray-900 dark:text-gray-100 ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} />
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
     </div>
   );
@@ -211,6 +237,7 @@ export const ConditionNode = ({ id, data, selected }) => {
   const outEdges = edges.filter(e => e.source === id).length;
   const hasWarning = outEdges === 1;
 
+  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
   const isGray = data.colorMode === false;
 
   const fillClass = isGray ? 'fill-gray-50 dark:fill-gray-800' : (hasWarning ? 'fill-red-50 dark:fill-red-900/20' : 'fill-orange-50 dark:fill-orange-900/30');
@@ -270,7 +297,7 @@ export const ConditionNode = ({ id, data, selected }) => {
 
   return (
     // Zvětšeno z min-w-[120px] min-h-[60px] na 160px x 80px, aby se posuvník pohodlně vešel do obou tvarů
-    <div className={`relative flex flex-col items-center justify-center min-w-[160px] min-h-[80px] transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
+    <div onDoubleClick={onDoubleClick} className={`relative flex flex-col items-center justify-center min-w-[160px] min-h-[80px] transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       {data.showDebugger && (
           <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-6 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
       )}
@@ -287,7 +314,7 @@ export const ConditionNode = ({ id, data, selected }) => {
       <div className="absolute top-2.5 z-10"><DragHandle /></div>
       
       {/* Větší max šířka textarea, protože celý blok je nyní větší */}
-      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`min-w-[90px] max-w-[130px] text-center outline-none bg-transparent text-sm font-mono nodrag mt-3 z-10 resize-none overflow-hidden text-gray-900 dark:text-gray-100 px-1 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} />
+      <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`min-w-[90px] max-w-[130px] text-center outline-none bg-transparent text-sm font-mono nodrag mt-3 z-10 resize-none overflow-hidden text-gray-900 dark:text-gray-100 px-1 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} />
       
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${bottomBorderColor} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair leading-none p-0`}>{bottomChar}</Handle>
       <Handle type="source" position={Position.Right} id="s-right" className={`!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${rightBorderColor} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair leading-none p-0`}>{rightChar}</Handle>
@@ -300,11 +327,12 @@ export const CommentNode = ({ id, data, selected }) => {
   const bgClass = isGray ? 'bg-gray-50 dark:bg-gray-800' : 'bg-yellow-50 dark:bg-yellow-900/30';
   const borderClass = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-yellow-300 dark:border-yellow-700';
   const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, borderClass);
+  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
 
   return (
-    <div className={`${bgClass} border-2 p-2 min-w-[160px] flex flex-col rounded-md relative transition-all ${highlightClass}`}>
+    <div onDoubleClick={onDoubleClick} className={`${bgClass} border-2 p-2 min-w-[160px] flex flex-col rounded-md relative transition-all ${highlightClass}`}>
       <DragHandle />
-      <textarea rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onInput={handleInputResize} onMouseDown={(e) => handleInputMouseDown(e, selected)} readOnly={data.readOnly} className={`w-full flex-1 outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-700 dark:text-yellow-100 ${selected && !data.readOnly ? 'pointer-events-auto' : 'pointer-events-none'}`} style={{ minHeight: '30px' }} />
+      <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-700 dark:text-yellow-100 ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} style={{ minHeight: '30px' }} />
     </div>
   );
 };
