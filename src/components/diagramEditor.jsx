@@ -708,3 +708,4 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 export default function DiagramEditor(props) {
   return <ReactFlowProvider><EditorCanvas {...props} /></ReactFlowProvider>;
 }
+//reload
