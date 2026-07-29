@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare, Bug, RefreshCcw, Download } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare, Bug, RefreshCcw, Download, Terminal, Maximize2, Minimize2 } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parseDrawioToPython } from './parsers/diagramToPython';
@@ -8,6 +8,86 @@ import { DiagramRunner } from './utils/runner';
 import { drawioToReactFlow } from './utils/diagramConverter';
 import DiagramEditor from './components/diagramEditor';
 import TutorialDialog from './components/TutorialDialog';
+
+const DebuggerConsole = ({ events }) => {
+    const [expanded, setExpanded] = useState(true);
+    const [showInfo, setShowInfo] = useState(false);
+    const scrollRef = useRef(null);
+
+    useEffect(() => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    }, [events, expanded]);
+
+    useEffect(() => {
+        const handleClickOutside = () => setShowInfo(false);
+        if (showInfo) {
+            window.addEventListener('click', handleClickOutside);
+            return () => window.removeEventListener('click', handleClickOutside);
+        }
+    }, [showInfo]);
+
+    if (!expanded) {
+        return (
+            <button 
+                onClick={() => setExpanded(true)} 
+                className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 text-gray-700 dark:text-gray-300 h-10 w-10 rounded-full shadow-2xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all pointer-events-auto flex items-center justify-center"
+                title="Zobrazit konzoli"
+            >
+                <Terminal size={20} />
+            </button>
+        );
+    }
+
+    return (
+        <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-2xl w-full pointer-events-auto flex flex-col transition-all duration-300 relative" style={{ maxHeight: '200px' }}>
+            <div className="flex justify-between items-center px-4 py-2.5 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/50 rounded-t-2xl">
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2 relative">
+                    <Terminal size={12} />
+                    Konzole
+                    <div className="relative">
+                        <button onClick={(e) => { e.stopPropagation(); setShowInfo(!showInfo); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-0.5 ml-1" title="Nápověda pro Debugger Konzoli">
+                            <HelpCircle size={10} />
+                        </button>
+                    </div>
+                    {showInfo && (
+                        <div className="absolute bottom-[calc(100%+12px)] left-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-4 w-72 z-[1000] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case text-left" onClick={e => e.stopPropagation()}>
+                            <p className="mb-2"><strong>Debugger Konzole</strong> zachycuje veškerý výstup programu.</p>
+                            <ul className="space-y-1 text-[10px] text-gray-500">
+                                <li><span className="text-green-600 font-bold">Zeleně:</span> Standardní výstup (např. PRINT "Ahoj")</li>
+                                <li><span className="text-indigo-500 italic font-semibold">Modře:</span> Zprávy debuggeru (např. přeskočené cykly)</li>
+                            </ul>
+                        </div>
+                    )}
+                </div>
+                <button onClick={() => setExpanded(false)} className="text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors">
+                    <Minimize2 size={14} />
+                </button>
+            </div>
+            
+            <div 
+                ref={scrollRef}
+                className="p-3 font-mono text-sm flex flex-col gap-1 overflow-y-auto no-scrollbar"
+                style={{ 
+                    minHeight: '36px', 
+                    maxHeight: '130px' 
+                }}
+            >
+                {events.length === 0 ? (
+                    <div className="text-gray-400 dark:text-gray-500 italic text-xs">Čekání na výstup...</div>
+                ) : (
+                    events.map((ev, i) => (
+                        <div key={i} className={`flex items-start gap-2 leading-relaxed ${ev.type === 'insight' ? 'text-indigo-500/90 dark:text-indigo-400/90 italic' : 'text-green-700 dark:text-green-400 font-semibold'}`}>
+                            <span className="opacity-50 select-none">{'>'}</span>
+                            <span className="break-words">{ev.msg}</span>
+                        </div>
+                    ))
+                )}
+            </div>
+        </div>
+    );
+};
 
 const PANEL_TYPES = {
   drawio: { id: 'drawio', label: 'Diagram', title: 'Vizuální návrh' },
@@ -164,7 +244,7 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
 
   const handleLineClick = (lineIndex) => {
      if (!showDebugger) return;
-     const nodeId = Object.keys(nodeLineMap).find(id => nodeLineMap[id] === lineIndex);
+     const nodeId = Object.keys(nodeLineMap).find(id => Array.isArray(nodeLineMap[id]) ? nodeLineMap[id].includes(lineIndex) : nodeLineMap[id] === lineIndex);
      if (nodeId && onBreakpointToggle) onBreakpointToggle(nodeId);
   };
 
@@ -176,7 +256,7 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
 
       <div ref={lineNumbersRef} className="w-12 bg-gray-50 dark:bg-gray-800 text-gray-400 text-right pr-3 py-4 font-mono text-sm overflow-hidden select-none border-r border-gray-200 dark:border-gray-700 z-10">
         {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => {
-          const nodeId = Object.keys(nodeLineMap).find(id => nodeLineMap[id] === i);
+          const nodeId = Object.keys(nodeLineMap).find(id => Array.isArray(nodeLineMap[id]) ? nodeLineMap[id].includes(i) : nodeLineMap[id] === i);
           const isBp = nodeId && breakpoints.includes(nodeId);
           const hasMapping = !!nodeId && showDebugger;
 
@@ -265,9 +345,11 @@ function AppContent() {
   const [runtimeActiveNodeId, setRuntimeActiveNodeId] = useState(null);
   const [runtimeVars, setRuntimeVars] = useState({});
   const [runtimeOutput, setRuntimeOutput] = useState([]);
+  const [runtimeEvents, setRuntimeEvents] = useState([]);
   
   const [debugSpeedPercent, setDebugSpeedPercent] = useState(100);
   const [showDebugSettings, setShowDebugSettings] = useState(false);
+  const [showWatcherInfo, setShowWatcherInfo] = useState(false);
   const [inputRequest, setInputRequest] = useState(null);
   
   const [isPlayingState, setIsPlayingState] = useState(false);
@@ -323,6 +405,17 @@ function AppContent() {
   useEffect(() => { 
       debugSpeedRef.current = debugSpeedPercent === 0 ? 3000 : Math.max(50, 800 * (100 / debugSpeedPercent)); 
   }, [debugSpeedPercent]);
+
+  useEffect(() => {
+      const handleClickOutside = () => {
+          setShowDebugSettings(false);
+          setShowWatcherInfo(false);
+      };
+      if (showDebugSettings || showWatcherInfo) {
+          window.addEventListener('click', handleClickOutside);
+          return () => window.removeEventListener('click', handleClickOutside);
+      }
+  }, [showDebugSettings, showWatcherInfo]);
 
   useEffect(() => {
     const seen = localStorage.getItem('eduCodeTutorialSeen');
@@ -431,7 +524,7 @@ function AppContent() {
             return;
         }
 
-        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode, diagramXml, edgeStyle, conditionShape);
+        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode, diagramXml, edgeStyle, conditionShape, editorMode);
         
         const parser = new DOMParser();
         const doc = parser.parseFromString(generatedXml, "text/xml");
@@ -478,7 +571,7 @@ function AppContent() {
         }
         
         const intermediatePseudocode = parsePythonToPseudocode(pythonCode);
-        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(intermediatePseudocode, diagramXml, edgeStyle, conditionShape);
+        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(intermediatePseudocode, diagramXml, edgeStyle, conditionShape, editorMode);
 
         setDiagramXml(prev => {
             if (prev !== generatedXml) {
@@ -549,7 +642,8 @@ function AppContent() {
       runnerRef.current = newRunner;
       setRuntimeVars({});
       setRuntimeOutput([]);
-      setInputRequest(null);
+      setRuntimeEvents([]);
+      setRuntimeActiveNodeId(null);
       
       setRuntimeActiveNodeId(newRunner.currentNodeId);
       setIsPlaying(false);
@@ -569,6 +663,7 @@ function AppContent() {
       if (clearData) {
           setRuntimeVars({});
           setRuntimeOutput([]);
+          setRuntimeEvents([]);
       }
       logAction('DEBUGGER_STOPPED');
   }, [setIsPlaying, logAction]);
@@ -592,6 +687,7 @@ function AppContent() {
 
       setRuntimeVars({ ...res.variables });
       setRuntimeOutput([...res.output]);
+      setRuntimeEvents([...(res.events || [])]);
 
       if (res.finished) {
           stopDebugger(false);
@@ -722,7 +818,18 @@ function AppContent() {
                 <div className="absolute top-20 left-4 pointer-events-auto">
                     <div className="bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700 w-64 flex flex-col">
                        <div className="flex justify-between items-center px-1 pb-2 mb-2 border-b border-gray-100 dark:border-gray-700">
-                          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Paměť (Variables)</span>
+                          <div className="flex items-center gap-2 relative">
+                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Paměť (Variables)</span>
+                              <button onClick={(e) => { e.stopPropagation(); setShowWatcherInfo(!showWatcherInfo); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-1" title="Nápověda pro Paměť (Variables)">
+                                  <HelpCircle size={12} />
+                              </button>
+                              {showWatcherInfo && (
+                                  <div className="absolute top-[calc(100%+8px)] left-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-4 w-64 z-[1000] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case" onClick={e => e.stopPropagation()}>
+                                      <p className="mb-2"><strong>Paměť (Variables)</strong> zobrazuje aktuální stav proměnných během krokování.</p>
+                                      <p className="text-[10px] text-gray-500">Změny uvidíte okamžitě, jakmile proběhne operace jako <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded text-gray-800 dark:text-gray-200 font-mono">x = 1</code>.</p>
+                                  </div>
+                              )}
+                          </div>
                           <span className={`w-2 h-2 rounded-full ${runner && !runner.isFinished ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
                        </div>
                        <div className="flex flex-col gap-1 max-h-[40vh] overflow-y-auto no-scrollbar px-1">
@@ -757,16 +864,7 @@ function AppContent() {
                 </div>
 
                 <div className="absolute bottom-4 left-4 right-4 flex justify-between items-end pointer-events-none">
-                    <div className="w-72 pointer-events-auto">
-                      {runtimeOutput.length > 0 && (
-                        <div className="bg-gray-900/95 backdrop-blur-md border border-gray-700 rounded-2xl shadow-xl p-4 w-full">
-                            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Výstup (Console)</div>
-                            <div className="font-mono text-sm text-green-400 flex flex-col gap-1 max-h-[20vh] overflow-y-auto no-scrollbar">
-                                {runtimeOutput.slice(-5).map((o,i) => <div key={i}>{`> ${o}`}</div>)}
-                            </div>
-                        </div>
-                      )}
-                    </div>
+                    <div className="w-72" />
                     
                     <div className="flex gap-2 items-end pointer-events-auto relative">
                         <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2 flex gap-2">
@@ -781,8 +879,8 @@ function AppContent() {
                                 <Settings size={18} />
                             </button>
                             {showDebugSettings && (
-                                <div className="absolute bottom-full right-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow p-3 w-48" onClick={e => e.stopPropagation()}>
-                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex justify-between">
+                                <div className="absolute bottom-full right-0 mb-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-2xl p-4 w-56" onClick={e => e.stopPropagation()}>
+                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
                                         Rychlost <span>{debugSpeedPercent}%</span>
                                     </label>
                                     <input 
@@ -799,7 +897,11 @@ function AppContent() {
                         </div>
                     </div>
 
-                    <div className="w-72" /> 
+                    <div className="w-72 pointer-events-auto flex justify-end">
+                        <DebuggerConsole 
+                             events={runtimeEvents}
+                        />
+                    </div>
                 </div>
             </div>
           )}
@@ -839,7 +941,10 @@ function AppContent() {
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`} 
             blocks={blocksToHighlightPython}
             runtimeActiveLine={isDebuggerActive && runtimeActiveNodeId !== null ? pythonNodeLineMap[runtimeActiveNodeId] : null}
-            highlightLines={!isDebuggerActive ? selectedNodeIds.map(id => pythonNodeLineMap[id]).filter(l => l !== undefined && l !== null) : []}
+            highlightLines={!isDebuggerActive ? selectedNodeIds.flatMap(id => {
+              const val = pythonNodeLineMap[id];
+              return Array.isArray(val) ? val : (val !== undefined && val !== null ? [val] : []);
+            }) : []}
           />
         </div>
       );
@@ -871,7 +976,10 @@ function AppContent() {
             placeholder={`// Zde bude ${PANEL_TYPES[type].label}...`}
             blocks={blocksToHighlight}
             runtimeActiveLine={isDebuggerActive && runtimeActiveNodeId !== null ? pseudoNodeLineMap[runtimeActiveNodeId] : null}
-            highlightLines={!isDebuggerActive ? selectedNodeIds.map(id => pseudoNodeLineMap[id]).filter(l => l !== undefined && l !== null) : []}
+            highlightLines={!isDebuggerActive ? selectedNodeIds.flatMap(id => {
+              const val = pseudoNodeLineMap[id];
+              return Array.isArray(val) ? val : (val !== undefined && val !== null ? [val] : []);
+            }) : []}
           />
         </div>
       );

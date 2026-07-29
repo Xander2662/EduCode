@@ -1,4 +1,4 @@
-export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 'true-false', conditionShape = 'hexagon') => {
+export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 'true-false', conditionShape = 'hexagon', editorMode = 'simple') => {
     const getNewId = () => 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 11);
 
     const edgeLabels = {
@@ -76,6 +76,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 else if (style.includes('rhombus') || style.includes('hexagon') || cellType === 'CONDITION') type = 'CONDITION';
                 else if (style.includes('shape=parallelogram') || cellType === 'IO') type = 'IO';
                 else if (style.includes('shape=note') || cellType === 'COMMENT') type = 'COMMENT';
+                else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellType === 'LOOP_CONTAINER') type = 'LOOP_CONTAINER';
                 existingNodes.push({ id: cell.getAttribute('id'), val, type, x: parseFloat(geo.getAttribute('x')), y: parseFloat(geo.getAttribute('y')), used: false });
             }
         });
@@ -202,7 +203,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
         const addNode = (text, type, defaultX, extraProps = {}, originalLineText = null) => {
             const pos = getPos(text, type, defaultX, yOffset);
-            outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y, ...extraProps });
+            outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y, matched: pos.matched, ...extraProps });
             yOffset = Math.max(yOffset, pos.y) + (type === 'CONDITION' ? 160 : 100);
             
             if (originalLineText !== null) {
@@ -224,7 +225,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         const getXPos = () => {
             let x = globalGroupX;
             for (let i = 0; i < stack.length; i++) {
-                if (stack[i].type === 'LOOP') x += 240;
+                if (stack[i].type === 'LOOP' && !stack[i].isSimple) x += 240;
                 if (stack[i].type === 'IF' && stack[i].trueExits !== null) x += 240;
             }
             return x;
@@ -238,7 +239,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             let upper = line.toUpperCase();
 
             if (upper.startsWith('//') || upper.startsWith('#')) {
-                addNode(line, 'COMMENT', getXPos() + 160, {}, line);
+                const commentText = line.replace(/^[\/#\s]+/, '');
+                addNode(commentText, 'COMMENT', getXPos() + 160, {}, commentText);
                 continue;
             }
 
@@ -280,9 +282,11 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 pendingExits = [...currentIf.trueExits, ...pendingExits];
                 yOffset = Math.max(yOffset, currentIf.trueMaxY || currentIf.branchStartY);
             }
+
             else if (upper.startsWith('WHILE ') || upper.startsWith('FOR ')) {
                 const isFor = upper.startsWith('FOR ');
-                let condText = isFor ? line.substring(0, upper.lastIndexOf(' DO')).trim() : line.substring(6, upper.lastIndexOf(' DO')).trim();
+                let doIndex = upper.lastIndexOf(' DO');
+                let condText = isFor ? line.substring(0, doIndex !== -1 ? doIndex : line.length).trim() : line.substring(6, doIndex !== -1 ? doIndex : line.length).trim();
 
                 let forVar = null;
                 let forStep = '1';
@@ -309,18 +313,75 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                     isNot = true;
                 }
 
-                const loopId = addNode(condText, 'CONDITION', getXPos(), {}, isFor ? null : line);
+                if (editorMode === 'simple' && !isFor) {
+                    // Simple mode WHILE loop (not FOR)
+                    yOffset += 60;
+                    stack.push({ type: 'LOOP', id: getNewId(), isSimple: true, condText, startY: yOffset, entryExits: [...pendingExits], doWhile: false, outNodesStartIndex: outNodes.length });
+                } else {
+                    const loopId = addNode(condText, 'CONDITION', getXPos(), {}, isFor ? null : line);
 
-                pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
-                const ports = getConditionPorts(loopId, isNot);
-                stack.push({ type: 'LOOP', id: loopId, mergeId: null, isNot, isFor, forVar, forStep });
-                pendingExits = [{ id: loopId, text: ports.tText, handle: ports.tHandle }];
-                
+                    pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
+                    const ports = getConditionPorts(loopId, isNot);
+                    stack.push({ type: 'LOOP', id: loopId, mergeId: null, isNot, isFor, forVar, forStep, isSimple: false, doWhile: false });
+                    pendingExits = [{ id: loopId, text: ports.tText, handle: ports.tHandle }];
+                }
             }
             else if (upper === 'ENDWHILE' || upper === 'ENDFOR') {
                 const currentLoop = stack.pop();
 
-                if (currentLoop.isFor && currentLoop.forVar) {
+                if (currentLoop.isSimple) {
+                    const loopBodyNodes = outNodes.slice(currentLoop.outNodesStartIndex);
+                    const k = loopBodyNodes.length;
+                    if (k > 0 && outNodes.length >= currentLoop.outNodesStartIndex + k) {
+                        const preLoopStartIdx = currentLoop.outNodesStartIndex - k;
+                        if (preLoopStartIdx >= 0) {
+                            const preLoopNodes = outNodes.slice(preLoopStartIdx, currentLoop.outNodesStartIndex);
+                            let match = true;
+                            for (let i = 0; i < k; i++) {
+                                if (preLoopNodes[i].text !== loopBodyNodes[i].text || preLoopNodes[i].type !== loopBodyNodes[i].type) {
+                                    match = false;
+                                    break;
+                                }
+                            }
+                            if (match) {
+                                currentLoop.doWhile = true;
+                                const removedNodeIds = new Set(preLoopNodes.map(n => n.id));
+                                
+                                outEdges.forEach(e => {
+                                    if (e.target === preLoopNodes[0].id && !removedNodeIds.has(e.source)) {
+                                        e.target = loopBodyNodes[0].id;
+                                    }
+                                });
+                                
+                                outEdges = outEdges.filter(e => !removedNodeIds.has(e.source) && !removedNodeIds.has(e.target));
+                                outNodes.splice(preLoopStartIdx, k);
+                                
+                                // Add 60px padding so the container doesn't overlap the block above it
+                                const shiftAmount = preLoopNodes[0].y - currentLoop.startY + 60;
+                                currentLoop.startY = currentLoop.startY + shiftAmount;
+                                yOffset += shiftAmount;
+                                
+
+                                for (let i = 0; i < k; i++) {
+                                    if (!loopBodyNodes[i].matched && preLoopNodes[i].matched) {
+                                        loopBodyNodes[i].x = preLoopNodes[i].x;
+                                    }
+                                }
+
+                                for (let i = preLoopStartIdx; i < outNodes.length; i++) {
+                                    outNodes[i].y += shiftAmount;
+                                }
+                            }
+                        }
+                    }
+
+                    const h = Math.max(150, yOffset - currentLoop.startY + 50);
+                    const id = currentLoop.id;
+                    const memPos = getPos(currentLoop.condText, 'LOOP_CONTAINER', getXPos() - 90, currentLoop.startY - 50);
+                    outNodes.push({ id, text: currentLoop.condText, type: 'LOOP_CONTAINER', x: memPos.x, y: memPos.y, w: 300, h, doWhile: currentLoop.doWhile });
+                    // pendingExits just flows sequentially to the next block, no back edges.
+                    yOffset += 50;
+                } else if (currentLoop.isFor && currentLoop.forVar) {
                     const incId = addNode(`${currentLoop.forVar} = ${currentLoop.forVar} + ${currentLoop.forStep}`, 'ACTION', getXPos(), {}, line);
                     pendingExits.forEach(exit => {
                         let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.id, currentLoop.isNot).tHandle : exit.handle;
@@ -328,14 +389,20 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                     });
                     addEdge(incId, currentLoop.id, "", "s-bottom", "t-top");
                 } else {
+                    const ports = getConditionPorts(currentLoop.id, currentLoop.isNot);
+                    let trueTargetHandle = "t-top";
+                    if (currentLoop.mergeId) trueTargetHandle = "t-top"; 
+
                     pendingExits.forEach(exit => {
-                        let returnHandle = exit.id === currentLoop.id ? getConditionPorts(currentLoop.id, currentLoop.isNot).tHandle : exit.handle;
-                        addEdge(exit.id, currentLoop.id, exit.text, returnHandle, "t-top");
+                        let returnHandle = exit.id === currentLoop.id ? ports.tHandle : exit.handle;
+                        addEdge(exit.id, currentLoop.mergeId || currentLoop.id, exit.text, returnHandle, trueTargetHandle);
                     });
                 }
                 
-                const ports = getConditionPorts(currentLoop.id, currentLoop.isNot);
-                pendingExits = [{ id: currentLoop.id, text: ports.fText, handle: ports.fHandle }];
+                if (!currentLoop.isSimple) {
+                    const ports = getConditionPorts(currentLoop.id, currentLoop.isNot);
+                    pendingExits = [{ id: currentLoop.id, text: ports.fText, handle: ports.fHandle }];
+                }
             }
             else {
                 let isIo = false;
@@ -418,22 +485,29 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
     let xml = `<mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">\n  <root>\n    <mxCell id="0" />\n    <mxCell id="1" parent="0" />\n`;
 
+
     outNodes.forEach(n => {
-        let w = 100, h = 50;
-        if (n.type === 'IO') { w = 120; h = 50; }
-        // OPRAVA: Podmínka je nyní v UI větší, takže ji do Draw.io zapisujeme jako 160x80
-        if (n.type === 'CONDITION') { w = 160; h = 80; }
-        if (n.type === 'START_END') { w = 100; h = 40; }
-        if (n.type === 'COMMENT') { w = 160; h = 40; }
-        if (n.type === 'MERGE') { w = 10; h = 10; }
+        let w = n.w || 120;
+        let h = n.h || 50;
+        if (!n.w) {
+            if (n.type === 'CONDITION') { w = 160; h = 80; }
+            if (n.type === 'START_END') { w = 100; h = 40; }
+            if (n.type === 'COMMENT') { w = 160; h = 40; }
+            if (n.type === 'MERGE') { w = 10; h = 10; }
+        }
 
         let style = STYLES[n.type] || n.type;
         if (n.mode) style += `mode=${n.mode};`;
         if (n.entityType) style += `entityType=${n.entityType};`;
         if (n.ioType) style += `ioType=${n.ioType};`; 
 
+        let extraAttrs = "";
+        if (n.type === 'LOOP_CONTAINER') {
+            extraAttrs = ` type="LOOP_CONTAINER" doWhile="${n.doWhile ? 'true' : 'false'}"`;
+        }
+
         const safeText = (n.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}" vertex="1" parent="1">\n`;
+        xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}"${extraAttrs} vertex="1" parent="1">\n`;
         xml += `      <mxGeometry x="${n.x}" y="${n.y}" width="${w}" height="${h}" as="geometry" />\n`;
         xml += `    </mxCell>\n`;
     });

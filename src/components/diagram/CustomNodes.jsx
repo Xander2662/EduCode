@@ -1,6 +1,7 @@
 import React from 'react';
 import { Handle, Position, useReactFlow, useEdges, NodeResizeControl, useStoreApi } from '@xyflow/react';
-import { RefreshCcw } from 'lucide-react';
+import { RefreshCcw, MousePointer2 } from 'lucide-react';
+import { calculateStretchLimits } from '../../utils/stretchLimits';
 import { edgeLabels, getHighlightClass } from './constants';
 
 const DragHandle = () => <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors mx-auto mb-1" title="Chytit a přesunout" />;
@@ -133,9 +134,7 @@ export const ActionNode = ({ id, data, selected }) => {
       )}
       
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
-      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-      <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
+
       <DragHandle />
       <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-900 dark:text-gray-100 ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} />
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
@@ -215,9 +214,6 @@ export const IONode = ({ id, data, selected }) => {
       </svg>
       
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
-      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-      <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
       
       <div className="pt-2 z-10"><DragHandle /></div>
       
@@ -272,19 +268,38 @@ export const ConditionNode = ({ id, data, selected }) => {
 
   const bottomEdge = edges.find(e => e.source === id && e.sourceHandle === 's-bottom');
   const rightEdge = edges.find(e => e.source === id && e.sourceHandle === 's-right');
+  const { setEdges } = useReactFlow();
 
-  let isBottomTrue = true;
-  let isRightTrue = false;
-
+  let bIsT = true;
   if (bottomEdge && bottomEdge.data?.label) {
-      isBottomTrue = (bottomEdge.data.label === pref.t || bottomEdge.data.label === 'Ano' || bottomEdge.data.label === '+' || bottomEdge.data.label === 'Yes' || bottomEdge.data.label === 'True');
-      if (!rightEdge) isRightTrue = !isBottomTrue;
+      bIsT = ['True', 'Ano', '+', 'Yes', pref.t].includes(bottomEdge.data.label);
+  } else if (rightEdge && rightEdge.data?.label) {
+      bIsT = !(['True', 'Ano', '+', 'Yes', pref.t].includes(rightEdge.data.label));
   }
+  
+  const expectedBottomLabel = bIsT ? pref.t : pref.f;
+  const expectedRightLabel = bIsT ? pref.f : pref.t;
+  
+  const isBottomTrue = bIsT;
+  const isRightTrue = !bIsT;
 
-  if (rightEdge && rightEdge.data?.label) {
-      isRightTrue = (rightEdge.data.label === pref.t || rightEdge.data.label === 'Ano' || rightEdge.data.label === '+' || rightEdge.data.label === 'Yes' || rightEdge.data.label === 'True');
-      if (!bottomEdge) isBottomTrue = !isRightTrue;
-  }
+  React.useEffect(() => {
+      if (data.readOnly) return;
+      let needsUpdate = false;
+      if (bottomEdge && bottomEdge.data?.label !== expectedBottomLabel) needsUpdate = true;
+      if (rightEdge && rightEdge.data?.label !== expectedRightLabel) needsUpdate = true;
+      
+      if (needsUpdate) {
+          // Push to end of event loop to avoid React warning about updating state during render
+          setTimeout(() => {
+              setEdges(eds => eds.map(e => {
+                  if (bottomEdge && e.id === bottomEdge.id) return { ...e, data: { ...e.data, label: expectedBottomLabel } };
+                  if (rightEdge && e.id === rightEdge.id) return { ...e, data: { ...e.data, label: expectedRightLabel } };
+                  return e;
+              }));
+          }, 0);
+      }
+  }, [bottomEdge?.data?.label, rightEdge?.data?.label, expectedBottomLabel, expectedRightLabel, bottomEdge?.id, rightEdge?.id, data.readOnly, setEdges]);
 
   const bottomChar = isBottomTrue ? tChar : fChar;
   const rightChar = isRightTrue ? tChar : fChar;
@@ -306,9 +321,6 @@ export const ConditionNode = ({ id, data, selected }) => {
         <polygon points={polygonPoints} className={fillClass} stroke="currentColor" strokeWidth={strokeW} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
       <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
-      <Handle type="target" position={Position.Left} id="t-left" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-      <Handle type="target" position={Position.Right} id="t-right" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
-      <Handle type="target" position={Position.Bottom} id="t-bottom" className="!w-2 !h-2 !bg-transparent !border-none absolute" />
 
       {/* Změněno z top-1 na top-2.5, aby se u kosočtverce drag handle neřezal o hranu (přidává to padding zespoda špičky) */}
       <div className="absolute top-2.5 z-10"><DragHandle /></div>
@@ -329,10 +341,20 @@ export const CommentNode = ({ id, data, selected }) => {
   const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, borderClass);
   const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
 
+  React.useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
+    }
+  }, [data.label, isEditing]);
+
   return (
     <div onDoubleClick={onDoubleClick} className={`${bgClass} border-2 p-2 min-w-[160px] flex flex-col rounded-md relative transition-all ${highlightClass}`}>
       <DragHandle />
-      <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-700 dark:text-yellow-100 ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} style={{ minHeight: '30px' }} />
+      <div className="flex w-full items-start gap-1.5 mt-1">
+        <span className="text-gray-400 dark:text-gray-500 font-mono select-none shrink-0 pointer-events-none leading-normal">#</span>
+        <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-700 dark:text-yellow-100 leading-normal ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} style={{ minHeight: '30px' }} />
+      </div>
     </div>
   );
 };
@@ -362,7 +384,7 @@ export const LoopContainerNode = ({ id, data, selected, dragging }) => {
   const triggerAutoFit = React.useCallback(() => {
     setNodes(nds => {
         const myNode = nds.find(n => n.id === id);
-        if (!myNode) return nds;
+        if (!myNode || myNode.selected) return nds;
         
         const myX = myNode.position.x;
         const myY = myNode.position.y;
@@ -408,120 +430,317 @@ export const LoopContainerNode = ({ id, data, selected, dragging }) => {
       }
   }, [dragging, triggerAutoFit]);
 
-  const containerRef = useRef(null);
+  const blockStates = React.useRef(new Map());
+  const containerBaseBounds = React.useRef(null);
+  const containerRef = React.useRef(null);
+  const rightLimitTopRef = React.useRef(null);
+  const rightLimitBottomRef = React.useRef(null);
+  const bottomLimitLeftRef = React.useRef(null);
+  const bottomLimitRightRef = React.useRef(null);
+  const ownedNodeIds = React.useRef(new Set());
+  const nodeDragStates = React.useRef(new Map());
+  const animateResizeUntil = React.useRef(0);
 
   // Fluent Dynamic Width, X and auto-Height adjustment (bez lagu)
   React.useEffect(() => {
       let animationFrameId;
       const checkBounds = () => {
-          setNodes(nds => {
-              const myNode = nds.find(n => n.id === id);
-              if (!myNode) return nds;
+          const nds = getNodes();
+          const myNode = nds.find(n => n.id === id);
+          if (!myNode || myNode.dragging) {
+              animationFrameId = requestAnimationFrame(checkBounds);
+              return;
+          }
 
-              const myY = myNode.position.y;
-              const myX = myNode.position.x;
-              const myHeight = myNode.style?.height || 150;
-              const myWidth = myNode.style?.width || 300;
+          const myY = myNode.position.y;
+          const myX = myNode.position.x;
+          const myHeight = myNode.style?.height || 150;
+          const myWidth = myNode.style?.width || 300;
+          
+          const candidateNodes = nds.filter(n => n.id !== id && n.type !== 'LOOP_CONTAINER' && n.type !== 'GROUP_BG' && n.type !== 'COMMENT' && n.type !== 'START_END');
+          
+          let currentOwned = new Set(ownedNodeIds.current);
+          let hasPendingIn = false;
+          
+          candidateNodes.forEach(n => {
+              const nW = n.measured?.width || n.width || 100;
+              const nH = n.measured?.height || n.height || 50;
+              const coreW = nW * 0.5;
+              const coreH = nH * 0.5;
+              const coreX = n.position.x + (nW - coreW) / 2;
+              const coreY = n.position.y + (nH - coreH) / 2;
+              // Add vertical leniency so if the container shrinks (e.g. middle block removed), 
+              // the bottom blocks aren't instantly ejected (domino effect).
+              const isInside = (coreX < myX + myWidth && coreX + coreW > myX && coreY < myY + myHeight + 150 && coreY + coreH > myY - 50);
               
-              const candidateNodes = nds.filter(n => n.id !== id && !['LOOP_CONTAINER', 'GROUP_BG'].includes(n.type));
-              
-              // Blok je uvnitř, pokud se jeho "vnitřní jádro" (50% plochy) překrývá s cyklem
-              const nodesInside = candidateNodes.filter(n => {
-                  const nX = n.position.x;
-                  const nY = n.position.y;
-                  const nW = n.measured?.width || n.width || 100;
-                  const nH = n.measured?.height || n.height || 50;
-                  
-                  // Hitbox pro vložení je větší než středový bod, ale menší než celý blok (50% velikosti bloku)
-                  const coreW = nW * 0.5;
-                  const coreH = nH * 0.5;
-                  const coreX = nX + (nW - coreW) / 2;
-                  const coreY = nY + (nH - coreH) / 2;
-                  
-                  return (
-                      coreX < myX + myWidth &&
-                      coreX + coreW > myX &&
-                      coreY < myY + myHeight &&
-                      coreY + coreH > myY
-                  );
-              });
-
-              // --- Zvýraznění při přetahování (Drop Preview) ---
-              if (containerRef.current) {
-                  const isHoveredByDrag = nodesInside.some(n => n.dragging);
-                  if (isHoveredByDrag) {
-                      containerRef.current.classList.add('bg-purple-100', 'dark:bg-purple-900/30', 'ring-4', 'ring-purple-400');
-                  } else {
-                      containerRef.current.classList.remove('bg-purple-100', 'dark:bg-purple-900/30', 'ring-4', 'ring-purple-400');
+              if (isInside) {
+                  currentOwned.add(n.id);
+                  if (n.dragging && !n.selected) {
+                      hasPendingIn = true;
                   }
+              } else if (!n.dragging) {
+                  currentOwned.delete(n.id);
               }
-              // ------------------------------------------------
-              
-              // Pokud je cyklus prázdný (buď jsme bloky vytáhli, nebo cyklus odtáhli pryč), zmenší se na default
-              if (nodesInside.length === 0) {
-                  if (myWidth !== 300 || myHeight !== 150) {
-                      return nds.map(n => n.id === id ? { ...n, style: { ...n.style, width: 300, height: 150 } } : n);
-                  }
-                  return nds;
-              }
-
-              // Zmrazení jakékoliv změny velikosti, pokud taháme buď samotný cyklus, NEBO nějaký blok uvnitř/venku
-              const anyNodeDragging = myNode.dragging || candidateNodes.some(n => n.dragging);
-              if (anyNodeDragging) {
-                  return nds;
-              }
-
-              // Pokud je uvnitř jen 1 blok, velikost a pozice se neupravují
-              if (nodesInside.length === 1) {
-                  return nds;
-              }
-
-              // Automatické napasování na více bloků
-              let minX = Infinity;
-              let maxX = -Infinity;
-              let maxY = myY;
-
-              nodesInside.forEach(n => {
-                  const w = n.measured?.width || n.width || (n.type === 'CONDITION' ? 140 : 100);
-                  const h = n.measured?.height || n.height || (n.type === 'CONDITION' ? 70 : 50);
-                  if (n.position.x < minX) minX = n.position.x;
-                  if (n.position.x + w > maxX) maxX = n.position.x + w;
-                  if (n.position.y + h > maxY) maxY = n.position.y + h;
-              });
-
-              const PAD = 50; 
-              const newX = minX - PAD;
-              const newWidth = (maxX - minX) + (PAD * 2);
-              const autoHeight = (maxY - myY) + PAD;
-
-              const targetHeight = autoHeight;
-
-              if (Math.abs(myNode.position.x - newX) > 2 || 
-                  Math.abs(myWidth - newWidth) > 2 || 
-                  Math.abs(myHeight - targetHeight) > 2) {
-                  return nds.map(n => {
-                      if (n.id === id) {
-                          return { ...n, position: { ...n.position, x: newX }, style: { ...n.style, width: newWidth, height: targetHeight } };
-                      }
-                      return n;
-                  });
-              }
-              return nds;
           });
+
+          // Compute bounding box and condition counts
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          let statMinX = Infinity, statMinY = Infinity, statMaxX = -Infinity, statMaxY = -Infinity;
+          let numConditions = 0;
+          
+          const ownedNodes = candidateNodes.filter(n => currentOwned.has(n.id));
+          const stationaryNodes = [];
+          
+          ownedNodes.forEach(n => {
+              if (n.type === 'CONDITION' || n.type === 'LOOP_CONTAINER') numConditions++;
+              
+              const nW = n.measured?.width || n.width || 100;
+              const nH = n.measured?.height || n.height || 50;
+              const x1 = n.position.x;
+              const y1 = n.position.y;
+              const x2 = x1 + nW;
+              const y2 = y1 + nH;
+              
+              if (x1 < minX) minX = x1;
+              if (y1 < minY) minY = y1;
+              if (x2 > maxX) maxX = x2;
+              if (y2 > maxY) maxY = y2;
+              
+              if (!n.dragging) {
+                  stationaryNodes.push(n);
+                  if (x1 < statMinX) statMinX = x1;
+                  if (y1 < statMinY) statMinY = y1;
+                  if (x2 > statMaxX) statMaxX = x2;
+                  if (y2 > statMaxY) statMaxY = y2;
+              }
+          });
+          
+          let newWidth = 300;
+          let newHeight = 150;
+          let atStretchLimitRight = false;
+          let atStretchLimitBottom = false;
+          
+          if (ownedNodes.length > 0) {
+              const paddingSides = 20;
+              const paddingBottom = 50;
+              
+              let desiredWidth = (maxX - myX) + paddingSides;
+              let desiredHeight = (maxY - myY) + paddingBottom;
+              
+              const { SSL_Width, SSL_Height, ASL_Width, ASL_Height } = calculateStretchLimits(ownedNodes, stationaryNodes, myX, myY);
+              
+              let popped = false;
+              newWidth = desiredWidth;
+              newHeight = desiredHeight;
+              
+              let stretchDistRight = 0;
+              let stretchDistBottom = 0;
+              
+              if (desiredWidth > ASL_Width) {
+                  newWidth = ASL_Width;
+                  atStretchLimitRight = true;
+                  stretchDistRight = desiredWidth - ASL_Width;
+              }
+              if (desiredHeight > ASL_Height) {
+                  newHeight = ASL_Height;
+                  atStretchLimitBottom = true;
+                  stretchDistBottom = desiredHeight - ASL_Height;
+              }
+              
+              const draggingNode = ownedNodes.find(n => n.dragging);
+              if (draggingNode) {
+                  const nW = draggingNode.measured?.width || 120;
+                  const nH = draggingNode.measured?.height || 50;
+                  const maxXNode = draggingNode.position.x + nW;
+                  const maxYNode = draggingNode.position.y + nH;
+                  const minXNode = draggingNode.position.x;
+                  const minYNode = draggingNode.position.y;
+                  
+                  const reqW = maxXNode - myX + paddingSides;
+                  const reqH = maxYNode - myY + paddingBottom;
+                  
+                  desiredWidth = Math.max(desiredWidth, reqW);
+                  desiredHeight = Math.max(desiredHeight, reqH);
+
+                  stretchDistRight = reqW - ASL_Width;
+                  stretchDistBottom = reqH - ASL_Height;
+                  const stretchDistLeft = myX - minXNode;
+                  const stretchDistTop = myY - minYNode;
+                  
+                  let dragState = nodeDragStates.current.get(draggingNode.id);
+                  if (!dragState) {
+                      dragState = { joinedThisDrag: !ownedNodeIds.current.has(draggingNode.id) };
+                      nodeDragStates.current.set(draggingNode.id, dragState);
+                  } else if (!ownedNodeIds.current.has(draggingNode.id)) {
+                      dragState.joinedThisDrag = true;
+                  }
+
+                  const POP_TOLERANCE_RIGHT = 70;
+                  const POP_TOLERANCE_BOTTOM = 70;
+                  const POP_TOLERANCE_LEFT = 0;
+                  const POP_TOLERANCE_TOP = 0;
+                  
+                  if (stretchDistRight > POP_TOLERANCE_RIGHT || stretchDistBottom > POP_TOLERANCE_BOTTOM || stretchDistLeft > POP_TOLERANCE_LEFT || stretchDistTop > POP_TOLERANCE_TOP) {
+                      currentOwned.delete(draggingNode.id);
+                      popped = true;
+                      atStretchLimitRight = false;
+                      atStretchLimitBottom = false;
+                  } else {
+                      atStretchLimitRight = stretchDistRight >= -20;
+                      atStretchLimitBottom = stretchDistBottom >= -20;
+                  }
+                  
+                  if (dragState.joinedThisDrag) {
+                      atStretchLimitRight = false;
+                      atStretchLimitBottom = false;
+                  }
+              } else {
+                  atStretchLimitRight = false;
+                  atStretchLimitBottom = false;
+              }
+              
+              if (popped) {
+                  // Recalculate based on remaining nodes
+                  const remainingNodes = candidateNodes.filter(n => currentOwned.has(n.id));
+                  if (remainingNodes.length === 0) {
+                      newWidth = 300; newHeight = 150;
+                  } else {
+                      let rMaxX = -Infinity, rMaxY = -Infinity;
+                      remainingNodes.forEach(n => {
+                          const nW = n.measured?.width || n.width || 100;
+                          const nH = n.measured?.height || n.height || 50;
+                          const x2 = n.position.x + nW;
+                          const y2 = n.position.y + nH;
+                          if (x2 > rMaxX) rMaxX = x2;
+                          if (y2 > rMaxY) rMaxY = y2;
+                      });
+                      newWidth = Math.max(300, (rMaxX - myX) + paddingSides);
+                      newHeight = Math.max(150, (rMaxY - myY) + paddingBottom);
+                  }
+              } else {
+                  newWidth = Math.min(desiredWidth, ASL_Width);
+                  newHeight = Math.min(desiredHeight, ASL_Height);
+              }
+              
+              if (newWidth < 300) newWidth = 300;
+              if (newHeight < 150) newHeight = 150;
+          }
+          const previousOwnedCount = ownedNodeIds.current.size;
+          ownedNodeIds.current = new Set([...currentOwned].filter(id => candidateNodes.some(n => n.id === id)));
+          
+          if (currentOwned.size > previousOwnedCount) {
+              animateResizeUntil.current = Date.now() + 300;
+          }
+
+          const opacityVal = '0.7';
+          if (rightLimitTopRef.current) rightLimitTopRef.current.style.opacity = atStretchLimitRight ? opacityVal : '0';
+          if (rightLimitBottomRef.current) rightLimitBottomRef.current.style.opacity = atStretchLimitRight ? opacityVal : '0';
+          if (bottomLimitLeftRef.current) bottomLimitLeftRef.current.style.opacity = atStretchLimitBottom ? opacityVal : '0';
+          if (bottomLimitRightRef.current) bottomLimitRightRef.current.style.opacity = atStretchLimitBottom ? opacityVal : '0';
+
+          if (containerRef.current) {
+              // Highlight visual feedback
+              containerRef.current.classList.remove(
+                  'bg-purple-100', 'dark:bg-purple-900/30', 'ring-4', 'ring-purple-400', 
+                  'bg-purple-100/50', 'dark:bg-purple-800/30', 
+                  'border-b-4', 'border-b-purple-500', 'border-r-4', 'border-r-purple-500',
+                  'border-l-4', 'border-l-purple-500', 'border-t-4', 'border-t-purple-500'
+              );
+              
+              if (atStretchLimitRight || atStretchLimitBottom) {
+                  containerRef.current.classList.add('bg-purple-100/50', 'dark:bg-purple-800/30');
+              } else if (hasPendingIn) {
+                  containerRef.current.classList.add('bg-purple-100', 'dark:bg-purple-900/30', 'ring-4', 'ring-purple-400');
+              }
+          }
+          
+          const anyChildDragging = candidateNodes.some(n => n.dragging && currentOwned.has(n.id));
+          
+          if (containerRef.current) {
+              const rfNode = containerRef.current.closest('.react-flow__node');
+              if (rfNode) {
+                  if (!anyChildDragging || Date.now() < animateResizeUntil.current) {
+                      rfNode.classList.add('animate-resize');
+                  } else {
+                      rfNode.classList.remove('animate-resize');
+                  }
+              }
+          }
+
+          if (Math.abs(newWidth - myWidth) > 1 || Math.abs(newHeight - myHeight) > 1) {
+              if (containerRef.current) {
+                  const rfNode = containerRef.current.closest('.react-flow__node');
+                  if (rfNode) {
+                      rfNode.style.width = newWidth + 'px';
+                      rfNode.style.height = newHeight + 'px';
+                  }
+              }
+              
+              if (!myNode.style) myNode.style = {};
+              myNode.style.width = newWidth;
+              myNode.style.height = newHeight;
+              
+              if (!anyChildDragging) {
+                  setNodes(oldNds => oldNds.map(n => n.id === id ? { ...n, style: { ...n.style, width: newWidth, height: newHeight } } : n));
+              } else {
+                  containerRef.current.dataset.needsCommit = 'true';
+              }
+          } else if (!anyChildDragging && containerRef.current?.dataset.needsCommit === 'true') {
+              containerRef.current.dataset.needsCommit = 'false';
+              setNodes(oldNds => oldNds.map(n => n.id === id ? { ...n, style: { ...n.style, width: newWidth, height: newHeight } } : n));
+          }
+          
           animationFrameId = requestAnimationFrame(checkBounds);
       };
       
       animationFrameId = requestAnimationFrame(checkBounds);
       return () => cancelAnimationFrame(animationFrameId);
-  }, [id, setNodes]);
+  }, [id, store]);
+  
+  const handleSelectAll = (e) => {
+      e.stopPropagation();
+      setNodes(nds => {
+          const myNode = nds.find(n => n.id === id);
+          if (!myNode) return nds;
+          
+          const myX = myNode.position.x;
+          const myY = myNode.position.y;
+          const myW = myNode.style?.width || 300;
+          const myH = myNode.style?.height || 150;
+          
+          return nds.map(n => {
+              if (n.id === id) return { ...n, selected: true };
+              if (['LOOP_CONTAINER', 'GROUP_BG'].includes(n.type)) return n;
+              
+              const nX = n.position.x;
+              const nY = n.position.y;
+              const nW = n.measured?.width || n.width || 100;
+              const nH = n.measured?.height || n.height || 50;
+              
+              const coreW = nW * 0.5;
+              const coreH = nH * 0.5;
+              const coreX = nX + (nW - coreW) / 2;
+              const coreY = nY + (nH - coreH) / 2;
+              
+              if (coreX < myX + myW && coreX + coreW > myX && coreY < myY + myH && coreY + coreH > myY) {
+                  return { ...n, selected: true };
+              }
+              return n;
+          });
+      });
+  };
   
   const toggleDoWhile = (e) => {
     e.stopPropagation();
-    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, doWhile: !isDoWhile } } : n));
+    if (data.onUpdateData) {
+        data.onUpdateData({ doWhile: !isDoWhile });
+    } else {
+        setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, doWhile: !isDoWhile } } : n));
+    }
   };
 
   return (
-    <div ref={containerRef} className={`relative w-full h-full rounded-lg border-2 border-dashed ${borderColor} ${bgColor} flex flex-col overflow-visible pointer-events-none`}>
+    <div ref={containerRef} className={`relative w-full h-full rounded-lg border-2 border-dashed ${borderColor} ${bgColor} flex flex-col overflow-visible ${selected ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-blue-50/50' : ''}`}>
       {/* Hlavička cyklu - Zde přidáme custom-drag-handle pro React Flow */}
       <div className={`custom-drag-handle absolute -top-4 left-4 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing`}>
         <RefreshCcw size={12} className="text-purple-500" />
@@ -548,6 +767,23 @@ export const LoopContainerNode = ({ id, data, selected, dragging }) => {
             </div>
         </div>
       </div>
+
+      {/* Tlačítko pro vybrání všeho uvnitř */}
+      <button 
+        onPointerDown={handleSelectAll}
+        className={`absolute -top-3 -right-3 w-6 h-6 bg-white dark:bg-gray-800 rounded-full shadow-sm border ${borderColor} flex items-center justify-center pointer-events-auto hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors z-10 cursor-grab active:cursor-grabbing`}
+        title="Vybrat vše v cyklu a přesunout"
+      >
+        <MousePointer2 size={12} className="text-purple-500" />
+      </button>
+
+      {/* Right Limit Extensions */}
+      <div ref={rightLimitTopRef} className="absolute bottom-full right-0 w-0 h-[40px] border-r-2 border-dashed border-purple-400 opacity-0 transition-opacity pointer-events-none" />
+      <div ref={rightLimitBottomRef} className="absolute top-full right-0 w-0 h-[40px] border-r-2 border-dashed border-purple-400 opacity-0 transition-opacity pointer-events-none" />
+      
+      {/* Bottom Limit Extensions */}
+      <div ref={bottomLimitLeftRef} className="absolute right-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-purple-400 opacity-0 transition-opacity pointer-events-none" />
+      <div ref={bottomLimitRightRef} className="absolute left-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-purple-400 opacity-0 transition-opacity pointer-events-none" />
     </div>
   );
 };

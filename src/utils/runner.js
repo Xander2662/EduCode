@@ -4,7 +4,42 @@ export class DiagramRunner {
         this.edges = edges;
         this.variables = {};
         this.output = [];
+        this.events = [];
         this.isFinished = false;
+
+        // Precompute LOOP_CONTAINER regions
+        this.loopContainers = this.nodes.filter(n => n.type === 'LOOP_CONTAINER');
+        this.nodeToLoop = {};
+        this.nodes.forEach(n => {
+            if (n.type === 'LOOP_CONTAINER' || n.type === 'GROUP_BG') return;
+            const nx = n.position?.x || n.x || 0;
+            const ny = n.position?.y || n.y || 0;
+            let innermost = null, minArea = Infinity;
+            this.loopContainers.forEach(l => {
+                const lx = l.position?.x || l.x || 0;
+                const ly = l.position?.y || l.y || 0;
+                const lw = l.width || l.style?.width || 300;
+                const lh = l.height || l.style?.height || 150;
+                if (nx >= lx && nx <= lx + lw && ny >= ly && ny <= ly + lh) {
+                    const area = lw * lh;
+                    if (area < minArea) { minArea = area; innermost = l; }
+                }
+            });
+            if (innermost) this.nodeToLoop[n.id] = innermost;
+        });
+
+        this.loopExits = {};
+        this.loopEntries = {};
+        this.edges.forEach(e => {
+            const srcLoop = this.nodeToLoop[e.source];
+            const tgtLoop = this.nodeToLoop[e.target];
+            if (srcLoop && (!tgtLoop || tgtLoop.id !== srcLoop.id)) {
+                this.loopExits[srcLoop.id] = e.target;
+            }
+            if (tgtLoop && (!srcLoop || srcLoop.id !== tgtLoop.id)) {
+                this.loopEntries[tgtLoop.id] = e.target;
+            }
+        });
 
         let startNode = this.nodes.find(n => n.type === 'START_END' && n.data?.mode === 'start');
         if (!startNode) {
@@ -79,7 +114,9 @@ export class DiagramRunner {
                 let inner = text.toUpperCase().startsWith('PRINT') ? text.substring(5).trim() : text;
                 if(inner.startsWith('(')) inner = inner.substring(1, inner.length-1);
                 const val = this.evalExpr(inner);
-                this.output.push(val !== undefined ? String(val) : inner);
+                const outStr = val !== undefined ? String(val) : inner;
+                this.output.push(outStr);
+                this.events.push({ type: 'output', msg: outStr });
                 if (outEdges.length > 0) nextNodeId = outEdges[0].target;
             } 
             else if (text.includes('=')) {
@@ -104,6 +141,7 @@ export class DiagramRunner {
                         return {
                             variables: { ...this.variables },
                             output: [...this.output],
+                            events: [...this.events],
                             currentNodeId: this.currentNodeId,
                             nextNodeId: this.currentNodeId,
                             finished: false,
@@ -133,13 +171,61 @@ export class DiagramRunner {
             if (outEdges.length > 0) nextNodeId = outEdges[0].target;
         }
 
+        const currentLoop = this.nodeToLoop[this.currentNodeId];
+        
+        // --- LOOP_CONTAINER: Routing out of the loop ---
+        // If the edge points outside the loop, we reached the end of the loop body!
+        // We must redirect back to the START of the loop instead of exiting (if it's a loop)
+        if (currentLoop && nextNodeId) {
+            const nextLoop = this.nodeToLoop[nextNodeId];
+            if (!nextLoop || nextLoop.id !== currentLoop.id) {
+                // We are trying to exit the loop. 
+                // Instead of exiting, we loop back to the first node!
+                if (this.loopEntries[currentLoop.id]) {
+                    nextNodeId = this.loopEntries[currentLoop.id];
+                }
+            }
+        }
+
+        // --- LOOP_CONTAINER: Condition Check on Entry ---
+        // Before we execute the nextNodeId, if it's the START of a loop, we evaluate the condition!
+        let finalNextId = nextNodeId;
+        if (finalNextId) {
+            const tgtLoop = this.nodeToLoop[finalNextId];
+            // If the next node is in a loop, and it's the entry node of that loop
+            if (tgtLoop && finalNextId === this.loopEntries[tgtLoop.id]) {
+                const isDoWhile = tgtLoop.data?.doWhile === true;
+                
+                // For DO-WHILE loops, we only evaluate the condition if we are looping BACK, 
+                // not on the first entry.
+                const isLoopBack = currentLoop && currentLoop.id === tgtLoop.id;
+                
+                if (!isDoWhile || isLoopBack) {
+                    const cond = this.cleanText(tgtLoop.data?.label || '');
+                    const isTrue = !!this.evalExpr(cond);
+                    if (!isTrue) {
+                        // Format current variables state for insight
+                        const varsState = Object.entries(this.variables).map(([k, v]) => `${k}=${v}`).join(', ');
+                        const varsMsg = varsState ? ` [${varsState}]` : '';
+                        this.events.push({ 
+                            type: 'insight', 
+                            msg: `Konec cyklu: '${cond}' je nepravdivá${varsMsg}` 
+                        });
+                        // Condition is false, exit the loop!
+                        finalNextId = this.loopExits[tgtLoop.id] || null;
+                    }
+                }
+            }
+        }
+
         const prevNodeId = this.currentNodeId;
-        this.currentNodeId = nextNodeId;
+        this.currentNodeId = finalNextId;
         if (!this.currentNodeId) this.isFinished = true;
 
         return {
             variables: { ...this.variables },
             output: [...this.output],
+            events: [...this.events],
             currentNodeId: prevNodeId,
             nextNodeId: this.currentNodeId,
             finished: this.isFinished

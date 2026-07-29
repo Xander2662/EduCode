@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, HelpCircle, Move, MousePointer, RefreshCcw, Circle, Square, AlignLeft, Diamond, Copy, Check, MessageSquare } from 'lucide-react';
+import { X, HelpCircle, Move, MousePointer, RefreshCcw, Circle, Square, AlignLeft, Diamond, Copy, Check, MessageSquare, Box } from 'lucide-react';
 
 const CodeBlock = ({ code }) => {
   const [copied, setCopied] = useState(false);
@@ -277,6 +277,49 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                           </div>
                       </div>
                   )}
+
+                  {activeDeepDive === 'LOOP_CONTAINER' && (
+                      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                          <div className="bg-purple-50 dark:bg-purple-900/20 border-b border-purple-100 dark:border-purple-800/50 p-6 flex items-start justify-between gap-4">
+                              <div className="flex items-start gap-4">
+                                  <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-purple-200 dark:border-purple-800 shrink-0">
+                                      <Box size={32} className="text-purple-600 dark:text-purple-500" />
+                                  </div>
+                                  <div>
+                                      <h3 className="text-2xl font-bold text-purple-900 dark:text-purple-100">Cyklus (Skupina)</h3>
+                                      <p className="text-purple-700 dark:text-purple-300 text-sm mt-1">Vizuální obal (kontejner) pro bloky, které se mají iterativně opakovat.</p>
+                                  </div>
+                              </div>
+                              <button onClick={() => setActiveDeepDive(null)} className="text-gray-800 hover:text-black dark:text-gray-200 dark:hover:text-white font-bold flex items-center gap-1.5 transition-all text-sm bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 shadow-md hover:shadow-lg whitespace-nowrap shrink-0">
+                                  Zpět na přehled &rarr;
+                              </button>
+                          </div>
+                          <div className="p-6 space-y-6 text-gray-700 dark:text-gray-300">
+                              <div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Jak funguje</h4>
+                                  <p className="text-sm leading-relaxed mb-4">
+                                      Tento vizuální obal představuje strukturu cyklu <strong>WHILE</strong> (případně DO WHILE). Jakýkoli blok, který přetáhnete a umístíte prostorově dovnitř tohoto vizuálního kontejneru, se stane součástí těla cyklu. Generátor kódu automaticky rozezná, že tyto bloky patří dovnitř.
+                                  </p>
+                              </div>
+                              <hr className="border-gray-100 dark:border-gray-700/50" />
+                              <div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Vlastnosti</h4>
+                                  <ul className="list-disc pl-5 space-y-2 text-sm">
+                                      <li><strong>Automatické přizpůsobení:</strong> Kontejner se sám automaticky roztahuje podle bloků, které do něj umístíte. Pokud dovnitř přidáte vnořený cyklus nebo podmínku (IF), skupina se sama rozšíří do šířky, aby udělala místo pro obě větve.</li>
+                                      <li><strong>Typy:</strong> Můžete přepínat mezi "Zatímco" (WHILE) a "Opakovat dokud" (DO WHILE) kliknutím na přepínač v hlavičce bloku.</li>
+                                      <li><strong>Podmínka:</strong> Podmínku cyklu zapíšete přímo do textového pole nahoře na bloku (např. <code>x &lt; 10</code>). Není potřeba přidávat žádný další samostatný blok podmínky (diamant) jako rozcestník pro samotný cyklus!</li>
+                                  </ul>
+                              </div>
+                              <hr className="border-gray-100 dark:border-gray-700/50" />
+                              <div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Tipy a varování</h4>
+                                  <p className="text-sm leading-relaxed mb-4 text-orange-700 dark:text-orange-300 bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border border-orange-200 dark:border-orange-800">
+                                      <strong>Nespojujte šipku ven z kontejneru a zase zpět!</strong> Kontejner <em>automaticky</em> zacyklí veškeré bloky umístěné uvnitř. Až exekuce doběhne k poslednímu bloku uvnitř, program se automaticky vrací na kontrolu podmínky kontejneru.
+                                  </p>
+                              </div>
+                          </div>
+                      </div>
+                  )}
               </div>
           </div>
         ) : (
@@ -323,6 +366,13 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                 <div>
                   <h4 className="font-bold text-yellow-800 dark:text-yellow-400">Komentář</h4>
                   <p className="text-xs mt-1">Textové poznámky, které debugger kompletně ignoruje. Slouží k vysvětlení kódu lidem.</p>
+                </div>
+              </div>
+              <div onClick={() => setActiveDeepDive('LOOP_CONTAINER')} className="border border-purple-200 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
+                <Box size={24} className="text-purple-600 mt-1 shrink-0" />
+                <div>
+                  <h4 className="font-bold text-purple-800 dark:text-purple-400">Cyklus (Skupina)</h4>
+                  <p className="text-xs mt-1">Obal, do kterého umísťujete bloky, které se mají opakovat jako smyčka.</p>
                 </div>
               </div>
             </div>
@@ -476,7 +526,6 @@ ENDFUNCTION`} />
 ENDFUNCTION`} />
             </div>
           )}
-
         </div>
         </>
         )}

@@ -42,7 +42,10 @@ describe('Roundtrip Parser Tests (XML -> Pseudo -> XML)', () => {
                 };
             })
             .filter(Boolean)
-            .sort((a, b) => a.x - b.x); // Seřazení podle X zajistí, že pořadí bloků nerozbije shodu polí
+            .sort((a, b) => {
+                if (a.x !== b.x) return a.x - b.x;
+                return a.value.localeCompare(b.value);
+            }); // Seřazení podle X (a pak value) zajistí, že pořadí bloků nerozbije shodu polí
 
         const edgesCount = doc.querySelectorAll('mxCell[edge="1"]').length;
         

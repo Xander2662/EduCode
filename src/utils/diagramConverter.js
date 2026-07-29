@@ -43,6 +43,7 @@ export const drawioToReactFlow = (xml) => {
       const entityMatch = style.match(/entityType=([^;]+)/);
       const ioMatch = style.match(/ioType=([^;]+)/);
       const doWhileMatch = style.match(/doWhile=([^;]+)/);
+      const doWhileAttr = cell.getAttribute('doWhile');
 
       const nodeObj = { 
           id, 
@@ -53,7 +54,7 @@ export const drawioToReactFlow = (xml) => {
               mode: modeMatch ? modeMatch[1] : undefined,
               entityType: entityMatch ? entityMatch[1] : undefined,
               ioType: ioMatch ? ioMatch[1] : (type === 'IO' ? 'input' : undefined),
-              doWhile: doWhileMatch ? doWhileMatch[1] === 'true' : undefined
+              doWhile: doWhileAttr ? doWhileAttr === 'true' : (doWhileMatch ? doWhileMatch[1] === 'true' : false)
           } 
       };
       if (type === 'LOOP_CONTAINER' || type === 'GROUP_BG') {

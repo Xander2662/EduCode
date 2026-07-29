@@ -170,7 +170,10 @@ export const parseDrawioToPython = (xml) => {
     const appendLine = (text, nodeId = null) => {
         const idx = codeLines.length;
         codeLines.push(text);
-        if (nodeId) nodeLineMap[nodeId] = idx;
+        if (nodeId) {
+            if (!nodeLineMap[nodeId]) nodeLineMap[nodeId] = [];
+            nodeLineMap[nodeId].push(idx);
+        }
     };
 
     const printCommentsBeforeY = (currentY, indent) => {

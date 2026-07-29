@@ -11,6 +11,14 @@ body {
   z-index: -1 !important;
 }
 
+.react-flow__node-LOOP_CONTAINER {
+  transition: transform 0s !important;
+}
+
+.react-flow__node-LOOP_CONTAINER.animate-resize {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), height 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0s !important;
+}
+
 /* Úprava ovládacího panelu React Flow pro Dark Mode */
 .dark .react-flow__controls-button {
   background-color: #1f2937 !important; /* bg-gray-800 */

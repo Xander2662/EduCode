@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { parseDrawioToPseudocode } from '../src/parsers/diagramToPseudocode';
 
 describe('diagramToPseudocode', () => {
@@ -32,5 +34,24 @@ describe('diagramToPseudocode', () => {
         expect(code).toContain('y = 5');
         expect(code).toContain('ENDFUNCTION');
         expect(errors.length).toBeGreaterThan(0); // Systém musí vyhodit varování o neexistujícím startu
+    });
+
+    it('správně převede vnořené IF bloky s komentáři uvnitř WHILE cyklu bez duplikace stavu smyčky', () => {
+        const xmlPath = path.resolve(__dirname, '../examples/diagram_examples/while_group_if_block_nested.xml');
+        const xml = fs.readFileSync(xmlPath, 'utf8');
+
+        const { code } = parseDrawioToPseudocode(xml);
+        
+        // Assert that the outer WHILE is present
+        expect(code).toContain('WHILE x < 10 DO');
+        // Assert that the IF block contains the false branch correctly
+        expect(code).toContain('IF x > 0 THEN');
+        expect(code).toContain('ELSE');
+        expect(code).toContain('# dwadaw');
+        expect(code).toContain('x = x - 2');
+        
+        // Critically, assert that it does NOT generate multiple duplicate WHILE x < 10 DO loops
+        const whileMatches = code.match(/WHILE x < 10 DO/g);
+        expect(whileMatches.length).toBe(1);
     });
 });

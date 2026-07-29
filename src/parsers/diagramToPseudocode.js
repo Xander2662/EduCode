@@ -56,6 +56,8 @@ export const parseDrawioToPseudocode = (xml) => {
         const x = geo ? parseFloat(geo.getAttribute('x') || 0) : 0;
         const y = geo ? parseFloat(geo.getAttribute('y') || 0) : 0;
 
+        let doWhile = false;
+        
         let type = 'ACTION';
         if (style.includes('shape=note') || style.includes('fillColor=#fff2cc') || value.startsWith('#') || value.startsWith('//')) type = 'COMMENT';
         else if (style.includes('ellipse') && style.includes('strokeColor=none') && style.includes('fillColor=none')) type = 'MERGE';
@@ -69,6 +71,15 @@ export const parseDrawioToPseudocode = (xml) => {
         else if (style.includes('shape=parallelogram') || cellTypeAttr === 'IO' || cellTypeAttr === 'io') {
             type = 'IO';
         }
+        else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellTypeAttr === 'LOOP_CONTAINER') {
+            type = 'LOOP_CONTAINER';
+            try {
+                doWhile = cell.getAttribute('doWhile') === 'true';
+                if (!doWhile && style.includes('doWhile=true')) {
+                    doWhile = true;
+                }
+            } catch(e) {}
+        }
         
         const entityMatch = style.match(/entityType=([^;]+)/);
         const entityType = entityMatch ? entityMatch[1] : 'FUNCTION';
@@ -76,7 +87,10 @@ export const parseDrawioToPseudocode = (xml) => {
         const ioMatch = style.match(/ioType=([^;]+)/);
         const ioType = ioMatch ? ioMatch[1] : 'input';
 
-        nodes[id] = { id, value, type, x, y, next: [], prev: [], entityType, ioType };
+        const width = geo ? parseFloat(geo.getAttribute('width') || 0) : 0;
+        const height = geo ? parseFloat(geo.getAttribute('height') || 0) : 0;
+
+        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
@@ -118,7 +132,7 @@ export const parseDrawioToPseudocode = (xml) => {
 
     const realStartsCount = startNodes.length;
 
-    let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END' && n.type !== 'GROUP_BG');
+    let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END' && n.type !== 'GROUP_BG' && n.type !== 'LOOP_CONTAINER');
     
     roots.forEach(r => {
         const ghostId = `ghost_start_${clusterId}`;
@@ -146,7 +160,7 @@ export const parseDrawioToPseudocode = (xml) => {
     });
 
     Object.values(nodes).forEach(n => {
-        if (!assigned.has(n.id) && n.type !== 'COMMENT' && n.type !== 'START' && n.type !== 'END' && n.type !== 'MERGE' && n.type !== 'GROUP_BG') {
+        if (!assigned.has(n.id) && n.type !== 'COMMENT' && n.type !== 'START' && n.type !== 'END' && n.type !== 'MERGE' && n.type !== 'GROUP_BG' && n.type !== 'LOOP_CONTAINER') {
             const ghostId = `ghost_start_${clusterId}`;
             nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
             edges.push({ source: ghostId, target: n.id, value: '' });
@@ -180,15 +194,15 @@ export const parseDrawioToPseudocode = (xml) => {
     }
 
     let codeLines = [];
+    let codeNodeIds = [];
     let nodeLineMap = {};
     let visited = new Set();
     let declaredFuncs = new Set();
     let pendingComments = Object.values(nodes).filter(n => n.type === 'COMMENT').sort((a, b) => a.y - b.y);
 
     const appendLine = (text, nodeId = null) => {
-        const idx = codeLines.length;
         codeLines.push(text);
-        if (nodeId) nodeLineMap[nodeId] = idx;
+        codeNodeIds.push(nodeId);
     };
 
     const printCommentsBeforeY = (currentY, indent) => {
@@ -201,9 +215,11 @@ export const parseDrawioToPseudocode = (xml) => {
         }
     };
 
-    const generateStatement = (node, indent = "", currentScope) => {
+    const generateStatement = (node, indent = "", currentScope, overrideNodeId = null) => {
         printCommentsBeforeY(node.y, indent);
         if (node.type === 'MERGE' || !node.value) return;
+
+        const targetId = overrideNodeId || node.id;
 
         if (node.type === 'ACTION') {
             node.value.split('\n').forEach(line => {
@@ -216,16 +232,16 @@ export const parseDrawioToPseudocode = (xml) => {
                     const right = parts.slice(1).join('=');
                     checkVariables(right, currentScope);
                     declareVariables(left, currentScope);
-                    appendLine(`${indent}${val}`, node.id);
+                    appendLine(`${indent}${val}`, targetId);
                 } else if (val.startsWith('"') && val.endsWith('"')) {
-                    appendLine(`${indent}PRINT(${val})`, node.id);
+                    appendLine(`${indent}PRINT(${val})`, targetId);
                 } else if (val.toUpperCase().startsWith('RETURN')) {
                     checkVariables(val.substring(6), currentScope);
-                    appendLine(`${indent}${val}`, node.id);
+                    appendLine(`${indent}${val}`, targetId);
                 } else {
                     let isFuncFormat = val.includes('(') || val.includes(')');
                     checkVariables(val, currentScope);
-                    appendLine(`${indent}${isFuncFormat ? val : val + '()'}`, node.id);
+                    appendLine(`${indent}${isFuncFormat ? val : val + '()'}`, targetId);
                 }
             });
         } else if (node.type === 'IO') {
@@ -240,7 +256,7 @@ export const parseDrawioToPseudocode = (xml) => {
                         inner = inner.substring(1, inner.length - 1).trim();
                     }
                     checkVariables(inner, currentScope);
-                    appendLine(`${indent}PRINT(${inner})`, node.id);
+                    appendLine(`${indent}PRINT(${inner})`, targetId);
                 } else {
                     // Očištění VSTUP prefixu
                     let p = val.replace(/^VSTUP\s+/i, '').trim();
@@ -252,9 +268,9 @@ export const parseDrawioToPseudocode = (xml) => {
                     });
                     
                     if (p.includes(',')) {
-                        appendLine(`${indent}VSTUP ${p}`, node.id);
+                        appendLine(`${indent}Vstup ${p}`, targetId);
                     } else {
-                        appendLine(`${indent}${p} = INPUT()`, node.id);
+                        appendLine(`${indent}Vstup ${p}`, targetId);
                     }
                 }
             });
@@ -293,31 +309,124 @@ export const parseDrawioToPseudocode = (xml) => {
         return null;
     };
 
+    const loopContainers = Object.values(nodes).filter(n => n.type === 'LOOP_CONTAINER');
+    const isInsideLoop = (node, loop) => {
+        if (!node || !loop) return false;
+        if (node.type === 'START' || node.type === 'START_END' || node.type === 'END') return false;
+        const nW = node.width || 100;
+        const nH = node.height || 50;
+        const coreW = nW * 0.5;
+        const coreH = nH * 0.5;
+        const coreX = node.x + (nW - coreW) / 2;
+        const coreY = node.y + (nH - coreH) / 2;
+        const loopW = loop.width || 300;
+        const loopH = loop.height || 150;
+        const isInside = (coreX < loop.x + loopW && coreX + coreW > loop.x && coreY < loop.y + loopH && coreY + coreH > loop.y);
+        return isInside;
+    };
+
     startNodes.forEach((start, index) => {
         let endNodeId = null;
         let endNodeVal = `END${start.entityType || 'FUNCTION'}`;
 
-        const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null, currentScope = new Set()) => {
-            if (!nodeId || !nodes[nodeId] || visited.has(nodeId)) return;
+        const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null, currentScope = new Set(), currentLoopStack = []) => {
+            if (!nodeId || !nodes[nodeId] || visited.has(nodeId)) {
+                return;
+            }
             if (nodeId === stopId) return;
 
             const node = nodes[nodeId];
+            
+            // Handle entering LOOP_CONTAINERs
+            const insideLoops = loopContainers.filter(l => isInsideLoop(node, l));
+            insideLoops.sort((a, b) => (a.width * a.height) - (b.width * b.height)); // sort by size, smallest (most nested) first
+            
+            // The loop entrance will be handled AFTER exiting loops.
+
+            // Find loops we exited
+            // Wait, if we process exits BEFORE the node, we might close a loop that we just entered? No, newLoops are pushed, so they are in currentLoopStack.
+            // But if a node is NOT in a loop that is currently in the stack, it means we exited it.
+            // Actually, we must process exits BEFORE entering new loops, because we are transitioning from the previous node to this node!
+            // Let's adjust:
+            // Find loops we exited
+            let loopsToExit = [];
+            for (let i = currentLoopStack.length - 1; i >= 0; i--) {
+                const l = currentLoopStack[i];
+                if (!isInsideLoop(node, l)) {
+                    loopsToExit.push(l);
+                } else {
+                    break; // stop at the first loop we are still inside
+                }
+            }
+            
+            loopsToExit.forEach(l => {
+                currentLoopStack.pop();
+                indent = indent.substring(0, indent.length - 4);
+                if (l.doWhile) {
+                    let bodyLines = codeLines.slice(l.startLineIndex);
+                    let bodyNodeIds = codeNodeIds.slice(l.startLineIndex);
+                    
+                    let preLoopLines = bodyLines.map(line => line.replace(/^    /, ''));
+                    let preLoopNodeIds = bodyNodeIds.map(() => l.id);
+                    
+                    let cond = l.value || "";
+                    let whileLine = `${indent}WHILE ${cond} DO`;
+                    let endWhileLine = `${indent}ENDWHILE`;
+                    
+                    let beforeLoop = codeLines.slice(0, l.startLineIndex);
+                    let beforeLoopIds = codeNodeIds.slice(0, l.startLineIndex);
+                    
+                    codeLines = [...beforeLoop, ...preLoopLines, whileLine, ...bodyLines, endWhileLine];
+                    codeNodeIds = [...beforeLoopIds, ...preLoopNodeIds, l.id, ...bodyNodeIds, l.id];
+                } else {
+                    appendLine(`${indent}ENDWHILE`, l.id);
+                }
+            });
+
+            // Now enter new loops
+            const loopsToEnter = insideLoops.filter(l => !currentLoopStack.includes(l));
+            // Wait, we need to sort them from largest to smallest for entering!
+            loopsToEnter.sort((a, b) => (b.width * b.height) - (a.width * a.height));
+            loopsToEnter.forEach(l => {
+                if (l.doWhile) {
+                    l.startLineIndex = codeLines.length;
+                } else {
+                    let cond = l.value || "";
+                    appendLine(`${indent}WHILE ${cond} DO`, l.id);
+                }
+                indent += "    ";
+                currentLoopStack.push(l);
+            });
+
             visited.add(nodeId);
             inPath.add(nodeId);
 
             if (node.type === 'START') {
                 const fName = node.value || 'main';
-                if (declaredFuncs.has(fName) && !fName.startsWith('fragment_')) errors.push(`Duplicitní název funkce/třídy '${fName}'`);
+                if (declaredFuncs.has(fName) && !fName.startsWith('fragment_')) errors.push(`Duplicitní název funkce/třída '${fName}'`);
                 declaredFuncs.add(fName);
 
                 appendLine(`${indent}${node.entityType} ${fName}()`, node.id);
-                if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId, currentScope);
+                if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId, currentScope, [...currentLoopStack]);
+                else if (!stopId) {
+                    currentLoopStack.slice().reverse().forEach(l => {
+                        indent = indent.substring(0, indent.length - 4);
+                        if (l.doWhile) appendLine(`${indent}WHILE ${l.value || "True"}`, l.id);
+                        else appendLine(`${indent}ENDWHILE`, l.id);
+                    });
+                }
                 printCommentsBeforeY(Infinity, indent + "    ");
             }
             else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE') {
                 generateStatement(node, indent, currentScope);
                 if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
-                    traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope);
+                    traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack]);
+                } else if (!stopId) {
+                    currentLoopStack.slice().reverse().forEach(l => {
+                        indent = indent.substring(0, indent.length - 4);
+                        if (l.doWhile) appendLine(`${indent}WHILE ${l.value || "True"}`, l.id);
+                        else appendLine(`${indent}ENDWHILE`, l.id);
+                    });
                 }
             }
             else if (node.type === 'CONDITION') {
@@ -377,7 +486,7 @@ export const parseDrawioToPseudocode = (xml) => {
                         
                         const loopInPath = new Set();
                         loopInPath.add(node.id);
-                        traverse(loopStartTarget, indent + "    ", loopInPath, node.id, currentScope);
+                        traverse(loopStartTarget, indent + "    ", loopInPath, node.id, currentScope, [...currentLoopStack]);
                         
                         temporarilyUnvisited.forEach(id => visited.add(id));
                     }
@@ -407,8 +516,10 @@ export const parseDrawioToPseudocode = (xml) => {
                                                  lastLine.match(new RegExp(`^\\s*${loopVar}\\s*[+\\-]=(.*)$`, 'i'));
                                 if (incMatch) {
                                     codeLines.splice(lastLoopBodyIdx, 1); // Remove increment
+                                    codeNodeIds.splice(lastLoopBodyIdx, 1);
                                     codeLines[headerLineIndex] = `${indent}FOR ${loopVar} = ${initVal} TO ${loopLimit} DO`;
                                     codeLines.splice(initLineIdx, 1); // Remove init
+                                    codeNodeIds.splice(initLineIdx, 1);
                                     isFor = true;
                                 }
                             }
@@ -418,21 +529,21 @@ export const parseDrawioToPseudocode = (xml) => {
                     appendLine(`${indent}${isFor ? 'ENDFOR' : 'ENDWHILE'}`);
 
                     const exitNode = isTrueLoop ? fTarget : tTarget;
-                    if (exitNode && exitNode !== stopId && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId, currentScope);
+                    if (exitNode && exitNode !== stopId && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack]);
                 } else {
                     let mergeNodeId = findConvergence(tTarget, fTarget);
                     
                     appendLine(`${indent}IF ${cleanCond} THEN`, node.id);
-                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope);
+                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope, [...currentLoopStack]);
                     
                     if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'END') {
                         appendLine(`${indent}ELSE`);
-                        traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope);
+                        traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope, [...currentLoopStack]);
                     }
                     appendLine(`${indent}ENDIF`);
                     
                     if (mergeNodeId && mergeNodeId !== stopId) {
-                        traverse(mergeNodeId, indent, new Set(inPath), stopId, currentScope);
+                        traverse(mergeNodeId, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack]);
                     }
                 }
             }
@@ -459,6 +570,14 @@ export const parseDrawioToPseudocode = (xml) => {
 
         if (index < startNodes.length - 1) {
             appendLine('');
+        }
+    });
+
+    nodeLineMap = {};
+    codeNodeIds.forEach((id, idx) => {
+        if (id) {
+            if (!nodeLineMap[id]) nodeLineMap[id] = [];
+            nodeLineMap[id].push(idx);
         }
     });
 

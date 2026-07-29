@@ -280,7 +280,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
     let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
     if (draggedNodes.length === 0) draggedNodes = [node];
-    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG')) return;
+    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER')) return;
 
     const draggedIds = new Set(draggedNodes.map(n => n.id));
     if (edges.some(e => (draggedIds.has(e.source) && !draggedIds.has(e.target)) || (draggedIds.has(e.target) && !draggedIds.has(e.source)))) return;
@@ -304,7 +304,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
     let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
     if (draggedNodes.length === 0) draggedNodes = [node];
-    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG')) return;
+    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER')) return;
 
     const draggedIds = new Set(draggedNodes.map(n => n.id));
     if (edges.some(e => (draggedIds.has(e.source) && !draggedIds.has(e.target)) || (draggedIds.has(e.target) && !draggedIds.has(e.source)))) return;
@@ -356,7 +356,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     const newNodes = clipboard.nodes.map(n => {
       const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
       idMap[n.id] = newId;
-      return { ...n, id: newId, position: { x: n.position.x + 30, y: n.position.y + 30 }, selected: true, data: { ...n.data, onChange: (e) => updateNodeLabel(newId, e.target.value) } };
+      return { ...n, id: newId, position: { x: n.position.x + 30, y: n.position.y + 30 }, selected: true, data: { ...n.data, onChange: (e) => updateNodeLabel(newId, e.target.value), onUpdateData: (newData) => updateNodeData(newId, newData) } };
     });
     const newEdges = clipboard.edges.map(e => ({ ...e, id: Date.now().toString() + Math.random().toString(36).substr(2, 5), source: idMap[e.source], target: idMap[e.target], selected: true }));
     setNodes(nds => nds.map(n => ({ ...n, selected: false })).concat(newNodes));
@@ -372,7 +372,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       setNodes(prev => parsedNodes.map(n => ({ 
           ...n, 
           selected: prev.find(p => p.id === n.id)?.selected || false, 
-          data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(n.id, e.target.value) } 
+          data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(n.id, e.target.value), onUpdateData: (newData) => updateNodeData(n.id, newData) } 
       })));
       
       setEdges(prev => parsedEdges.map(e => ({ 
@@ -495,7 +495,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             ...(type === 'START_END' ? { mode: 'unassigned', entityType: 'FUNCTION' } : {}), 
             ...(type === 'LOOP_CONTAINER' ? { isNew: true, doWhile: false } : {}),
             ...(type === 'IO' ? { ioType: 'input' } : {}),
-            onChange: (e) => updateNodeLabel(newId, e.target.value) 
+            onChange: (e) => updateNodeLabel(newId, e.target.value),
+            onUpdateData: (newData) => updateNodeData(newId, newData)
         },
         ...(type === 'LOOP_CONTAINER' ? { style: { width: 300, height: 150 } } : {})
     }));
@@ -536,7 +537,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
                 id: newId, 
                 position: { x: n.position.x + 40, y: n.position.y + 40 }, 
                 selected: true, 
-                data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(newId, e.target.value) } 
+                data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(newId, e.target.value), onUpdateData: (newData) => updateNodeData(newId, newData) } 
             };
         });
         
@@ -597,7 +598,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       )}
       
       {deleteConfirm && (
-        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-gray-900/20 backdrop-blur-sm rounded-lg">
+        <div className="absolute inset-0 z-[9999] flex items-center justify-center bg-gray-900/20 backdrop-blur-sm rounded-lg">
           <div className="bg-white dark:bg-gray-800 p-4 rounded shadow-lg border border-gray-200 dark:border-gray-700">
             <h3 className="font-bold mb-2 dark:text-gray-100">Smazat vybrané prvky?</h3>
             <div className="flex gap-2 justify-end">
@@ -609,17 +610,17 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       )}
 
       {pendingImport && (
-          <div className="absolute inset-0 z-[100] flex items-center justify-center bg-gray-900/40 dark:bg-black/60 backdrop-blur-sm">
-              <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-80 text-center">
-                  <h3 className="font-bold text-lg mb-2 text-gray-800 dark:text-gray-100">Importovat diagram</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">Plátno již obsahuje diagram. Chcete jej nahradit, nebo přidat nový diagram k existujícímu?</p>
-                  <div className="flex flex-col gap-2">
-                      <button onClick={() => executeImport('replace')} className="w-full px-4 py-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-800/50 text-red-700 dark:text-red-300 font-bold rounded transition-colors">Nahradit stávající</button>
-                      <button onClick={() => executeImport('add')} className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded transition-colors">Přidat k současnému</button>
-                      <button onClick={() => setPendingImport(null)} className="w-full px-4 py-2 mt-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors">Zrušit</button>
-                  </div>
-              </div>
+        <div className="absolute inset-0 bg-gray-900/40 dark:bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-80 text-center m-4">
+            <h3 className="font-bold text-xl mb-3 text-gray-900 dark:text-white">Importovat diagram</h3>
+            <p className="text-gray-600 dark:text-gray-300 text-sm mb-6">Pracovní plocha již obsahuje diagram. Jak chcete pokračovat?</p>
+            <div className="flex flex-col gap-2">
+                <button onClick={() => executeImport('replace')} className="w-full px-4 py-2.5 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-800/50 text-red-700 dark:text-red-300 font-bold rounded-lg transition-colors">Nahradit stávající</button>
+                <button onClick={() => executeImport('add')} className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors shadow-sm">Přidat k současnému</button>
+                <button onClick={() => setPendingImport(null)} className="w-full px-4 py-2 mt-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 font-semibold rounded-lg transition-colors">Zrušit</button>
+            </div>
           </div>
+        </div>
       )}
 
       {contextMenu && (
@@ -648,13 +649,13 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         <button onClick={() => { clearHover(); addNodeAt('ACTION', 'Operace'); }} onMouseEnter={(e) => handlePointerDown('ACTION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('ACTION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Square size={18} className={colorMode ? "text-blue-600" : ""} /></button>
         <button onClick={() => { clearHover(); addNodeAt('IO', 'x'); }} onMouseEnter={(e) => handlePointerDown('IO', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('IO', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><AlignLeft size={18} className={colorMode ? "text-emerald-600" : ""} style={{transform: 'skew(-15deg)'}} /></button>
         <button onClick={() => { clearHover(); addNodeAt('CONDITION', 'x > 0'); }} onMouseEnter={(e) => handlePointerDown('CONDITION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('CONDITION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Diamond size={18} className={colorMode ? "text-orange-600" : ""} /></button>
-        <button onClick={() => { clearHover(); addNodeAt('LOOP_CONTAINER', ''); }} onMouseEnter={(e) => handlePointerDown('LOOP_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('LOOP_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass} title="Cyklus (Skupina)"><Box size={18} className={colorMode ? "text-purple-600" : ""} /></button>
+        <button onClick={() => { clearHover(); addNodeAt('LOOP_CONTAINER', ''); }} onMouseEnter={(e) => handlePointerDown('LOOP_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('LOOP_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Box size={18} className={colorMode ? "text-purple-600" : ""} /></button>
         <button onClick={() => { clearHover(); addNodeAt('COMMENT', '# Komentář'); }} onMouseEnter={(e) => handlePointerDown('COMMENT', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('COMMENT', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
       </div>
 
       {(selectedNodes.length > 0 || selectedEdges.length > 0) && !readOnly && (
         <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 flex gap-2 bg-indigo-600 p-1.5 rounded-lg shadow-lg">
-           <button onClick={handleDuplicate} disabled={selectedNodes.length === 0} className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium ${selectedNodes.length === 0 ? 'text-indigo-200 opacity-50 cursor-not-allowed' : 'text-white hover:bg-indigo-500'}`}><Copy size={16}/> Duplikovat</button>
+           <button onClick={handleDuplicate} disabled={selectedNodes.length === 0} className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium ${selectedNodes.length === 0 ? 'text-indigo-300 opacity-50 cursor-not-allowed' : 'text-white hover:bg-indigo-500'}`}><Copy size={16}/> Duplikovat</button>
            <div className="w-px bg-indigo-400 mx-1"></div>
            <button onClick={() => setDeleteConfirm(true)} className="flex items-center gap-1 text-red-100 hover:bg-red-500 hover:text-white px-3 py-1.5 rounded text-sm font-medium"><Trash2 size={16}/> Smazat</button>
         </div>
