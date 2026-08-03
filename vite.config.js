@@ -7,6 +7,7 @@ export default defineConfig({
   base: '/EduCode/',
   test: {
     environment: 'jsdom',
+    exclude: ['**/node_modules/**', '**/dist/**', '**/tests-e2e/**'],
   },
   server: {
     watch: {

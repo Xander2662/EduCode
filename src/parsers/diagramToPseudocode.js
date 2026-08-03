@@ -16,7 +16,7 @@ export const parseDrawioToPseudocode = (xml) => {
         return vars.filter(v => !KEYWORDS.has(v.toUpperCase()));
     };
 
-    const checkVariables = (expr, scope) => {
+    const checkVariables = () => {
         // Ztišeno: Pro výukové a testovací účely (často fragmentované diagramy) 
         // nevyhazujeme chyby o Scope. Reálné chyby zachytí až samotný Python/Runner běh.
     };
@@ -57,6 +57,9 @@ export const parseDrawioToPseudocode = (xml) => {
         const y = geo ? parseFloat(geo.getAttribute('y') || 0) : 0;
 
         let doWhile = false;
+        let forInit = '';
+        let forLimit = '';
+        let forStep = '';
         
         let type = 'ACTION';
         if (style.includes('shape=note') || style.includes('fillColor=#fff2cc') || value.startsWith('#') || value.startsWith('//')) type = 'COMMENT';
@@ -78,7 +81,20 @@ export const parseDrawioToPseudocode = (xml) => {
                 if (!doWhile && style.includes('doWhile=true')) {
                     doWhile = true;
                 }
-            } catch(e) {}
+            } catch {
+                // Ignore error if attribute is missing
+            }
+            if (style.includes('forInit=')) {
+                type = 'FOR_CONTAINER';
+                const initMatch = style.match(/forInit=([^;]+)/);
+                if (initMatch) forInit = decodeURIComponent(initMatch[1]);
+                
+                const limitMatch = style.match(/forLimit=([^;]+)/);
+                if (limitMatch) forLimit = decodeURIComponent(limitMatch[1]);
+                
+                const stepMatch = style.match(/forStep=([^;]+)/);
+                if (stepMatch) forStep = decodeURIComponent(stepMatch[1]);
+            }
         }
         
         const entityMatch = style.match(/entityType=([^;]+)/);
@@ -90,7 +106,7 @@ export const parseDrawioToPseudocode = (xml) => {
         const width = geo ? parseFloat(geo.getAttribute('width') || 0) : 0;
         const height = geo ? parseFloat(geo.getAttribute('height') || 0) : 0;
 
-        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile };
+        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
@@ -209,7 +225,7 @@ export const parseDrawioToPseudocode = (xml) => {
         while (pendingComments.length > 0 && pendingComments[0].y <= currentY + 30) {
             let c = pendingComments.shift();
             c.value.split('\n').forEach(line => {
-                let cl = line.replace(/^[\/#\s]+/, '').trim();
+                let cl = line.replace(/^[/#\s]+/, '').trim();
                 if (cl) appendLine(`${indent}# ${cl}`, c.id);
             });
         }
@@ -309,7 +325,7 @@ export const parseDrawioToPseudocode = (xml) => {
         return null;
     };
 
-    const loopContainers = Object.values(nodes).filter(n => n.type === 'LOOP_CONTAINER');
+    const loopContainers = Object.values(nodes).filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
     const isInsideLoop = (node, loop) => {
         if (!node || !loop) return false;
         if (node.type === 'START' || node.type === 'START_END' || node.type === 'END') return false;
@@ -366,7 +382,7 @@ export const parseDrawioToPseudocode = (xml) => {
                     let bodyLines = codeLines.slice(l.startLineIndex);
                     let bodyNodeIds = codeNodeIds.slice(l.startLineIndex);
                     
-                    let preLoopLines = bodyLines.map(line => line.replace(/^    /, ''));
+                    let preLoopLines = bodyLines.map(line => line.replace(/^ {4}/, ''));
                     let preLoopNodeIds = bodyNodeIds.map(() => l.id);
                     
                     let cond = l.value || "";
@@ -378,6 +394,8 @@ export const parseDrawioToPseudocode = (xml) => {
                     
                     codeLines = [...beforeLoop, ...preLoopLines, whileLine, ...bodyLines, endWhileLine];
                     codeNodeIds = [...beforeLoopIds, ...preLoopNodeIds, l.id, ...bodyNodeIds, l.id];
+                } else if (l.type === 'FOR_CONTAINER') {
+                    appendLine(`${indent}ENDFOR`, l.id);
                 } else {
                     appendLine(`${indent}ENDWHILE`, l.id);
                 }
@@ -388,7 +406,10 @@ export const parseDrawioToPseudocode = (xml) => {
             // Wait, we need to sort them from largest to smallest for entering!
             loopsToEnter.sort((a, b) => (b.width * b.height) - (a.width * a.height));
             loopsToEnter.forEach(l => {
-                if (l.doWhile) {
+                if (l.type === 'FOR_CONTAINER') {
+                    const stepText = (l.forStep && l.forStep !== '1' && l.forStep !== '+1') ? ` STEP ${l.forStep}` : '';
+                    appendLine(`${indent}FOR ${l.forInit || ''} TO ${l.forLimit || ''}${stepText} DO`, l.id);
+                } else if (l.doWhile) {
                     l.startLineIndex = codeLines.length;
                 } else {
                     let cond = l.value || "";
@@ -411,7 +432,8 @@ export const parseDrawioToPseudocode = (xml) => {
                 else if (!stopId) {
                     currentLoopStack.slice().reverse().forEach(l => {
                         indent = indent.substring(0, indent.length - 4);
-                        if (l.doWhile) appendLine(`${indent}WHILE ${l.value || "True"}`, l.id);
+                        if (l.type === 'FOR_CONTAINER') appendLine(`${indent}ENDFOR`, l.id);
+                        else if (l.doWhile) appendLine(`${indent}WHILE ${l.value || "True"}`, l.id);
                         else appendLine(`${indent}ENDWHILE`, l.id);
                     });
                 }
@@ -424,7 +446,8 @@ export const parseDrawioToPseudocode = (xml) => {
                 } else if (!stopId) {
                     currentLoopStack.slice().reverse().forEach(l => {
                         indent = indent.substring(0, indent.length - 4);
-                        if (l.doWhile) appendLine(`${indent}WHILE ${l.value || "True"}`, l.id);
+                        if (l.type === 'FOR_CONTAINER') appendLine(`${indent}ENDFOR`, l.id);
+                        else if (l.doWhile) appendLine(`${indent}WHILE ${l.value || "True"}`, l.id);
                         else appendLine(`${indent}ENDWHILE`, l.id);
                     });
                 }

@@ -2,6 +2,7 @@ import React from 'react';
 import { Handle, Position, useReactFlow, useEdges, NodeResizeControl, useStoreApi } from '@xyflow/react';
 import { RefreshCcw, MousePointer2 } from 'lucide-react';
 import { calculateStretchLimits } from '../../utils/stretchLimits';
+import { useContainerBounds } from './useContainerBounds';
 import { edgeLabels, getHighlightClass } from './constants';
 
 const DragHandle = () => <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors mx-auto mb-1" title="Chytit a přesunout" />;
@@ -62,10 +63,6 @@ export const StartEndNode = ({ id, data, selected }) => {
     setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, mode: newMode, label: newLabel } } : n));
   };
 
-  const toggleEntity = () => {
-    if(data.readOnly) return;
-    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, entityType: entityType === 'FUNCTION' ? 'CLASS' : 'FUNCTION' } } : n));
-  };
 
   const isGray = data.colorMode === false;
   const bgClass = isGray ? 'bg-gray-100 dark:bg-gray-800' : 'bg-fuchsia-50 dark:bg-fuchsia-900/30';
@@ -222,7 +219,8 @@ export const IONode = ({ id, data, selected }) => {
           <RefreshCcw size={8} className="opacity-80" />
       </span>
       
-      <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={handleUserChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden px-[35px] pt-1 z-10 text-gray-900 dark:text-gray-100 ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} />
+      <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={handleUserChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-900 dark:text-gray-100 ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'} relative z-10 px-[35px] pt-1`} />
+      
       <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
     </div>
   );
@@ -299,7 +297,7 @@ export const ConditionNode = ({ id, data, selected }) => {
               }));
           }, 0);
       }
-  }, [bottomEdge?.data?.label, rightEdge?.data?.label, expectedBottomLabel, expectedRightLabel, bottomEdge?.id, rightEdge?.id, data.readOnly, setEdges]);
+  }, [bottomEdge, rightEdge, expectedBottomLabel, expectedRightLabel, data.readOnly, setEdges]);
 
   const bottomChar = isBottomTrue ? tChar : fChar;
   const rightChar = isRightTrue ? tChar : fChar;
@@ -334,7 +332,7 @@ export const ConditionNode = ({ id, data, selected }) => {
   );
 };
 
-export const CommentNode = ({ id, data, selected }) => {
+export const CommentNode = ({ data, selected }) => {
   const isGray = data.colorMode === false;
   const bgClass = isGray ? 'bg-gray-50 dark:bg-gray-800' : 'bg-yellow-50 dark:bg-yellow-900/30';
   const borderClass = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-yellow-300 dark:border-yellow-700';
@@ -346,7 +344,7 @@ export const CommentNode = ({ id, data, selected }) => {
       inputRef.current.style.height = 'auto';
       inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
     }
-  }, [data.label, isEditing]);
+  }, [data.label, isEditing, inputRef]);
 
   return (
     <div onDoubleClick={onDoubleClick} className={`${bgClass} border-2 p-2 min-w-[160px] flex flex-col rounded-md relative transition-all ${highlightClass}`}>
@@ -373,362 +371,15 @@ export const LoopContainerNode = ({ id, data, selected, dragging }) => {
   const borderColor = (selected || data.isRuntimeActive) ? 'border-indigo-500' : (isGray ? 'border-gray-400 dark:border-gray-600' : 'border-purple-400 dark:border-purple-600');
   const bgColor = isGray ? 'bg-gray-50/50 dark:bg-gray-900/50' : 'bg-purple-50/30 dark:bg-purple-900/10';
   
-  const { setNodes, getNodes } = useReactFlow();
-  const store = useStoreApi();
-  
   const isDoWhile = data.doWhile === true;
-  const [isResizing, setIsResizing] = React.useState(false);
-  const wasDragging = React.useRef(false);
-
-  // Auto-fit height na začátku nebo po puštění (když se blok přesunul)
-  const triggerAutoFit = React.useCallback(() => {
-    setNodes(nds => {
-        const myNode = nds.find(n => n.id === id);
-        if (!myNode || myNode.selected) return nds;
-        
-        const myX = myNode.position.x;
-        const myY = myNode.position.y;
-        const candidateNodes = nds.filter(n => n.id !== id && !['LOOP_CONTAINER', 'GROUP_BG'].includes(n.type));
-        
-        const nodesBelow = candidateNodes.filter(n => 
-            n.position.y >= myY && 
-            n.position.x >= myX - 100 && 
-            n.position.x <= myX + 400
-        ).sort((a, b) => a.position.y - b.position.y);
-        
-        if (nodesBelow.length > 0) {
-            const nodesToInclude = nodesBelow.slice(0, 3);
-            const lastNode = nodesToInclude[nodesToInclude.length - 1];
-            const h = lastNode.measured?.height || lastNode.height || (lastNode.type === 'CONDITION' ? 70 : 50);
-            const newHeight = (lastNode.position.y + h - myY) + 50;
-            
-            return nds.map(n => {
-                if (n.id === id) {
-                    return { ...n, data: { ...n.data, isNew: false }, style: { ...n.style, height: Math.max(150, newHeight) } };
-                }
-                return n;
-            });
-        }
-        
-        return nds.map(n => n.id === id ? { ...n, data: { ...n.data, isNew: false } } : n);
-    });
-  }, [id, setNodes]);
-
-  React.useEffect(() => {
-    if (data.isNew) {
-      setTimeout(triggerAutoFit, 50);
-    }
-  }, [data.isNew, triggerAutoFit]);
-
-  // Sticky chování - reset po přesunu
-  React.useEffect(() => {
-      if (dragging) {
-          wasDragging.current = true;
-      } else if (wasDragging.current) {
-          wasDragging.current = false;
-          triggerAutoFit();
-      }
-  }, [dragging, triggerAutoFit]);
-
-  const blockStates = React.useRef(new Map());
-  const containerBaseBounds = React.useRef(null);
-  const containerRef = React.useRef(null);
-  const rightLimitTopRef = React.useRef(null);
-  const rightLimitBottomRef = React.useRef(null);
-  const bottomLimitLeftRef = React.useRef(null);
-  const bottomLimitRightRef = React.useRef(null);
-  const ownedNodeIds = React.useRef(new Set());
-  const nodeDragStates = React.useRef(new Map());
-  const animateResizeUntil = React.useRef(0);
-
-  // Fluent Dynamic Width, X and auto-Height adjustment (bez lagu)
-  React.useEffect(() => {
-      let animationFrameId;
-      const checkBounds = () => {
-          const nds = getNodes();
-          const myNode = nds.find(n => n.id === id);
-          if (!myNode || myNode.dragging) {
-              animationFrameId = requestAnimationFrame(checkBounds);
-              return;
-          }
-
-          const myY = myNode.position.y;
-          const myX = myNode.position.x;
-          const myHeight = myNode.style?.height || 150;
-          const myWidth = myNode.style?.width || 300;
-          
-          const candidateNodes = nds.filter(n => n.id !== id && n.type !== 'LOOP_CONTAINER' && n.type !== 'GROUP_BG' && n.type !== 'COMMENT' && n.type !== 'START_END');
-          
-          let currentOwned = new Set(ownedNodeIds.current);
-          let hasPendingIn = false;
-          
-          candidateNodes.forEach(n => {
-              const nW = n.measured?.width || n.width || 100;
-              const nH = n.measured?.height || n.height || 50;
-              const coreW = nW * 0.5;
-              const coreH = nH * 0.5;
-              const coreX = n.position.x + (nW - coreW) / 2;
-              const coreY = n.position.y + (nH - coreH) / 2;
-              // Add vertical leniency so if the container shrinks (e.g. middle block removed), 
-              // the bottom blocks aren't instantly ejected (domino effect).
-              const isInside = (coreX < myX + myWidth && coreX + coreW > myX && coreY < myY + myHeight + 150 && coreY + coreH > myY - 50);
-              
-              if (isInside) {
-                  currentOwned.add(n.id);
-                  if (n.dragging && !n.selected) {
-                      hasPendingIn = true;
-                  }
-              } else if (!n.dragging) {
-                  currentOwned.delete(n.id);
-              }
-          });
-
-          // Compute bounding box and condition counts
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          let statMinX = Infinity, statMinY = Infinity, statMaxX = -Infinity, statMaxY = -Infinity;
-          let numConditions = 0;
-          
-          const ownedNodes = candidateNodes.filter(n => currentOwned.has(n.id));
-          const stationaryNodes = [];
-          
-          ownedNodes.forEach(n => {
-              if (n.type === 'CONDITION' || n.type === 'LOOP_CONTAINER') numConditions++;
-              
-              const nW = n.measured?.width || n.width || 100;
-              const nH = n.measured?.height || n.height || 50;
-              const x1 = n.position.x;
-              const y1 = n.position.y;
-              const x2 = x1 + nW;
-              const y2 = y1 + nH;
-              
-              if (x1 < minX) minX = x1;
-              if (y1 < minY) minY = y1;
-              if (x2 > maxX) maxX = x2;
-              if (y2 > maxY) maxY = y2;
-              
-              if (!n.dragging) {
-                  stationaryNodes.push(n);
-                  if (x1 < statMinX) statMinX = x1;
-                  if (y1 < statMinY) statMinY = y1;
-                  if (x2 > statMaxX) statMaxX = x2;
-                  if (y2 > statMaxY) statMaxY = y2;
-              }
-          });
-          
-          let newWidth = 300;
-          let newHeight = 150;
-          let atStretchLimitRight = false;
-          let atStretchLimitBottom = false;
-          
-          if (ownedNodes.length > 0) {
-              const paddingSides = 20;
-              const paddingBottom = 50;
-              
-              let desiredWidth = (maxX - myX) + paddingSides;
-              let desiredHeight = (maxY - myY) + paddingBottom;
-              
-              const { SSL_Width, SSL_Height, ASL_Width, ASL_Height } = calculateStretchLimits(ownedNodes, stationaryNodes, myX, myY);
-              
-              let popped = false;
-              newWidth = desiredWidth;
-              newHeight = desiredHeight;
-              
-              let stretchDistRight = 0;
-              let stretchDistBottom = 0;
-              
-              if (desiredWidth > ASL_Width) {
-                  newWidth = ASL_Width;
-                  atStretchLimitRight = true;
-                  stretchDistRight = desiredWidth - ASL_Width;
-              }
-              if (desiredHeight > ASL_Height) {
-                  newHeight = ASL_Height;
-                  atStretchLimitBottom = true;
-                  stretchDistBottom = desiredHeight - ASL_Height;
-              }
-              
-              const draggingNode = ownedNodes.find(n => n.dragging);
-              if (draggingNode) {
-                  const nW = draggingNode.measured?.width || 120;
-                  const nH = draggingNode.measured?.height || 50;
-                  const maxXNode = draggingNode.position.x + nW;
-                  const maxYNode = draggingNode.position.y + nH;
-                  const minXNode = draggingNode.position.x;
-                  const minYNode = draggingNode.position.y;
-                  
-                  const reqW = maxXNode - myX + paddingSides;
-                  const reqH = maxYNode - myY + paddingBottom;
-                  
-                  desiredWidth = Math.max(desiredWidth, reqW);
-                  desiredHeight = Math.max(desiredHeight, reqH);
-
-                  stretchDistRight = reqW - ASL_Width;
-                  stretchDistBottom = reqH - ASL_Height;
-                  const stretchDistLeft = myX - minXNode;
-                  const stretchDistTop = myY - minYNode;
-                  
-                  let dragState = nodeDragStates.current.get(draggingNode.id);
-                  if (!dragState) {
-                      dragState = { joinedThisDrag: !ownedNodeIds.current.has(draggingNode.id) };
-                      nodeDragStates.current.set(draggingNode.id, dragState);
-                  } else if (!ownedNodeIds.current.has(draggingNode.id)) {
-                      dragState.joinedThisDrag = true;
-                  }
-
-                  const POP_TOLERANCE_RIGHT = 70;
-                  const POP_TOLERANCE_BOTTOM = 70;
-                  const POP_TOLERANCE_LEFT = 0;
-                  const POP_TOLERANCE_TOP = 0;
-                  
-                  if (stretchDistRight > POP_TOLERANCE_RIGHT || stretchDistBottom > POP_TOLERANCE_BOTTOM || stretchDistLeft > POP_TOLERANCE_LEFT || stretchDistTop > POP_TOLERANCE_TOP) {
-                      currentOwned.delete(draggingNode.id);
-                      popped = true;
-                      atStretchLimitRight = false;
-                      atStretchLimitBottom = false;
-                  } else {
-                      atStretchLimitRight = stretchDistRight >= -20;
-                      atStretchLimitBottom = stretchDistBottom >= -20;
-                  }
-                  
-                  if (dragState.joinedThisDrag) {
-                      atStretchLimitRight = false;
-                      atStretchLimitBottom = false;
-                  }
-              } else {
-                  atStretchLimitRight = false;
-                  atStretchLimitBottom = false;
-              }
-              
-              if (popped) {
-                  // Recalculate based on remaining nodes
-                  const remainingNodes = candidateNodes.filter(n => currentOwned.has(n.id));
-                  if (remainingNodes.length === 0) {
-                      newWidth = 300; newHeight = 150;
-                  } else {
-                      let rMaxX = -Infinity, rMaxY = -Infinity;
-                      remainingNodes.forEach(n => {
-                          const nW = n.measured?.width || n.width || 100;
-                          const nH = n.measured?.height || n.height || 50;
-                          const x2 = n.position.x + nW;
-                          const y2 = n.position.y + nH;
-                          if (x2 > rMaxX) rMaxX = x2;
-                          if (y2 > rMaxY) rMaxY = y2;
-                      });
-                      newWidth = Math.max(300, (rMaxX - myX) + paddingSides);
-                      newHeight = Math.max(150, (rMaxY - myY) + paddingBottom);
-                  }
-              } else {
-                  newWidth = Math.min(desiredWidth, ASL_Width);
-                  newHeight = Math.min(desiredHeight, ASL_Height);
-              }
-              
-              if (newWidth < 300) newWidth = 300;
-              if (newHeight < 150) newHeight = 150;
-          }
-          const previousOwnedCount = ownedNodeIds.current.size;
-          ownedNodeIds.current = new Set([...currentOwned].filter(id => candidateNodes.some(n => n.id === id)));
-          
-          if (currentOwned.size > previousOwnedCount) {
-              animateResizeUntil.current = Date.now() + 300;
-          }
-
-          const opacityVal = '0.7';
-          if (rightLimitTopRef.current) rightLimitTopRef.current.style.opacity = atStretchLimitRight ? opacityVal : '0';
-          if (rightLimitBottomRef.current) rightLimitBottomRef.current.style.opacity = atStretchLimitRight ? opacityVal : '0';
-          if (bottomLimitLeftRef.current) bottomLimitLeftRef.current.style.opacity = atStretchLimitBottom ? opacityVal : '0';
-          if (bottomLimitRightRef.current) bottomLimitRightRef.current.style.opacity = atStretchLimitBottom ? opacityVal : '0';
-
-          if (containerRef.current) {
-              // Highlight visual feedback
-              containerRef.current.classList.remove(
-                  'bg-purple-100', 'dark:bg-purple-900/30', 'ring-4', 'ring-purple-400', 
-                  'bg-purple-100/50', 'dark:bg-purple-800/30', 
-                  'border-b-4', 'border-b-purple-500', 'border-r-4', 'border-r-purple-500',
-                  'border-l-4', 'border-l-purple-500', 'border-t-4', 'border-t-purple-500'
-              );
-              
-              if (atStretchLimitRight || atStretchLimitBottom) {
-                  containerRef.current.classList.add('bg-purple-100/50', 'dark:bg-purple-800/30');
-              } else if (hasPendingIn) {
-                  containerRef.current.classList.add('bg-purple-100', 'dark:bg-purple-900/30', 'ring-4', 'ring-purple-400');
-              }
-          }
-          
-          const anyChildDragging = candidateNodes.some(n => n.dragging && currentOwned.has(n.id));
-          
-          if (containerRef.current) {
-              const rfNode = containerRef.current.closest('.react-flow__node');
-              if (rfNode) {
-                  if (!anyChildDragging || Date.now() < animateResizeUntil.current) {
-                      rfNode.classList.add('animate-resize');
-                  } else {
-                      rfNode.classList.remove('animate-resize');
-                  }
-              }
-          }
-
-          if (Math.abs(newWidth - myWidth) > 1 || Math.abs(newHeight - myHeight) > 1) {
-              if (containerRef.current) {
-                  const rfNode = containerRef.current.closest('.react-flow__node');
-                  if (rfNode) {
-                      rfNode.style.width = newWidth + 'px';
-                      rfNode.style.height = newHeight + 'px';
-                  }
-              }
-              
-              if (!myNode.style) myNode.style = {};
-              myNode.style.width = newWidth;
-              myNode.style.height = newHeight;
-              
-              if (!anyChildDragging) {
-                  setNodes(oldNds => oldNds.map(n => n.id === id ? { ...n, style: { ...n.style, width: newWidth, height: newHeight } } : n));
-              } else {
-                  containerRef.current.dataset.needsCommit = 'true';
-              }
-          } else if (!anyChildDragging && containerRef.current?.dataset.needsCommit === 'true') {
-              containerRef.current.dataset.needsCommit = 'false';
-              setNodes(oldNds => oldNds.map(n => n.id === id ? { ...n, style: { ...n.style, width: newWidth, height: newHeight } } : n));
-          }
-          
-          animationFrameId = requestAnimationFrame(checkBounds);
-      };
-      
-      animationFrameId = requestAnimationFrame(checkBounds);
-      return () => cancelAnimationFrame(animationFrameId);
-  }, [id, store]);
-  
-  const handleSelectAll = (e) => {
-      e.stopPropagation();
-      setNodes(nds => {
-          const myNode = nds.find(n => n.id === id);
-          if (!myNode) return nds;
-          
-          const myX = myNode.position.x;
-          const myY = myNode.position.y;
-          const myW = myNode.style?.width || 300;
-          const myH = myNode.style?.height || 150;
-          
-          return nds.map(n => {
-              if (n.id === id) return { ...n, selected: true };
-              if (['LOOP_CONTAINER', 'GROUP_BG'].includes(n.type)) return n;
-              
-              const nX = n.position.x;
-              const nY = n.position.y;
-              const nW = n.measured?.width || n.width || 100;
-              const nH = n.measured?.height || n.height || 50;
-              
-              const coreW = nW * 0.5;
-              const coreH = nH * 0.5;
-              const coreX = nX + (nW - coreW) / 2;
-              const coreY = nY + (nH - coreH) / 2;
-              
-              if (coreX < myX + myW && coreX + coreW > myX && coreY < myY + myH && coreY + coreH > myY) {
-                  return { ...n, selected: true };
-              }
-              return n;
-          });
-      });
-  };
+  const {
+      containerRef,
+      rightLimitTopRef,
+      rightLimitBottomRef,
+      bottomLimitLeftRef,
+      bottomLimitRightRef,
+      handleSelectAll
+  } = useContainerBounds(id, { ...data, isForContainer: false }, dragging, 300, 150);
   
   const toggleDoWhile = (e) => {
     e.stopPropagation();
@@ -784,6 +435,82 @@ export const LoopContainerNode = ({ id, data, selected, dragging }) => {
       {/* Bottom Limit Extensions */}
       <div ref={bottomLimitLeftRef} className="absolute right-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-purple-400 opacity-0 transition-opacity pointer-events-none" />
       <div ref={bottomLimitRightRef} className="absolute left-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-purple-400 opacity-0 transition-opacity pointer-events-none" />
+    </div>
+  );
+};
+
+export const ForContainerNode = ({ id, data, selected, dragging }) => {
+  const isGray = data.colorMode === false;
+  const borderColor = (selected || data.isRuntimeActive) ? 'border-indigo-500' : (isGray ? 'border-gray-400 dark:border-gray-600' : 'border-indigo-400 dark:border-indigo-600');
+  const bgColor = isGray ? 'bg-gray-50/50 dark:bg-gray-900/50' : 'bg-indigo-50/30 dark:bg-indigo-900/10';
+  
+  const {
+      containerRef,
+      rightLimitTopRef,
+      rightLimitBottomRef,
+      bottomLimitLeftRef,
+      bottomLimitRightRef,
+      handleSelectAll
+  } = useContainerBounds(id, { ...data, isForContainer: true }, dragging, 350, 200);
+
+  const updateField = (field, value) => {
+      if (data.onUpdateData) {
+          data.onUpdateData({ [field]: value });
+      } else {
+          setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, [field]: value } } : n));
+      }
+  };
+
+  return (
+    <div ref={containerRef} className={`relative w-full h-full rounded-lg border-2 border-dashed ${borderColor} ${bgColor} flex flex-col overflow-visible ${selected ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-indigo-50/50' : ''}`}>
+      <div className={`custom-drag-handle absolute -top-4 left-4 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing`}>
+        <RefreshCcw size={12} className="text-indigo-500" />
+        <span className="text-indigo-700 dark:text-indigo-300">FOR</span>
+        
+        <input 
+            type="text" 
+            value={data.forInit || 'i = 0'} 
+            onChange={(e) => updateField('forInit', e.target.value)}
+            onMouseDown={e => e.stopPropagation()}
+            className="outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-[10px] font-mono w-16 border border-transparent focus:border-indigo-300 cursor-text"
+            placeholder="Init"
+            title="Výchozí hodnota (např. i = 0)"
+        />
+        <span className="text-[10px] text-gray-500">TO</span>
+        <input 
+            type="text" 
+            value={data.forLimit || '10'} 
+            onChange={(e) => updateField('forLimit', e.target.value)}
+            onMouseDown={e => e.stopPropagation()}
+            className="outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-[10px] font-mono w-12 border border-transparent focus:border-indigo-300 cursor-text text-center"
+            placeholder="Limit"
+            title="Podmínka konce (např. 10)"
+        />
+        <span className="text-[10px] text-gray-500">STEP</span>
+        <input 
+            type="text" 
+            value={data.forStep || '1'} 
+            onChange={(e) => updateField('forStep', e.target.value)}
+            onMouseDown={e => e.stopPropagation()}
+            className="outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-[10px] font-mono w-10 border border-transparent focus:border-indigo-300 cursor-text text-center"
+            placeholder="Step"
+            title="Iterace / Krok (např. 1)"
+        />
+      </div>
+
+      <button 
+        onPointerDown={handleSelectAll}
+        className={`absolute -top-3 -right-3 w-6 h-6 bg-white dark:bg-gray-800 rounded-full shadow-sm border ${borderColor} flex items-center justify-center pointer-events-auto hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors z-10 cursor-grab active:cursor-grabbing`}
+        title="Vybrat vše v cyklu a přesunout"
+      >
+        <MousePointer2 size={12} className="text-indigo-500" />
+      </button>
+
+      <div ref={rightLimitTopRef} className="absolute bottom-full right-0 w-0 h-[40px] border-r-2 border-dashed border-indigo-400 opacity-0 transition-opacity pointer-events-none" />
+      <div ref={rightLimitBottomRef} className="absolute top-full right-0 w-0 h-[40px] border-r-2 border-dashed border-indigo-400 opacity-0 transition-opacity pointer-events-none" />
+      
+      <div ref={bottomLimitLeftRef} className="absolute right-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-indigo-400 opacity-0 transition-opacity pointer-events-none" />
+      <div ref={bottomLimitRightRef} className="absolute left-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-indigo-400 opacity-0 transition-opacity pointer-events-none" />
     </div>
   );
 };

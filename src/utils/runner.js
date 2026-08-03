@@ -3,15 +3,16 @@ export class DiagramRunner {
         this.nodes = nodes;
         this.edges = edges;
         this.variables = {};
+        this.loopStates = {};
         this.output = [];
         this.events = [];
         this.isFinished = false;
 
         // Precompute LOOP_CONTAINER regions
-        this.loopContainers = this.nodes.filter(n => n.type === 'LOOP_CONTAINER');
+        this.loopContainers = this.nodes.filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
         this.nodeToLoop = {};
         this.nodes.forEach(n => {
-            if (n.type === 'LOOP_CONTAINER' || n.type === 'GROUP_BG') return;
+            if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'GROUP_BG') return;
             const nx = n.position?.x || n.x || 0;
             const ny = n.position?.y || n.y || 0;
             let innermost = null, minArea = Infinity;
@@ -132,6 +133,7 @@ export class DiagramRunner {
                 
                 if (inputValue === undefined) {
                     // Fallback pre testovaci knihovnu
+                    // eslint-disable-next-line no-undef
                     if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test') {
                         let input = window.prompt(`Zadejte hodnotu pro proměnnou '${varName}':`, "0");
                         let parsed = parseFloat(input);
@@ -202,7 +204,47 @@ export class DiagramRunner {
                 
                 if (!isDoWhile || isLoopBack) {
                     const cond = this.cleanText(tgtLoop.data?.label || '');
-                    const isTrue = !!this.evalExpr(cond);
+                    let isTrue = false;
+                    
+                    const forMatch = cond.match(/^FOR\s+([a-zA-Z_]\w*)\s*(?:=|<-)\s*(.*?)\s+TO\s+(.*)$/i);
+                    if (tgtLoop.type === 'FOR_CONTAINER') {
+                        const initStr = tgtLoop.data?.forInit || '';
+                        const limitStr = tgtLoop.data?.forLimit || '';
+                        const stepStr = tgtLoop.data?.forStep || '1';
+                        
+                        const initMatch = initStr.match(/([a-zA-Z_]\w*)\s*(?:=|<-)\s*(.*)/);
+                        const varName = initMatch ? initMatch[1] : 'i';
+                        const initValExpr = initMatch ? initMatch[2] : initStr;
+                        
+                        if (!isLoopBack || !this.loopStates[tgtLoop.id]) {
+                            const startVal = Number(this.evalExpr(initValExpr));
+                            const endVal = Number(this.evalExpr(limitStr));
+                            const stepVal = Number(this.evalExpr(stepStr));
+                            this.variables[varName] = startVal;
+                            this.loopStates[tgtLoop.id] = { endVal, varName, step: stepVal };
+                            isTrue = stepVal > 0 ? (startVal <= endVal) : (startVal >= endVal);
+                        } else {
+                            const state = this.loopStates[tgtLoop.id];
+                            this.variables[state.varName] += state.step;
+                            isTrue = state.step > 0 ? (this.variables[state.varName] <= state.endVal) : (this.variables[state.varName] >= state.endVal);
+                        }
+                    } else if (forMatch) {
+                        const varName = forMatch[1];
+                        if (!isLoopBack || !this.loopStates[tgtLoop.id]) {
+                            const startVal = Number(this.evalExpr(forMatch[2]));
+                            const endVal = Number(this.evalExpr(forMatch[3]));
+                            this.variables[varName] = startVal;
+                            this.loopStates[tgtLoop.id] = { endVal, varName, step: 1 };
+                            isTrue = startVal <= endVal;
+                        } else {
+                            const state = this.loopStates[tgtLoop.id];
+                            this.variables[state.varName] += state.step;
+                            isTrue = this.variables[state.varName] <= state.endVal;
+                        }
+                    } else {
+                        isTrue = !!this.evalExpr(cond);
+                    }
+                    
                     if (!isTrue) {
                         // Format current variables state for insight
                         const varsState = Object.entries(this.variables).map(([k, v]) => `${k}=${v}`).join(', ');

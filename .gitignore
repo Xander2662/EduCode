@@ -25,3 +25,10 @@ dist-ssr
 
 other
 diff.txt
+/.agents
+playwright.config.js
+mcp-server.js
+/mcp-server
+/playwright-report
+/tests-e2e
+/test-results

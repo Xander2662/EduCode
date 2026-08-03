@@ -14,7 +14,7 @@ describe('Bi-directional FOR loop sync logic', () => {
 
     it('should parse Pseudocode FOR loop to 3 Diagram Nodes', () => {
         const pseudo = 'FOR i = 0 TO 9 DO\n    PRINT i\nENDFOR';
-        const result = parsePseudocodeToDrawio(pseudo);
+        const result = parsePseudocodeToDrawio(pseudo, null, 'true-false', 'hexagon', 'advanced');
         const xml = result.xml;
         
         // Should contain Init node
@@ -25,10 +25,12 @@ describe('Bi-directional FOR loop sync logic', () => {
         expect(xml).toContain('i = i + 1');
     });
 
+
+
     it('should parse Diagram loops back into FOR loop Pseudocode', () => {
         // We will pass the XML generated from the previous step back into diagramToPseudocode
         const pseudoInput = 'FOR i = 0 TO 9 DO\n    PRINT(i)\nENDFOR';
-        const drawioResult = parsePseudocodeToDrawio(pseudoInput);
+        const drawioResult = parsePseudocodeToDrawio(pseudoInput, null, 'true-false', 'hexagon', 'advanced');
         const xml = drawioResult.xml;
 
         const generatedPseudo = parseDrawioToPseudocode(xml);
@@ -42,7 +44,7 @@ describe('Bi-directional FOR loop sync logic', () => {
 
     it('should parse Diagram loops back into Python for loops', () => {
         const pseudoInput = 'FOR i = 0 TO 9 DO\n    PRINT(i)\nENDFOR';
-        const drawioResult = parsePseudocodeToDrawio(pseudoInput);
+        const drawioResult = parsePseudocodeToDrawio(pseudoInput, null, 'true-false', 'hexagon', 'advanced');
         const xml = drawioResult.xml;
 
         const generatedPython = parseDrawioToPython(xml);

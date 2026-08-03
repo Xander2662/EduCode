@@ -239,7 +239,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             let upper = line.toUpperCase();
 
             if (upper.startsWith('//') || upper.startsWith('#')) {
-                const commentText = line.replace(/^[\/#\s]+/, '');
+                const commentText = line.replace(/^[/#\s]+/, '');
                 addNode(commentText, 'COMMENT', getXPos() + 160, {}, commentText);
                 continue;
             }
@@ -290,6 +290,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
                 let forVar = null;
                 let forStep = '1';
+                let forInit = '';
+                let forLimit = '';
                 if (isFor) {
                     const forMatch = condText.match(/^FOR\s+([a-zA-Z_]\w*)\s*(?:=|<-)\s*(.*?)\s+TO\s+(.*)$/i);
                     if (forMatch) {
@@ -297,11 +299,16 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                         const initVal = forMatch[2];
                         const toVal = forMatch[3];
                         
-                        const initId = addNode(`${forVar} = ${initVal}`, 'ACTION', getXPos(), {}, line);
-                        pendingExits.forEach(exit => addEdge(exit.id, initId, exit.text, exit.handle, "t-top"));
-                        pendingExits = [{ id: initId, text: "", handle: "s-bottom" }];
+                        forInit = `${forVar} = ${initVal}`;
+                        forLimit = toVal;
                         
-                        condText = `${forVar} <= ${toVal}`;
+                        if (editorMode !== 'simple') {
+                            const initId = addNode(`${forVar} = ${initVal}`, 'ACTION', getXPos(), {}, line);
+                            pendingExits.forEach(exit => addEdge(exit.id, initId, exit.text, exit.handle, "t-top"));
+                            pendingExits = [{ id: initId, text: "", handle: "s-bottom" }];
+                            
+                            condText = `${forVar} <= ${toVal}`;
+                        }
                     }
                 }
 
@@ -313,10 +320,10 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                     isNot = true;
                 }
 
-                if (editorMode === 'simple' && !isFor) {
-                    // Simple mode WHILE loop (not FOR)
+                if (editorMode === 'simple') {
+                    // Simple mode loop (WHILE or FOR)
                     yOffset += 60;
-                    stack.push({ type: 'LOOP', id: getNewId(), isSimple: true, condText, startY: yOffset, entryExits: [...pendingExits], doWhile: false, outNodesStartIndex: outNodes.length });
+                    stack.push({ type: 'LOOP', id: getNewId(), isSimple: true, condText: (isFor ? upper : condText), startY: yOffset, entryExits: [...pendingExits], doWhile: false, outNodesStartIndex: outNodes.length, isFor, forVar, forStep, forInit, forLimit });
                 } else {
                     const loopId = addNode(condText, 'CONDITION', getXPos(), {}, isFor ? null : line);
 
@@ -377,8 +384,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
                     const h = Math.max(150, yOffset - currentLoop.startY + 50);
                     const id = currentLoop.id;
-                    const memPos = getPos(currentLoop.condText, 'LOOP_CONTAINER', getXPos() - 90, currentLoop.startY - 50);
-                    outNodes.push({ id, text: currentLoop.condText, type: 'LOOP_CONTAINER', x: memPos.x, y: memPos.y, w: 300, h, doWhile: currentLoop.doWhile });
+                    const memPos = getPos(currentLoop.condText, currentLoop.isFor ? 'FOR_CONTAINER' : 'LOOP_CONTAINER', getXPos() - 90, currentLoop.startY - 50);
+                    outNodes.push({ id, text: currentLoop.condText, type: currentLoop.isFor ? 'FOR_CONTAINER' : 'LOOP_CONTAINER', x: memPos.x, y: memPos.y, w: 300, h, doWhile: currentLoop.doWhile, forInit: currentLoop.forInit, forLimit: currentLoop.forLimit, forStep: currentLoop.forStep });
                     // pendingExits just flows sequentially to the next block, no back edges.
                     yOffset += 50;
                 } else if (currentLoop.isFor && currentLoop.forVar) {
@@ -502,8 +509,11 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         if (n.ioType) style += `ioType=${n.ioType};`; 
 
         let extraAttrs = "";
-        if (n.type === 'LOOP_CONTAINER') {
-            extraAttrs = ` type="LOOP_CONTAINER" doWhile="${n.doWhile ? 'true' : 'false'}"`;
+        if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') {
+            extraAttrs = ` type="${n.type}" doWhile="${n.doWhile ? 'true' : 'false'}"`;
+            if (n.type === 'FOR_CONTAINER') {
+                extraAttrs += ` forInit="${encodeURIComponent(n.forInit || '')}" forLimit="${encodeURIComponent(n.forLimit || '')}" forStep="${encodeURIComponent(n.forStep || '1')}"`;
+            }
         }
 
         const safeText = (n.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

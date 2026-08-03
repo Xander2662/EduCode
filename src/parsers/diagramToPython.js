@@ -38,6 +38,11 @@ export const parseDrawioToPython = (xml) => {
         const x = geo ? parseFloat(geo.getAttribute('x') || 0) : 0;
         const y = geo ? parseFloat(geo.getAttribute('y') || 0) : 0;
 
+        let doWhile = false;
+        let forInit = '';
+        let forLimit = '';
+        let forStep = '';
+        
         let type = 'ACTION';
         if (style.includes('shape=note') || style.includes('fillColor=#fff2cc') || value.startsWith('#') || value.startsWith('//')) type = 'COMMENT';
         else if (style.includes('ellipse') && style.includes('strokeColor=none') && style.includes('fillColor=none')) type = 'MERGE';
@@ -51,6 +56,27 @@ export const parseDrawioToPython = (xml) => {
         else if (style.includes('shape=parallelogram') || cellTypeAttr === 'IO' || cellTypeAttr === 'io') {
             type = 'IO';
         }
+        else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellTypeAttr === 'LOOP_CONTAINER') {
+            type = 'LOOP_CONTAINER';
+            try {
+                doWhile = cell.getAttribute('doWhile') === 'true';
+                if (!doWhile && style.includes('doWhile=true')) {
+                    doWhile = true;
+                }
+            } catch {
+            }
+            if (style.includes('forInit=')) {
+                type = 'FOR_CONTAINER';
+                const initMatch = style.match(/forInit=([^;]+)/);
+                if (initMatch) forInit = decodeURIComponent(initMatch[1]);
+                
+                const limitMatch = style.match(/forLimit=([^;]+)/);
+                if (limitMatch) forLimit = decodeURIComponent(limitMatch[1]);
+                
+                const stepMatch = style.match(/forStep=([^;]+)/);
+                if (stepMatch) forStep = decodeURIComponent(stepMatch[1]);
+            }
+        }
         
         const entityMatch = style.match(/entityType=([^;]+)/);
         const entityType = entityMatch ? entityMatch[1] : 'FUNCTION';
@@ -58,7 +84,10 @@ export const parseDrawioToPython = (xml) => {
         const ioMatch = style.match(/ioType=([^;]+)/);
         const ioType = ioMatch ? ioMatch[1] : 'input';
 
-        nodes[id] = { id, value, type, x, y, next: [], prev: [], entityType, ioType };
+        const width = geo ? parseFloat(geo.getAttribute('width') || 0) : 0;
+        const height = geo ? parseFloat(geo.getAttribute('height') || 0) : 0;
+
+        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
@@ -180,7 +209,7 @@ export const parseDrawioToPython = (xml) => {
         while (pendingComments.length > 0 && pendingComments[0].y <= currentY + 30) {
             let c = pendingComments.shift();
             c.value.split('\n').forEach(line => {
-                let cl = line.replace(/^[\/#\s]+/, '').trim();
+                let cl = line.replace(/^[/#\s]+/, '').trim();
                 if (cl) appendLine(`${indent}# ${cl}`, c.id);
             });
         }
@@ -341,7 +370,27 @@ export const parseDrawioToPython = (xml) => {
                     const condText = isTrueLoop ? cleanCond : `not (${cleanCond})`;
                     
                     const headerLineIndex = codeLines.length;
-                    const loopCmd = isFor ? cleanCond : `while ${condText}:`;
+                    
+                    let loopCmd = `while ${condText}:`;
+                    if (isFor) {
+                        const forMatch = cleanCond.match(/^FOR\s+([a-zA-Z_]\w*)\s*(?:=|<-)\s*(.*?)\s+TO\s+(.*)$/i);
+                        if (forMatch) {
+                            const loopVar = forMatch[1];
+                            const initVal = forMatch[2];
+                            let toVal = forMatch[3];
+                            // To match pseudocode `TO X` behavior (inclusive), we do X + 1 in Python
+                            if (!isNaN(toVal)) {
+                                toVal = `${parseInt(toVal) + 1}`;
+                            } else {
+                                toVal = `${toVal} + 1`;
+                            }
+                            loopCmd = `for ${loopVar} in range(${initVal}, ${toVal}):`;
+                        } else {
+                            // Fallback if it doesn't match the regex perfectly
+                            loopCmd = `# FOR loop parsing error: ${cleanCond}`;
+                        }
+                    }
+                    
                     appendLine(`${indent}${loopCmd}`, node.id);
                     
                     const loopStartTarget = isTrueLoop ? tTarget : fTarget;
@@ -409,7 +458,6 @@ export const parseDrawioToPython = (xml) => {
                     // headerLineIndex is now either the while or for header. If the loop body is empty, we need pass.
                     // Wait, since we might have removed init, headerLineIndex could be off by 1 if init was removed.
                     // Let's just check the last element.
-                    let loopHeaderIndex = isFor && codeLines[codeLines.length - 1] === codeLines[headerLineIndex - (isFor ? 1 : 0)] ? codeLines.length - 1 : headerLineIndex;
                     if (isFor && codeLines.length > 0 && codeLines[codeLines.length - 1].trim().startsWith('for ')) {
                         appendLine(`${indent}    pass`);
                     } else if (!isFor && codeLines.length > 0 && codeLines[codeLines.length - 1].trim().startsWith('while ')) {

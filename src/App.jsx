@@ -307,6 +307,52 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
   );
 };
 
+const ToggleSwitch = ({ checked, onChange, label }) => (
+  <label className="flex items-center justify-between cursor-pointer w-full group py-1.5">
+    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{label}</span>
+    <div className="relative">
+      <input type="checkbox" className="sr-only" checked={checked} onChange={onChange} />
+      <div className={`block w-10 h-6 rounded-full transition-colors ${checked ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
+      <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${checked ? 'transform translate-x-4' : ''}`}></div>
+    </div>
+  </label>
+);
+
+const CustomSelect = ({ value, options, onChange, label }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const selectedOption = options.find(o => o.value === value) || options[0];
+
+  return (
+    <div className="relative mb-5">
+      {label && <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">{label}</label>}
+      <button 
+        onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
+        className="w-full text-sm bg-gray-50/50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg outline-none px-3 py-2 flex items-center justify-between text-gray-700 dark:text-gray-300 hover:border-indigo-400 transition-colors"
+      >
+        <span>{selectedOption?.label}</span>
+        <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setIsOpen(false); }}></div>
+          <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden border">
+            {options.map(opt => (
+              <button 
+                key={opt.value}
+                onClick={(e) => { e.stopPropagation(); onChange(opt.value); setIsOpen(false); }}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 ${value === opt.value ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 function AppContent() {
   const [flow, setFlow] = useState('bidirectional');
   const [panels, setPanels] = useState(['drawio', 'pseudocode']);
@@ -318,7 +364,10 @@ function AppContent() {
   const [parseErrors, setParseErrors] = useState([]);
   const [activeDropdown, setActiveDropdown] = useState(null);
   const [settingsDropdown, setSettingsDropdown] = useState(null);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('isDarkMode');
+    return saved !== null ? JSON.parse(saved) : false;
+  });
   const [dialog, setDialog] = useState(null);
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialType, setTutorialType] = useState('drawio');
@@ -344,7 +393,7 @@ function AppContent() {
   const runnerRef = useRef(null); 
   const [runtimeActiveNodeId, setRuntimeActiveNodeId] = useState(null);
   const [runtimeVars, setRuntimeVars] = useState({});
-  const [runtimeOutput, setRuntimeOutput] = useState([]);
+  const [, setRuntimeOutput] = useState([]);
   const [runtimeEvents, setRuntimeEvents] = useState([]);
   
   const [debugSpeedPercent, setDebugSpeedPercent] = useState(100);
@@ -388,7 +437,7 @@ function AppContent() {
           window.__LAST_ACTION_LOGS__ = newLogs;
           return newLogs;
       });
-  }, []);
+  }, [appVersion]);
 
   const downloadLogs = () => {
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(actionLogs, null, 2));
@@ -400,6 +449,52 @@ function AppContent() {
       downloadAnchorNode.remove();
   };
 
+  // MCP WebSocket Bridge for Dev Mode
+  // Currently disabled to prevent console connection errors since the external bridge server (port 8080) is not running.
+  // Uncomment and configure port if you need the AI to read the live diagram state.
+  /*
+  useEffect(() => {
+    if (import.meta.env && import.meta.env.DEV) {
+      let ws;
+      let reconnectTimer;
+      
+      const connect = () => {
+        ws = new WebSocket('ws://localhost:8080');
+        
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            if (message.type === 'GET_STATE') {
+              const payload = {
+                xml: diagramXml,
+                pseudocode: pseudocode,
+                pythonCode: pythonCode,
+                panels: panels,
+                isDebuggerActive: isDebuggerActive,
+                isPlaying: isPlayingState
+              };
+              ws.send(JSON.stringify({ type: 'STATE_RESPONSE', payload }));
+            }
+          } catch (err) {}
+        };
+        
+        ws.onclose = () => {
+            reconnectTimer = setTimeout(connect, 3000);
+        };
+        
+        ws.onerror = () => {};
+      };
+      
+      connect();
+      
+      return () => {
+        if (ws) ws.close();
+        clearTimeout(reconnectTimer);
+      };
+    }
+  }, []);
+  */
+
   useEffect(() => { breakpointsRef.current = breakpoints; }, [breakpoints]);
   
   useEffect(() => { 
@@ -410,12 +505,13 @@ function AppContent() {
       const handleClickOutside = () => {
           setShowDebugSettings(false);
           setShowWatcherInfo(false);
+          setActiveDropdown(null);
+          setSettingsDropdown(null);
       };
-      if (showDebugSettings || showWatcherInfo) {
-          window.addEventListener('click', handleClickOutside);
-          return () => window.removeEventListener('click', handleClickOutside);
-      }
-  }, [showDebugSettings, showWatcherInfo]);
+      
+      window.addEventListener('click', handleClickOutside);
+      return () => window.removeEventListener('click', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const seen = localStorage.getItem('eduCodeTutorialSeen');
@@ -429,6 +525,7 @@ function AppContent() {
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
+    localStorage.setItem('isDarkMode', JSON.stringify(isDarkMode));
   }, [isDarkMode]);
 
   const setIsPlaying = useCallback((val) => {
@@ -516,6 +613,15 @@ function AppContent() {
     if (flow === 'bidirectional' && lastEdited.current !== 'pseudocode') return;
     if (flow === 'code-to-diagram' && panels.includes('python') && lastEdited.current === 'python') return; // let python win if it was last edited
 
+    const defaultDiagram = `<mxGraphModel dx="871" dy="541" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+  </root>
+</mxGraphModel>`;
+
+
+
     const timeoutId = setTimeout(() => {
       try {
         if (!pseudocode || pseudocode.trim() === '') {
@@ -553,7 +659,7 @@ function AppContent() {
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [pseudocode, flow, edgeStyle, conditionShape, logAction, syncTrigger, panels]);
+  }, [pseudocode, diagramXml, editorMode, flow, edgeStyle, conditionShape, logAction, syncTrigger, panels]);
 
   // SYNC 3: Python -> Diagram
   useEffect(() => {
@@ -586,7 +692,7 @@ function AppContent() {
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [pythonCode, flow, edgeStyle, conditionShape, logAction, syncTrigger, panels]);
+  }, [pythonCode, diagramXml, editorMode, flow, edgeStyle, conditionShape, logAction, syncTrigger, panels]);
 
   useEffect(() => {
     if (panels.includes('python')) {
@@ -598,7 +704,9 @@ function AppContent() {
           const result = parseDrawioToPython(diagramXml);
           setPythonCode(result?.code || '');
           setPythonNodeLineMap(result?.nodeLineMap || {});
-        } catch (err) {}
+        } catch {
+            // Ignore error
+        }
       }, 400);
       return () => clearTimeout(timeoutId);
     }
@@ -703,11 +811,11 @@ function AppContent() {
       }
   }, [startDebugger, setIsPlaying, stopDebugger]);
 
-  const executeAutoPlay = useCallback(() => {
+  const executeAutoPlay = useCallback(function play() {
       if (!isPlayingRef.current) return;
       doStep(false);
       if (isPlayingRef.current) {
-          playTimeoutRef.current = setTimeout(executeAutoPlay, debugSpeedRef.current);
+          playTimeoutRef.current = setTimeout(play, debugSpeedRef.current);
       }
   }, [doStep]);
 
@@ -773,7 +881,18 @@ function AppContent() {
             activeRuntimeNodeId={runtimeActiveNodeId}
             breakpoints={showDebugger ? breakpoints : []}
             onBreakpointToggle={toggleBreakpoint}
-            onInteract={() => { activeWindow.current = 'drawio'; lastEdited.current = 'drawio'; }}
+            onInteract={() => { 
+                activeWindow.current = 'drawio'; 
+                lastEdited.current = 'drawio'; 
+                setActiveDropdown(null);
+                setSettingsDropdown(null);
+                setShowDebugSettings(false);
+            }}
+            onPaneClick={() => { 
+                setActiveDropdown(null);
+                setSettingsDropdown(null);
+                setShowDebugSettings(false);
+            }}
             onLogAction={logAction}
             onXmlChange={(xml, isUserInteraction) => { 
                 if (isUserInteraction) lastEdited.current = 'drawio'; 
@@ -1035,7 +1154,7 @@ function AppContent() {
           <a href={isExperimental ? '/EduCode/safe/' : '/EduCode/experimental/'} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors shadow-sm ${isExperimental ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border border-amber-300/50 hover:bg-amber-200' : 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 border border-green-300/50 hover:bg-green-200'}`}>
             {isExperimental ? 'Experimental' : 'Safe Mode'}
           </a>
-          <button onClick={(e) => { e.stopPropagation(); setIsDarkMode(!isDarkMode); }} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors" aria-label={isDarkMode ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"}><Sun size={20} /></button>
+          <button onClick={(e) => { e.stopPropagation(); setIsDarkMode(!isDarkMode); }} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors" aria-label={isDarkMode ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"}>{isDarkMode ? <Sun size={20} /> : <Moon size={20} />}</button>
         </div>
       </header>
 
@@ -1062,54 +1181,46 @@ function AppContent() {
                         <Settings size={16} />
                       </button>
                       {settingsDropdown === index && (
-                        <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 p-3" onClick={e => e.stopPropagation()}>
+                        <div className="absolute right-0 top-full mt-3 w-64 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-xl z-50 p-4" onClick={e => e.stopPropagation()}>
                           
-                          <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">Pravda / Nepravda alias</label>
-                          <select
+                          <CustomSelect 
+                            label="Pravda / Nepravda alias"
                             value={edgeStyle}
-                            onChange={(e) => { setEdgeStyle(e.target.value); localStorage.setItem('edgeStyle', e.target.value); logAction('SETTINGS_CHANGED', { edgeStyle: e.target.value }); }}
-                            className="w-full text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none p-1.5 cursor-pointer text-gray-700 dark:text-gray-300 mb-4"
-                          >
-                            <option value="true-false">True / False</option>
-                            <option value="ano-ne">Ano / Ne</option>
-                            <option value="yes-no">Yes / No</option>
-                            <option value="+-">+ / -</option>
-                          </select>
+                            onChange={(val) => { setEdgeStyle(val); localStorage.setItem('edgeStyle', val); logAction('SETTINGS_CHANGED', { edgeStyle: val }); }}
+                            options={[
+                              {value: 'true-false', label: 'True / False'},
+                              {value: 'ano-ne', label: 'Ano / Ne'},
+                              {value: 'yes-no', label: 'Yes / No'},
+                              {value: '+-', label: '+ / -'}
+                            ]}
+                          />
 
-                          <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block mt-3">Tvar podmínky</label>
-                          <select
+                          <CustomSelect 
+                            label="Tvar podmínky"
                             value={conditionShape}
-                            onChange={(e) => { setConditionShape(e.target.value); localStorage.setItem('conditionShape', e.target.value); logAction('SETTINGS_CHANGED', { conditionShape: e.target.value }); }}
-                            className="w-full text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none p-1.5 cursor-pointer text-gray-700 dark:text-gray-300 mb-4"
-                          >
-                            <option value="hexagon">Šestiúhelník</option>
-                            <option value="diamond">Kosočtverec</option>
-                          </select>
+                            onChange={(val) => { setConditionShape(val); localStorage.setItem('conditionShape', val); logAction('SETTINGS_CHANGED', { conditionShape: val }); }}
+                            options={[
+                              {value: 'hexagon', label: 'Šestiúhelník'},
+                              {value: 'diamond', label: 'Kosočtverec'}
+                            ]}
+                          />
 
-                          <div className="space-y-3">
-                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1 block">Režim editoru</label>
-                            <div className="flex bg-gray-100 dark:bg-gray-900 rounded p-1 mb-3">
-                                <button onClick={() => { setEditorMode('simple'); localStorage.setItem('editorMode', 'simple'); logAction('SETTINGS_CHANGED', { editorMode: 'simple' }); }} className={`flex-1 text-xs py-1 px-2 rounded font-medium transition-colors ${editorMode === 'simple' ? 'bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Začátečník</button>
-                                <button onClick={() => { setEditorMode('advanced'); localStorage.setItem('editorMode', 'advanced'); logAction('SETTINGS_CHANGED', { editorMode: 'advanced' }); }} className={`flex-1 text-xs py-1 px-2 rounded font-medium transition-colors ${editorMode === 'advanced' ? 'bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Pokročilý</button>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">Režim editoru</label>
+                            <div className="flex bg-gray-100/80 dark:bg-gray-900/80 rounded-lg p-1 mb-4">
+                                <button onClick={() => { setEditorMode('simple'); localStorage.setItem('editorMode', 'simple'); logAction('SETTINGS_CHANGED', { editorMode: 'simple' }); }} className={`flex-1 text-xs py-1.5 px-2 rounded-md font-medium transition-colors ${editorMode === 'simple' ? 'bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Začátečník</button>
+                                <button onClick={() => { setEditorMode('advanced'); localStorage.setItem('editorMode', 'advanced'); logAction('SETTINGS_CHANGED', { editorMode: 'advanced' }); }} className={`flex-1 text-xs py-1.5 px-2 rounded-md font-medium transition-colors ${editorMode === 'advanced' ? 'bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Pokročilý</button>
                             </div>
-                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                                <input type="checkbox" checked={colorMode} onChange={e => { setColorMode(e.target.checked); localStorage.setItem('colorMode', e.target.checked); logAction('SETTINGS_CHANGED', { colorMode: e.target.checked }); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                                Barevné bloky
-                            </label>
-                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                                <input type="checkbox" checked={groupColoring} onChange={e => { setGroupColoring(e.target.checked); localStorage.setItem('groupColoring', e.target.checked); logAction('SETTINGS_CHANGED', { groupColoring: e.target.checked }); }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                                Zbarvení skupin
-                            </label>
-                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                                <input type="checkbox" checked={showDebugger} onChange={e => { 
-                                    const checked = e.target.checked;
-                                    setShowDebugger(checked); 
-                                    localStorage.setItem('showDebugger', checked); 
-                                    logAction('SETTINGS_CHANGED', { showDebugger: checked });
-                                    if(!checked) stopDebugger(); 
-                                }} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                                Debugger (Watch list)
-                            </label>
+                            
+                            <ToggleSwitch checked={colorMode} onChange={e => { setColorMode(e.target.checked); localStorage.setItem('colorMode', e.target.checked); logAction('SETTINGS_CHANGED', { colorMode: e.target.checked }); }} label="Barevné bloky" />
+                            <ToggleSwitch checked={groupColoring} onChange={e => { setGroupColoring(e.target.checked); localStorage.setItem('groupColoring', e.target.checked); logAction('SETTINGS_CHANGED', { groupColoring: e.target.checked }); }} label="Zbarvení skupin" />
+                            <ToggleSwitch checked={showDebugger} onChange={e => { 
+                                const checked = e.target.checked;
+                                setShowDebugger(checked); 
+                                localStorage.setItem('showDebugger', checked); 
+                                logAction('SETTINGS_CHANGED', { showDebugger: checked });
+                                if(!checked) stopDebugger(); 
+                            }} label="Debugger (Watch list)" />
                           </div>
                         </div>
                       )}
@@ -1192,7 +1303,16 @@ function AppContent() {
                   )}
                 </div>
               </div>
-              {renderPanelContent(type)}
+              <div 
+                className="flex-1 flex flex-col relative w-full h-full overflow-hidden" 
+                onPointerDownCapture={() => { 
+                  setActiveDropdown(null); 
+                  setSettingsDropdown(null); 
+                  setShowDebugSettings(false); 
+                }}
+              >
+                {renderPanelContent(type)}
+              </div>
             </div>
 
             {index === 0 && panels.length === 2 && (

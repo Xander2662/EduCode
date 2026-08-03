@@ -7,16 +7,31 @@ body {
 }
 
 /* Zabráníme tomu, aby React Flow při kliknutí na LOOP_CONTAINER zvednul z-index a překryl bloky */
-.react-flow__node-LOOP_CONTAINER.selected {
-  z-index: -1 !important;
+.react-flow__node-LOOP_CONTAINER.selected,
+.react-flow__node-FOR_CONTAINER.selected {
+  z-index: -100 !important;
 }
 
-.react-flow__node-LOOP_CONTAINER {
-  transition: transform 0s !important;
+.react-flow__node-LOOP_CONTAINER,
+.react-flow__node-FOR_CONTAINER {
+  transition: width 0.1s ease-out, height 0.1s ease-out, z-index 0s;
 }
 
-.react-flow__node-LOOP_CONTAINER.animate-resize {
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), height 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0s !important;
+.react-flow__node-LOOP_CONTAINER.animate-resize,
+.react-flow__node-FOR_CONTAINER.animate-resize {
+  transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), 
+              height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), 
+              z-index 0s;
+}
+
+.react-flow__node-LOOP_CONTAINER .custom-drag-handle,
+.react-flow__node-FOR_CONTAINER .custom-drag-handle {
+  cursor: grab;
+}
+
+.react-flow__node-LOOP_CONTAINER .custom-drag-handle:active,
+.react-flow__node-FOR_CONTAINER .custom-drag-handle:active {
+  cursor: grabbing;
 }
 
 /* Úprava ovládacího panelu React Flow pro Dark Mode */

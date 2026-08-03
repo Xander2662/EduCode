@@ -65,7 +65,9 @@ describe('Roundtrip Parser Tests (XML -> Pseudo -> XML)', () => {
             expect(pseudoResult.code).toBeTruthy();
 
             // 3. Převod z Pseudokódu zpět do XML (s vložením původního XML jako "paměti" pro stávající ID a X pozice)
-            const xmlResult = parsePseudocodeToDrawio(pseudoResult.code, xmlContent);
+            const hasContainer = xmlContent.includes('LOOP_CONTAINER') || xmlContent.includes('GROUP_BG') || xmlContent.includes('swimlane');
+            const editorMode = hasContainer ? 'simple' : 'advanced';
+            const xmlResult = parsePseudocodeToDrawio(pseudoResult.code, xmlContent, 'true-false', 'hexagon', editorMode);
             
             // 4. Získání sémantiky ze zrekonstruovaného XML
             const newSemantics = extractGraphSemantics(xmlResult.xml);

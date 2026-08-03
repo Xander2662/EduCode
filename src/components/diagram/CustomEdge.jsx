@@ -186,7 +186,6 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
                 { x1: cX, y1: targetY, x2: targetX, y2: targetY }
             ];
         } else if (enteringLoop && sourceY + 10 < enteringLoop.position.y + 30) {
-            const loopH = enteringLoop.measured?.height || enteringLoop.height || 150;
             const loopW = enteringLoop.measured?.width || enteringLoop.width || 300;
             const lTop = enteringLoop.position.y;
             const lLeft = enteringLoop.position.x;

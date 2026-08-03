@@ -1,5 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { X, HelpCircle, Move, MousePointer, RefreshCcw, Circle, Square, AlignLeft, Diamond, Copy, Check, MessageSquare, Box } from 'lucide-react';
+import { X, HelpCircle, Move, MousePointer, RefreshCcw, Circle, Square, Diamond, Copy, Check, MessageSquare, Box, Hexagon } from 'lucide-react';
+
+const IoIcon = ({ size = 24, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polygon points="8,3 22,3 16,21 2,21" />
+  </svg>
+);
+
+const ActionIcon = ({ size = 24, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+  </svg>
+);
 
 const CodeBlock = ({ code }) => {
   const [copied, setCopied] = useState(false);
@@ -149,7 +161,7 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                           <div className="bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-100 dark:border-emerald-800/50 p-6 flex items-start justify-between gap-4">
                               <div className="flex items-start gap-4">
                                   <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-emerald-200 dark:border-emerald-800 shrink-0">
-                                      <AlignLeft size={32} className="text-emerald-600 dark:text-emerald-500" style={{transform: 'skew(-15deg)'}} />
+                                      <IoIcon size={32} className="text-emerald-600 dark:text-emerald-500" />
                                   </div>
                                   <div>
                                       <h3 className="text-2xl font-bold text-emerald-900 dark:text-emerald-100">Vstup / Výstup (IO)</h3>
@@ -239,6 +251,75 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                       </div>
                   )}
 
+                  {activeDeepDive === 'FOR_CONTAINER' && (
+                      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                          <div className="bg-indigo-50 dark:bg-indigo-900/20 border-b border-indigo-100 dark:border-indigo-800/50 p-6 flex items-start justify-between gap-4">
+                              <div className="flex items-start gap-4">
+                                  <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-indigo-200 dark:border-indigo-800 shrink-0">
+                                      <Box size={32} className="text-indigo-600 dark:text-indigo-500" />
+                                  </div>
+                                  <div>
+                                      <h3 className="text-2xl font-bold text-indigo-900 dark:text-indigo-100">FOR Cyklus</h3>
+                                      <p className="text-indigo-700 dark:text-indigo-300 text-sm mt-1">Iterační cyklus pro opakování bloku kódu s přesným počtem kroků.</p>
+                                  </div>
+                              </div>
+                              <button onClick={() => setActiveDeepDive(null)} className="text-gray-800 hover:text-black dark:text-gray-200 dark:hover:text-white font-bold flex items-center gap-1.5 transition-all text-sm bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 shadow-md hover:shadow-lg whitespace-nowrap shrink-0">
+                                  Zpět na přehled &rarr;
+                              </button>
+                          </div>
+                          <div className="p-6 space-y-6 text-gray-700 dark:text-gray-300">
+                              <div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Jak funguje</h4>
+                                  <p className="text-sm leading-relaxed mb-4">
+                                      FOR cyklus je speciální kontejner, který automaticky zajišťuje opakování příkazů uvnitř něj na základě tří parametrů: <strong>Počáteční hodnoty</strong> (např. <code>i = 0</code>), <strong>Limitu</strong> (např. <code>10</code>) a volitelného <strong>Kroku</strong>.
+                                      Je ideální pro případy, kdy předem víte, kolikrát se má smyčka opakovat.
+                                  </p>
+                              </div>
+                              <hr className="border-gray-100 dark:border-gray-700/50" />
+                              <div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Vlastnosti</h4>
+                                  <ul className="list-disc pl-5 space-y-2 text-sm">
+                                      <li><strong>Automatické přizpůsobení:</strong> Podobně jako u WHILE skupiny se i tento kontejner automaticky roztahuje podle bloků, které do něj umístíte.</li>
+                                      <li><strong>Parametry cyklu:</strong> FOR cyklus definujete kliknutím do záhlaví bloku. Nastavujete proměnnou, počáteční hodnotu, limitní hodnotu a velikost kroku.</li>
+                                      <li><strong>Generování kódu:</strong> Všechny bloky umístěné prostorově dovnitř kontejneru jsou automaticky odsazeny a vloženy do těla cyklu ve výsledném kódu.</li>
+                                  </ul>
+                              </div>
+                              <hr className="border-gray-100 dark:border-gray-700/50" />
+                              <div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Tipy a varování</h4>
+                                  <p className="text-sm leading-relaxed mb-4 text-orange-700 dark:text-orange-300 bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border border-orange-200 dark:border-orange-800">
+                                      <strong>Nespojujte šipku ven z kontejneru a zase zpět!</strong> Kontejner <em>automaticky</em> zacyklí veškeré bloky umístěné uvnitř. Nepotřebujete kreslit zpětnou šipku pro zacyklení, kontejner to vyřeší sám.
+                                  </p>
+                              </div>
+                              <hr className="border-gray-100 dark:border-gray-700/50" />
+                              <div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg">Příklad použití</h4>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                                          <h5 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Vizuální reprezentace</h5>
+                                          <div className="flex flex-col gap-2 relative z-0">
+                                              <div className="bg-indigo-50/50 dark:bg-indigo-900/20 border border-indigo-300 dark:border-indigo-700 rounded p-3 pt-6 min-h-[100px] relative">
+                                                  <div className="absolute top-1 left-2 text-[10px] text-indigo-500 font-bold uppercase">FOR i = 0 TO 10</div>
+                                                  <div className="bg-blue-100 dark:bg-blue-900/40 border border-blue-400 dark:border-blue-600 rounded p-2 text-center text-sm font-mono mt-2">
+                                                      print(i)
+                                                  </div>
+                                              </div>
+                                          </div>
+                                      </div>
+                                      <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 flex flex-col justify-center">
+                                          <h5 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Výsledný pseudokód</h5>
+                                          <pre className="text-xs bg-black text-green-400 p-3 rounded font-mono overflow-x-auto">
+{`FOR i = 0 TO 10 DO
+    print(i)
+ENDFOR`}
+                                          </pre>
+                                      </div>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                  )}
+
                   {activeDeepDive === 'COMMENT' && (
                       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
                           <div className="bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-100 dark:border-yellow-800/50 p-6 flex items-start justify-between gap-4">
@@ -283,7 +364,7 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                           <div className="bg-purple-50 dark:bg-purple-900/20 border-b border-purple-100 dark:border-purple-800/50 p-6 flex items-start justify-between gap-4">
                               <div className="flex items-start gap-4">
                                   <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-purple-200 dark:border-purple-800 shrink-0">
-                                      <Box size={32} className="text-purple-600 dark:text-purple-500" />
+                                      <Hexagon size={32} className="text-purple-600 dark:text-purple-500" />
                                   </div>
                                   <div>
                                       <h3 className="text-2xl font-bold text-purple-900 dark:text-purple-100">Cyklus (Skupina)</h3>
@@ -325,9 +406,9 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
         ) : (
           <>
             <div className="flex border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 overflow-x-auto">
-          <button onClick={() => setTab('zaklady')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'zaklady' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>Základní syntaxe</button>
-          <button onClick={() => setTab('spojovani')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'spojovani' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>{type === 'drawio' ? 'Spojování & Cykly' : 'Podmínky (IF / ELSE)'}</button>
-          <button onClick={() => setTab('klavesy')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'klavesy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}>{type === 'drawio' ? 'Klávesové zkratky' : 'Cykly (WHILE / FOR)'}</button>
+          <button onClick={() => setTab('zaklady')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'zaklady' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>Základní syntaxe</button>
+          <button onClick={() => setTab('spojovani')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'spojovani' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>{type === 'drawio' ? 'Spojování & Cykly' : 'Podmínky (IF / ELSE)'}</button>
+          <button onClick={() => setTab('klavesy')} className={`px-4 py-3 text-sm font-semibold transition-colors shrink-0 ${tab === 'klavesy' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>{type === 'drawio' ? 'Klávesové zkratky' : 'Cykly (WHILE / FOR)'}</button>
         </div>
         <div className="p-6 overflow-y-auto max-h-[60vh] text-gray-700 dark:text-gray-300 text-sm leading-relaxed space-y-6">
           
@@ -348,7 +429,7 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                 </div>
               </div>
               <div onClick={() => setActiveDeepDive('IO')} className="border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
-                <AlignLeft size={24} className="text-emerald-600 mt-1 shrink-0" style={{transform: 'skew(-15deg)'}} />
+                <IoIcon size={24} className="text-emerald-600 mt-1 shrink-0" />
                 <div>
                   <h4 className="font-bold text-emerald-800 dark:text-emerald-400">Vstup / Výstup (IO)</h4>
                   <p className="text-xs mt-1">Pro získání hodnoty od uživatele. Blok má vodoznak, takže dovnitř stačí napsat jen proměnnou (např. <code>x</code>) nebo dosazení (<code>x = 1</code>).</p>
@@ -361,18 +442,25 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                   <p className="text-xs mt-1">Obsahuje logický test (např. <code>x &gt; 0</code>). Vychází z ní vždy dvě cesty (Pravda / Nepravda).</p>
                 </div>
               </div>
+              <div onClick={() => setActiveDeepDive('LOOP_CONTAINER')} className="border border-purple-200 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
+                <Hexagon size={24} className="text-purple-600 mt-1 shrink-0" />
+                <div>
+                  <h4 className="font-bold text-purple-800 dark:text-purple-400">Cyklus (Skupina)</h4>
+                  <p className="text-xs mt-1">Obal, do kterého umísťujete bloky, které se mají opakovat jako smyčka WHILE.</p>
+                </div>
+              </div>
+              <div onClick={() => setActiveDeepDive('FOR_CONTAINER')} className="border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
+                <Box size={24} className="text-indigo-600 mt-1 shrink-0" />
+                <div>
+                  <h4 className="font-bold text-indigo-800 dark:text-indigo-400">FOR Cyklus</h4>
+                  <p className="text-xs mt-1">Iterační cyklus pro opakování bloku kódu s přesným počtem kroků (např. i od 0 do 10).</p>
+                </div>
+              </div>
               <div onClick={() => setActiveDeepDive('COMMENT')} className="border border-yellow-200 bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
                 <MessageSquare size={24} className="text-yellow-600 mt-1 shrink-0" />
                 <div>
                   <h4 className="font-bold text-yellow-800 dark:text-yellow-400">Komentář</h4>
                   <p className="text-xs mt-1">Textové poznámky, které debugger kompletně ignoruje. Slouží k vysvětlení kódu lidem.</p>
-                </div>
-              </div>
-              <div onClick={() => setActiveDeepDive('LOOP_CONTAINER')} className="border border-purple-200 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
-                <Box size={24} className="text-purple-600 mt-1 shrink-0" />
-                <div>
-                  <h4 className="font-bold text-purple-800 dark:text-purple-400">Cyklus (Skupina)</h4>
-                  <p className="text-xs mt-1">Obal, do kterého umísťujete bloky, které se mají opakovat jako smyčka.</p>
                 </div>
               </div>
             </div>
@@ -470,60 +558,61 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
 
           {/* PSEUDOCODE TUTORIAL */}
           {type === 'pseudocode' && tab === 'zaklady' && (
-            <div className="space-y-4">
-              <h3 className="font-bold text-lg mb-2">Struktura programu</h3>
-              <p>Pseudokód používá blokovou strukturu ohraničenou klíčovými slovy. Funkci vždy zahájíme a zakončíme příslušným slovem.</p>
-              <CodeBlock code={`FUNCTION hlavni()
-    x = 10
-    y = x + 5
-    PRINT(y)
-ENDFUNCTION`} />
-              <h3 className="font-bold text-lg mt-4 mb-2">Vstup od uživatele</h3>
-              <p>Použijte klíčové slovo <code>VSTUP</code> následované názvem proměnné. Můžete načíst i více proměnných naráz přes čárku.</p>
-              <CodeBlock code={`FUNCTION nacti()
-    VSTUP vek
-    VSTUP jmeno, heslo
-ENDFUNCTION`} />
-              <h3 className="font-bold text-lg mt-4 mb-2">Vytváření proměnných</h3>
-              <p>Každá nová proměnná by měla mít přiřazenou hodnotu (např. <code>x = 10</code>) nebo načtena od uživatele (<code>x = INPUT()</code>). Pokud napíšete pouze název proměnné (např. <code>x</code>), debugger si automaticky vyžádá vstup od uživatele, ale editor zobrazí varování, abyste přiřazení zapsali explicitně.</p>
+            <div className="space-y-6">
+              <div className="bg-gray-100 dark:bg-gray-800 p-5 rounded-xl space-y-3">
+                  <h3 className="font-bold flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                      <Box size={18} /> Struktura programu
+                  </h3>
+                  <p className="text-gray-700 dark:text-gray-300">Pseudokód používá blokovou strukturu ohraničenou klíčovými slovy. Funkci vždy zahájíme a zakončíme příslušným slovem.</p>
+                  <CodeBlock code={`FUNCTION hlavni()\n    x = 10\n    y = x + 5\n    PRINT(y)\nENDFUNCTION`} />
+              </div>
+              <div className="bg-gray-100 dark:bg-gray-800 p-5 rounded-xl space-y-3">
+                  <h3 className="font-bold flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                      <MessageSquare size={18} /> Vstup od uživatele
+                  </h3>
+                  <p className="text-gray-700 dark:text-gray-300">Použijte klíčové slovo <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-indigo-600 dark:text-indigo-400 font-mono text-sm">VSTUP</code> následované názvem proměnné. Můžete načíst i více proměnných naráz přes čárku.</p>
+                  <CodeBlock code={`FUNCTION nacti()\n    VSTUP vek\n    VSTUP jmeno, heslo\nENDFUNCTION`} />
+              </div>
+              <div className="bg-gray-100 dark:bg-gray-800 p-5 rounded-xl space-y-3">
+                  <h3 className="font-bold flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                      <Square size={18} /> Vytváření proměnných
+                  </h3>
+                  <p className="text-gray-700 dark:text-gray-300">Každá nová proměnná by měla mít přiřazenou hodnotu (např. <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-indigo-600 dark:text-indigo-400 font-mono text-sm">x = 10</code>) nebo načtena od uživatele (<code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-indigo-600 dark:text-indigo-400 font-mono text-sm">x = INPUT()</code>). Pokud napíšete pouze název proměnné, debugger si automaticky vyžádá vstup.</p>
+              </div>
             </div>
           )}
           {type === 'pseudocode' && tab === 'spojovani' && (
-            <div className="space-y-4">
-              <h3 className="font-bold text-lg mb-2">Rozhodování (IF/ELSE)</h3>
-              <p>Větvení programu používá syntaxi <code>IF ... THEN</code>. Konec celého bloku se vždy musí označit jako <code>ENDIF</code>.</p>
-              <CodeBlock code={`FUNCTION zkontroluj_vek()
-    VSTUP vek
-    IF vek >= 18 THEN
-        PRINT("Dospělý")
-    ELSE
-        PRINT("Nezletilý")
-    ENDIF
-ENDFUNCTION`} />
-              <p className="text-xs text-gray-500 mt-2">Poznámka: Pseudokód nepodporuje ELIF, vícenásobné podmínky tvoříte vnořením dalšího IF do větve ELSE.</p>
+            <div className="space-y-6">
+              <div className="bg-gray-100 dark:bg-gray-800 p-5 rounded-xl space-y-3">
+                  <h3 className="font-bold flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                      <Diamond size={18} /> Rozhodování (IF/ELSE)
+                  </h3>
+                  <p className="text-gray-700 dark:text-gray-300">Větvení programu používá syntaxi <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-indigo-600 dark:text-indigo-400 font-mono text-sm">IF ... THEN</code>. Konec celého bloku se vždy musí označit jako <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-indigo-600 dark:text-indigo-400 font-mono text-sm">ENDIF</code>.</p>
+                  <CodeBlock code={`FUNCTION zkontroluj_vek()\n    VSTUP vek\n    IF vek >= 18 THEN\n        PRINT("Dospělý")\n    ELSE\n        PRINT("Nezletilý")\n    ENDIF\nENDFUNCTION`} />
+                  <div className="bg-orange-50 dark:bg-orange-900/20 border-l-4 border-orange-400 p-3 mt-2 rounded">
+                      <p className="text-xs text-orange-800 dark:text-orange-300"><strong>Poznámka:</strong> Pseudokód nepodporuje ELIF, vícenásobné podmínky tvoříte vnořením dalšího IF do větve ELSE.</p>
+                  </div>
+              </div>
             </div>
           )}
           {type === 'pseudocode' && tab === 'klavesy' && (
-            <div className="space-y-4">
-              <h3 className="font-bold text-lg mb-2">Cykly (WHILE)</h3>
-              <p>Pro opakování dokud platí podmínka využijte <code>WHILE ... DO</code>. Konec cyklu se uzavírá pomocí <code>ENDWHILE</code>.</p>
-              <CodeBlock code={`FUNCTION odpocet()
-    i = 10
-    WHILE i > 0 DO
-        PRINT(i)
-        i = i - 1
-    ENDWHILE
-    PRINT("Start!")
-ENDFUNCTION`} />
-              <p className="text-xs text-gray-500 mt-2">Tip: Operátory pište velkými písmeny (AND, OR, NOT, TRUE, FALSE).</p>
+            <div className="space-y-6">
+              <div className="bg-gray-100 dark:bg-gray-800 p-5 rounded-xl space-y-3">
+                  <h3 className="font-bold flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                      <RefreshCcw size={18} /> Cykly (WHILE)
+                  </h3>
+                  <p className="text-gray-700 dark:text-gray-300">Pro opakování dokud platí podmínka využijte <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-indigo-600 dark:text-indigo-400 font-mono text-sm">WHILE ... DO</code>. Konec cyklu se uzavírá pomocí <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-indigo-600 dark:text-indigo-400 font-mono text-sm">ENDWHILE</code>.</p>
+                  <CodeBlock code={`FUNCTION odpocet()\n    i = 10\n    WHILE i > 0 DO\n        PRINT(i)\n        i = i - 1\n    ENDWHILE\n    PRINT("Start!")\nENDFUNCTION`} />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Tip: Operátory pište velkými písmeny (AND, OR, NOT, TRUE, FALSE).</p>
+              </div>
               
-              <h3 className="font-bold text-lg mt-4 mb-2">Cykly (FOR)</h3>
-              <p>Pokud víte, kolikrát se má cyklus opakovat, využijte <code>FOR ... TO ... DO</code>. Konec cyklu se uzavírá pomocí <code>ENDFOR</code>.</p>
-              <CodeBlock code={`FUNCTION pocitani()
-    FOR i = 1 TO 10 DO
-        PRINT(i)
-    ENDFOR
-ENDFUNCTION`} />
+              <div className="bg-gray-100 dark:bg-gray-800 p-5 rounded-xl space-y-3">
+                  <h3 className="font-bold flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                      <RefreshCcw size={18} /> Cykly (FOR)
+                  </h3>
+                  <p className="text-gray-700 dark:text-gray-300">Pokud víte, kolikrát se má cyklus opakovat, využijte <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-indigo-600 dark:text-indigo-400 font-mono text-sm">FOR ... TO ... DO</code>. Konec cyklu se uzavírá pomocí <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-indigo-600 dark:text-indigo-400 font-mono text-sm">ENDFOR</code>.</p>
+                  <CodeBlock code={`FUNCTION pocitani()\n    FOR i = 1 TO 10 DO\n        PRINT(i)\n    ENDFOR\nENDFUNCTION`} />
+              </div>
             </div>
           )}
         </div>

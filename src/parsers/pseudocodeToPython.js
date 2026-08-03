@@ -16,7 +16,7 @@ export const parsePseudocodeToPython = (code) => {
 
         // Handle Comments
         if (line.startsWith('#') || line.startsWith('//')) {
-            let comment = line.replace(/^[\/#\s]+/, '');
+            let comment = line.replace(/^[/#\s]+/, '');
             if (comment.includes('----------------------')) {
                 pythonLines.push(`# ${comment}`);
                 continue;

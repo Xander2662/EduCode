@@ -1,12 +1,18 @@
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, Background, MarkerType, useReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Download, Upload, Square, Circle, Diamond, AlignLeft, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box } from 'lucide-react';
+import { Download, Upload, Square, Circle, Diamond, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box, Hexagon } from 'lucide-react';
 import { drawioToReactFlow, reactFlowToDrawio } from '../utils/diagramConverter';
 import { calculateGroupNodes } from '../utils/grouping';
 import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
-import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode, LoopContainerNode } from './diagram/CustomNodes';
+import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode, LoopContainerNode, ForContainerNode } from './diagram/CustomNodes';
+
+const IoIcon = ({ size = 24, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polygon points="8,3 22,3 16,21 2,21" />
+  </svg>
+);
 
 const nodeTypes = { 
   ACTION: ActionNode, 
@@ -16,11 +22,12 @@ const nodeTypes = {
   COMMENT: CommentNode, 
   MERGE: MergeNode, 
   GROUP_BG: GroupBgNode,
-  LOOP_CONTAINER: LoopContainerNode
+  LOOP_CONTAINER: LoopContainerNode,
+  FOR_CONTAINER: ForContainerNode
 };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, conditionShape, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction, onRequestTutorial, editorMode = 'advanced' }) {
+function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, conditionShape, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction, onRequestTutorial, editorMode }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
@@ -123,7 +130,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const mappedNodes = useMemo(() => nodes.map(n => ({
         ...n,
-        zIndex: n.type === 'LOOP_CONTAINER' ? -1 : 10,
+        zIndex: (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? -1 : 10,
         data: { 
             ...n.data, 
             colorMode, 
@@ -198,7 +205,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
         return modified ? formattedEds : eds;
     });
-  }, [edgeStyle, nodes.length, setEdges]); 
+  }, [edgeStyle, nodes.length, nodes, setEdges]); 
 
   const executeDelete = useCallback(() => {
     handleInteract();
@@ -209,6 +216,31 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     setEdges(eds => eds.filter(e => !selectedEdgeIds.has(e.id) && !selectedNodeIds.has(e.source) && !selectedNodeIds.has(e.target)));
     setDeleteConfirm(false);
   }, [selectedNodes, selectedEdges, setNodes, setEdges, handleInteract, onLogAction]);
+
+  const handleCopy = useCallback(() => { 
+    if (selectedNodes.length > 0) {
+      const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
+      setClipboard({ nodes: selectedNodes, edges: edges.filter(e => selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target)) });
+      if(onLogAction) onLogAction('NODES_COPIED', { count: selectedNodes.length });
+    }
+  }, [selectedNodes, edges, onLogAction, setClipboard]);
+
+  const handlePaste = useCallback(() => {
+    if (clipboard.nodes.length === 0) return;
+    handleInteract();
+    if(onLogAction) onLogAction('NODES_PASTED', { count: clipboard.nodes.length });
+    const idMap = {};
+    const newNodes = clipboard.nodes.map(n => {
+      const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+      idMap[n.id] = newId;
+      return { ...n, id: newId, position: { x: n.position.x + 30, y: n.position.y + 30 }, selected: true, data: { ...n.data, onChange: (e) => updateNodeLabel(newId, e.target.value), onUpdateData: (newData) => updateNodeData(newId, newData) } };
+    });
+    const newEdges = clipboard.edges.map(e => ({ ...e, id: Date.now().toString() + Math.random().toString(36).substr(2, 5), source: idMap[e.source], target: idMap[e.target], selected: true }));
+    setNodes(nds => nds.map(n => ({ ...n, selected: false })).concat(newNodes));
+    setEdges(eds => eds.map(e => ({ ...e, selected: false })).concat(newEdges));
+  }, [clipboard, onLogAction, updateNodeLabel, updateNodeData, setNodes, setEdges, handleInteract]);
+
+  const handleDuplicate = useCallback(() => { handleCopy(); setTimeout(handlePaste, 10); }, [handleCopy, handlePaste]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -248,7 +280,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete]);
+  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete, handleCopy, handlePaste, setNodes, setEdges]);
 
   const getHitEdge = (event, draggedNodes) => {
     const clientX = event.clientX || (event.touches && event.touches[0].clientX);
@@ -280,7 +312,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
     let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
     if (draggedNodes.length === 0) draggedNodes = [node];
-    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER')) return;
+    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER')) return;
 
     const draggedIds = new Set(draggedNodes.map(n => n.id));
     if (edges.some(e => (draggedIds.has(e.source) && !draggedIds.has(e.target)) || (draggedIds.has(e.target) && !draggedIds.has(e.source)))) return;
@@ -304,7 +336,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
     let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
     if (draggedNodes.length === 0) draggedNodes = [node];
-    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER')) return;
+    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER')) return;
 
     const draggedIds = new Set(draggedNodes.map(n => n.id));
     if (edges.some(e => (draggedIds.has(e.source) && !draggedIds.has(e.target)) || (draggedIds.has(e.target) && !draggedIds.has(e.source)))) return;
@@ -340,30 +372,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     }
   }, [edges, nodes, setEdges, edgeStyle, readOnly, handleInteract, onLogAction]);
 
-  const handleCopy = () => { 
-    if (selectedNodes.length > 0) {
-      const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
-      setClipboard({ nodes: selectedNodes, edges: edges.filter(e => selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target)) });
-      if(onLogAction) onLogAction('NODES_COPIED', { count: selectedNodes.length });
-    }
-  };
 
-  const handlePaste = () => {
-    if (clipboard.nodes.length === 0) return;
-    handleInteract();
-    if(onLogAction) onLogAction('NODES_PASTED', { count: clipboard.nodes.length });
-    const idMap = {};
-    const newNodes = clipboard.nodes.map(n => {
-      const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
-      idMap[n.id] = newId;
-      return { ...n, id: newId, position: { x: n.position.x + 30, y: n.position.y + 30 }, selected: true, data: { ...n.data, onChange: (e) => updateNodeLabel(newId, e.target.value), onUpdateData: (newData) => updateNodeData(newId, newData) } };
-    });
-    const newEdges = clipboard.edges.map(e => ({ ...e, id: Date.now().toString() + Math.random().toString(36).substr(2, 5), source: idMap[e.source], target: idMap[e.target], selected: true }));
-    setNodes(nds => nds.map(n => ({ ...n, selected: false })).concat(newNodes));
-    setEdges(eds => eds.map(e => ({ ...e, selected: false })).concat(newEdges));
-  };
-
-  const handleDuplicate = () => { handleCopy(); setTimeout(handlePaste, 10); };
   
   useEffect(() => {
     if (xml && xml !== lastXmlRef.current) {
@@ -383,7 +392,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           markerEnd: { type: MarkerType.ArrowClosed } 
       })));
     }
-  }, [xml, readOnly, edgeStyle, setNodes, setEdges, updateNodeLabel]);
+  }, [xml, readOnly, edgeStyle, setNodes, setEdges, updateNodeLabel, updateNodeData]);
 
   // =========================================================================================
   // CRITICAL WARNING: XML EMISSION & INTERACTION FLAG
@@ -472,7 +481,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     });
   }, [edgeStyle, updateNodeData, handleInteract, setEdges, getNode, onLogAction, getEdges]);
 
-  const addNodeAt = (type, label, clientPos = null) => {
+  const addNodeAt = React.useCallback((type, label, clientPos = null) => {
     if (readOnly) return;
     handleInteract();
     if(onLogAction) onLogAction('NODE_ADDED', { type, label });
@@ -493,14 +502,15 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             label, 
             readOnly, 
             ...(type === 'START_END' ? { mode: 'unassigned', entityType: 'FUNCTION' } : {}), 
-            ...(type === 'LOOP_CONTAINER' ? { isNew: true, doWhile: false } : {}),
+            ...((type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER') ? { isNew: true, doWhile: false } : {}),
             ...(type === 'IO' ? { ioType: 'input' } : {}),
             onChange: (e) => updateNodeLabel(newId, e.target.value),
             onUpdateData: (newData) => updateNodeData(newId, newData)
         },
-        ...(type === 'LOOP_CONTAINER' ? { style: { width: 300, height: 150 } } : {})
+        ...(type === 'LOOP_CONTAINER' ? { style: { width: 300, height: 150 } } : {}),
+        ...(type === 'FOR_CONTAINER' ? { style: { width: 350, height: 200 } } : {})
     }));
-  };
+  }, [readOnly, handleInteract, onLogAction, screenToFlowPosition, setNodes, updateNodeData, updateNodeLabel]);
 
   const handlePaneContextMenu = useCallback((e) => { if (readOnly) return; e.preventDefault(); setContextMenu({ mouseX: e.clientX, mouseY: e.clientY }); }, [readOnly]);
 
@@ -631,13 +641,22 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
                 {[
                   {type: 'START_END', label: 'Start/End', icon: Circle, color: colorMode ? "text-fuchsia-500" : "text-gray-500"},
                   {type: 'ACTION', label: 'Operace', icon: Square, color: colorMode ? "text-blue-500" : "text-gray-500"},
-                  {type: 'IO', label: 'Vstup/Výstup', icon: AlignLeft, color: colorMode ? "text-emerald-500" : "text-gray-500"},
+                  {type: 'IO', label: 'Vstup/Výstup', icon: Square, color: colorMode ? "text-emerald-500" : "text-gray-500"},
                   {type: 'CONDITION', label: 'Podmínka', icon: Diamond, color: colorMode ? "text-orange-500" : "text-gray-500"},
-                  {type: 'LOOP_CONTAINER', label: 'Cyklus (Skupina)', icon: Box, color: colorMode ? "text-purple-500" : "text-gray-500"},
+                  ...(editorMode !== 'advanced' ? [
+                    {type: 'LOOP_CONTAINER', label: 'Cyklus (Skupina)', icon: Hexagon, color: colorMode ? "text-purple-500" : "text-gray-500"},
+                    {type: 'FOR_CONTAINER', label: 'FOR Cyklus', icon: Box, color: colorMode ? "text-indigo-500" : "text-gray-500"}
+                  ] : []),
                   {type: 'COMMENT', label: 'Komentář', icon: MessageSquare, color: colorMode ? "text-yellow-500" : "text-gray-500"}
                 ].map(item => (
-                  <button key={item.type} onClick={() => { addNodeAt(item.type, item.type === 'COMMENT'?'#':(item.type==='CONDITION'?'x>0':(item.type==='IO'?'x':(item.type==='LOOP_CONTAINER'?'':''))), contextMenu); setContextMenu(null); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
-                    <item.icon size={14} className={item.color}/> {item.label}
+                  <button key={item.type} onClick={() => { 
+                    let t = item.type;
+                    let txt = item.type === 'COMMENT'?'#':(item.type==='CONDITION'?'x>0':(item.type==='IO'?'x':(item.type==='LOOP_CONTAINER'?'':'')));
+                    if (t === 'FOR_CONTAINER') { txt = ''; }
+                    addNodeAt(t, txt, contextMenu); 
+                    setContextMenu(null); 
+                  }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                    {item.type === 'IO' ? <IoIcon size={14} className={item.color} /> : <item.icon size={14} className={item.color} />} {item.label}
                   </button>
                 ))}  
             </div>
@@ -645,12 +664,17 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       )}
 
       <div className="absolute top-4 left-4 z-10 flex gap-2 bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700">
-        <button onClick={() => { clearHover(); addNodeAt('START_END', ''); }} onMouseEnter={(e) => handlePointerDown('START_END', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('START_END', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Circle size={18} className={colorMode ? "text-fuchsia-600" : ""} /></button>
-        <button onClick={() => { clearHover(); addNodeAt('ACTION', 'Operace'); }} onMouseEnter={(e) => handlePointerDown('ACTION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('ACTION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Square size={18} className={colorMode ? "text-blue-600" : ""} /></button>
-        <button onClick={() => { clearHover(); addNodeAt('IO', 'x'); }} onMouseEnter={(e) => handlePointerDown('IO', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('IO', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><AlignLeft size={18} className={colorMode ? "text-emerald-600" : ""} style={{transform: 'skew(-15deg)'}} /></button>
-        <button onClick={() => { clearHover(); addNodeAt('CONDITION', 'x > 0'); }} onMouseEnter={(e) => handlePointerDown('CONDITION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('CONDITION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Diamond size={18} className={colorMode ? "text-orange-600" : ""} /></button>
-        <button onClick={() => { clearHover(); addNodeAt('LOOP_CONTAINER', ''); }} onMouseEnter={(e) => handlePointerDown('LOOP_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('LOOP_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Box size={18} className={colorMode ? "text-purple-600" : ""} /></button>
-        <button onClick={() => { clearHover(); addNodeAt('COMMENT', '# Komentář'); }} onMouseEnter={(e) => handlePointerDown('COMMENT', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('COMMENT', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
+        <button data-testid="Start/Konec" onClick={() => { clearHover(); addNodeAt('START_END', ''); }} onMouseEnter={(e) => handlePointerDown('START_END', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('START_END', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Circle size={18} className={colorMode ? "text-fuchsia-600" : ""} /></button>
+        <button data-testid="Operace" onClick={() => { clearHover(); addNodeAt('ACTION', 'Operace'); }} onMouseEnter={(e) => handlePointerDown('ACTION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('ACTION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Square size={18} className={colorMode ? "text-blue-600" : ""} /></button>
+        <button data-testid="Vstup/Výstup" onClick={() => { clearHover(); addNodeAt('IO', 'x'); }} onMouseEnter={(e) => handlePointerDown('IO', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('IO', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><IoIcon size={18} className={colorMode ? "text-emerald-600" : ""} /></button>
+        <button data-testid="Podmínka" onClick={() => { clearHover(); addNodeAt('CONDITION', 'x > 0'); }} onMouseEnter={(e) => handlePointerDown('CONDITION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('CONDITION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Diamond size={18} className={colorMode ? "text-orange-600" : ""} /></button>
+        {editorMode !== 'advanced' && (
+          <>
+            <button data-testid="Cyklus" onClick={() => { clearHover(); addNodeAt('LOOP_CONTAINER', ''); }} onMouseEnter={(e) => handlePointerDown('LOOP_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('LOOP_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Hexagon size={18} className={colorMode ? "text-purple-600" : ""} /></button>
+            <button data-testid="FOR Cyklus" onClick={() => { clearHover(); addNodeAt('FOR_CONTAINER', ''); }} onMouseEnter={(e) => handlePointerDown('FOR_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('FOR_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Box size={18} className={colorMode ? "text-indigo-600" : ""} /></button>
+          </>
+        )}
+        <button data-testid="Komentář" onClick={() => { clearHover(); addNodeAt('COMMENT', '# Komentář'); }} onMouseEnter={(e) => handlePointerDown('COMMENT', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('COMMENT', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
       </div>
 
       {(selectedNodes.length > 0 || selectedEdges.length > 0) && !readOnly && (
