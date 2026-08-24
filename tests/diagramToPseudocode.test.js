@@ -54,4 +54,55 @@ describe('diagramToPseudocode', () => {
         const whileMatches = code.match(/WHILE x < 10 DO/g);
         expect(whileMatches.length).toBe(1);
     });
+
+    it('should parse unconnected blocks within a loop sequentially as if they were connected', () => {
+        const xml = `<mxGraphModel>
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+    <mxCell id="start" value="main" style="mode=start;entityType=FUNCTION;" vertex="1" parent="1">
+      <mxGeometry x="360" y="40" width="100" height="40" as="geometry" />
+    </mxCell>
+    
+    <mxCell id="loop" value="count &lt; 5" style="LOOP_CONTAINER" type="LOOP_CONTAINER" doWhile="false" vertex="1" parent="1">
+      <mxGeometry x="270" y="120" width="300" height="300" as="geometry" />
+    </mxCell>
+    
+    <mxCell id="block_1" value="step1 = 1" vertex="1" parent="1">
+      <mxGeometry x="360" y="150" width="120" height="50" as="geometry" />
+    </mxCell>
+    
+    <mxCell id="block_2" value="step2 = 2" vertex="1" parent="1">
+      <mxGeometry x="360" y="230" width="120" height="50" as="geometry" />
+    </mxCell>
+
+    <mxCell id="block_3" value="step3 = 3" vertex="1" parent="1">
+      <mxGeometry x="360" y="310" width="120" height="50" as="geometry" />
+    </mxCell>
+    
+    <mxCell id="end" value="ENDFUNCTION" style="mode=end;" vertex="1" parent="1">
+      <mxGeometry x="360" y="470" width="100" height="40" as="geometry" />
+    </mxCell>
+    
+    <mxCell id="e1" edge="1" parent="1" source="start" target="block_1" />
+  </root>
+</mxGraphModel>`;
+
+        const { code } = parseDrawioToPseudocode(xml);
+        expect(code).toContain('WHILE count < 5 DO');
+        expect(code).toContain('step1 = 1');
+        expect(code).toContain('step2 = 2');
+        expect(code).toContain('step3 = 3');
+        expect(code).toContain('ENDWHILE');
+
+        // Verify sequential order inside loop
+        const pos1 = code.indexOf('step1 = 1');
+        const pos2 = code.indexOf('step2 = 2');
+        const pos3 = code.indexOf('step3 = 3');
+        const posEnd = code.indexOf('ENDWHILE');
+
+        expect(pos1).toBeLessThan(pos2);
+        expect(pos2).toBeLessThan(pos3);
+        expect(pos3).toBeLessThan(posEnd);
+    });
 });

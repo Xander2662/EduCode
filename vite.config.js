@@ -10,6 +10,7 @@ export default defineConfig({
     exclude: ['**/node_modules/**', '**/dist/**', '**/tests-e2e/**'],
   },
   server: {
+    host: '0.0.0.0',
     watch: {
       ignored: ['**/EduCode EduBox/**']
     }

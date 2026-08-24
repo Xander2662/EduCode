@@ -60,6 +60,9 @@ export const parseDrawioToPseudocode = (xml) => {
         let forInit = '';
         let forLimit = '';
         let forStep = '';
+        let switchVar = '';
+        let caseVal = '';
+        let isDefault = false;
         
         let type = 'ACTION';
         if (style.includes('shape=note') || style.includes('fillColor=#fff2cc') || value.startsWith('#') || value.startsWith('//')) type = 'COMMENT';
@@ -74,15 +77,17 @@ export const parseDrawioToPseudocode = (xml) => {
         else if (style.includes('shape=parallelogram') || cellTypeAttr === 'IO' || cellTypeAttr === 'io') {
             type = 'IO';
         }
-        else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellTypeAttr === 'LOOP_CONTAINER') {
-            type = 'LOOP_CONTAINER';
+        else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellTypeAttr === 'LOOP_CONTAINER' || style.includes('SWITCH_CONTAINER') || style.includes('CASE_CONTAINER')) {
+            if (style.includes('SWITCH_CONTAINER')) type = 'SWITCH_CONTAINER';
+            else if (style.includes('CASE_CONTAINER')) type = 'CASE_CONTAINER';
+            else type = 'LOOP_CONTAINER';
+            
             try {
                 doWhile = cell.getAttribute('doWhile') === 'true';
                 if (!doWhile && style.includes('doWhile=true')) {
                     doWhile = true;
                 }
             } catch {
-                // Ignore error if attribute is missing
             }
             if (style.includes('forInit=')) {
                 type = 'FOR_CONTAINER';
@@ -95,6 +100,18 @@ export const parseDrawioToPseudocode = (xml) => {
                 const stepMatch = style.match(/forStep=([^;]+)/);
                 if (stepMatch) forStep = decodeURIComponent(stepMatch[1]);
             }
+            if (style.includes('switchVar=')) {
+                const svMatch = style.match(/switchVar=([^;]+)/);
+                if (svMatch) switchVar = decodeURIComponent(svMatch[1]);
+            }
+            if (style.includes('caseVal=')) {
+                const cvMatch = style.match(/caseVal=([^;]+)/);
+                if (cvMatch) caseVal = decodeURIComponent(cvMatch[1]);
+            }
+            if (style.includes('isDefault=')) {
+                const defMatch = style.match(/isDefault=([^;]+)/);
+                if (defMatch) isDefault = defMatch[1] === 'true';
+            }
         }
         
         const entityMatch = style.match(/entityType=([^;]+)/);
@@ -105,8 +122,9 @@ export const parseDrawioToPseudocode = (xml) => {
 
         const width = geo ? parseFloat(geo.getAttribute('width') || 0) : 0;
         const height = geo ? parseFloat(geo.getAttribute('height') || 0) : 0;
+        const parentId = cell.getAttribute('parent');
 
-        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep };
+        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep, switchVar, caseVal, isDefault, parentId };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
@@ -123,32 +141,155 @@ export const parseDrawioToPseudocode = (xml) => {
       }
     });
 
+    Object.values(nodes).filter(n => n.type === 'SWITCH_CONTAINER').forEach(switchNode => {
+        const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && n.parentId === switchNode.id);
+        cases.sort((a, b) => {
+            if (a.isDefault) return 1;
+            if (b.isDefault) return -1;
+            return a.x - b.x;
+        });
+        const mergeEdges = [...switchNode.next];
+        switchNode.next = [];
+        
+        cases.forEach(caseNode => {
+            const edgeToCase = { source: switchNode.id, target: caseNode.id, value: caseNode.isDefault ? 'default' : caseNode.caseVal };
+            switchNode.next.push(edgeToCase);
+            caseNode.prev.push(edgeToCase);
+            
+            const blocksInside = Object.values(nodes).filter(n => n.id !== caseNode.id && n.parentId === caseNode.id);
+            if (blocksInside.length > 0) {
+                blocksInside.sort((a, b) => a.y - b.y);
+                
+                for (let i = 0; i < blocksInside.length - 1; i++) {
+                    const curr = blocksInside[i];
+                    const nxt = blocksInside[i+1];
+                    if (curr.next.length === 0) {
+                        const internalEdge = { source: curr.id, target: nxt.id, value: '' };
+                        curr.next.push(internalEdge);
+                        nxt.prev.push(internalEdge);
+                    }
+                }
+
+                const firstBlock = blocksInside[0];
+                const lastBlocks = blocksInside.filter(b => b.next.length === 0);
+                
+                const edgeToFirst = { source: caseNode.id, target: firstBlock.id, value: '' };
+                caseNode.next.push(edgeToFirst);
+                firstBlock.prev.push(edgeToFirst);
+                
+                lastBlocks.forEach(lb => {
+                    mergeEdges.forEach(me => {
+                        const edgeFromLast = { source: lb.id, target: me.target, value: '' };
+                        lb.next.push(edgeFromLast);
+                        if (nodes[me.target]) nodes[me.target].prev.push(edgeFromLast);
+                    });
+                });
+            } else {
+                mergeEdges.forEach(me => {
+                    const edgeFromCase = { source: caseNode.id, target: me.target, value: '' };
+                    caseNode.next.push(edgeFromCase);
+                    if (nodes[me.target]) nodes[me.target].prev.push(edgeFromCase);
+                });
+            }
+        });
+        
+        mergeEdges.forEach(me => {
+            if (nodes[me.target]) {
+                nodes[me.target].prev = nodes[me.target].prev.filter(p => p.source !== switchNode.id);
+            }
+        });
+    });
+
+    const isIgnoredRootType = (t) => ['COMMENT', 'MERGE', 'END', 'GROUP_BG', 'LOOP_CONTAINER', 'FOR_CONTAINER', 'SWITCH_CONTAINER', 'CASE_CONTAINER'].includes(t);
+
+    const loopContainers = Object.values(nodes).filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
+    const isInsideLoop = (node, loop) => {
+        if (!node || !loop) return false;
+        if (node.type === 'START' || node.type === 'START_END' || node.type === 'END') return false;
+        const nW = node.width || 100;
+        const nH = node.height || 50;
+        const coreW = nW * 0.5;
+        const coreH = nH * 0.5;
+        const coreX = node.x + (nW - coreW) / 2;
+        const coreY = node.y + (nH - coreH) / 2;
+        const loopW = loop.width || 300;
+        const loopH = loop.height || 150;
+        const isInside = (coreX < loop.x + loopW && coreX + coreW > loop.x && coreY < loop.y + loopH && coreY + coreH > loop.y);
+        return isInside;
+    };
+
+    loopContainers.forEach(loopNode => {
+        const blocksInside = Object.values(nodes).filter(n => !isIgnoredRootType(n.type) && isInsideLoop(n, loopNode));
+        if (blocksInside.length > 0) {
+            blocksInside.sort((a, b) => a.y - b.y || a.x - b.x);
+            
+            for (let i = 0; i < blocksInside.length - 1; i++) {
+                const curr = blocksInside[i];
+                const nxt = blocksInside[i+1];
+                
+                // If curr has an exit edge leaving the loop, move it to the last block
+                const exitEdges = curr.next.filter(e => !isInsideLoop(nodes[e.target], loopNode));
+                if (exitEdges.length > 0 && curr.next.every(e => !isInsideLoop(nodes[e.target], loopNode))) {
+                    curr.next = curr.next.filter(e => isInsideLoop(nodes[e.target], loopNode));
+                    const lastBlock = blocksInside[blocksInside.length - 1];
+                    exitEdges.forEach(ee => {
+                        const newExit = { source: lastBlock.id, target: ee.target, value: ee.value };
+                        lastBlock.next.push(newExit);
+                        if (nodes[ee.target]) {
+                            nodes[ee.target].prev = nodes[ee.target].prev.map(p => p.source === curr.id ? newExit : p);
+                        }
+                    });
+                }
+
+                if (curr.next.length === 0) {
+                    const internalEdge = { source: curr.id, target: nxt.id, value: '' };
+                    curr.next.push(internalEdge);
+                    nxt.prev.push(internalEdge);
+                }
+            }
+        }
+    });
+
     const startNodes = Object.values(nodes).filter(n => n.type === 'START');
     startNodes.sort((a, b) => a.x - b.x || a.y - b.y);
 
     let clusterId = 1;
     let assigned = new Set();
     
-    startNodes.forEach(sn => {
-        let q = [sn.id];
-        assigned.add(sn.id);
+    const markCluster = (startId) => {
+        let q = [startId];
+        assigned.add(startId);
         while(q.length > 0) {
             let curr = q.shift();
             const node = nodes[curr];
-            if (node && node.next) {
-                node.next.forEach(e => {
-                    if(!assigned.has(e.target)) {
-                        assigned.add(e.target);
-                        q.push(e.target);
-                    }
+            if (node) {
+                const insideLoops = loopContainers.filter(l => isInsideLoop(node, l));
+                insideLoops.forEach(l => {
+                    Object.values(nodes).forEach(inNode => {
+                        if (!assigned.has(inNode.id) && !isIgnoredRootType(inNode.type) && inNode.prev.length === 0 && isInsideLoop(inNode, l)) {
+                            assigned.add(inNode.id);
+                            q.push(inNode.id);
+                        }
+                    });
                 });
+
+                if (node.next) {
+                    node.next.forEach(e => {
+                        if(!assigned.has(e.target)) {
+                            assigned.add(e.target);
+                            q.push(e.target);
+                        }
+                    });
+                }
             }
         }
-    });
+    };
+
+    startNodes.forEach(sn => markCluster(sn.id));
 
     const realStartsCount = startNodes.length;
 
-    let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END' && n.type !== 'GROUP_BG' && n.type !== 'LOOP_CONTAINER');
+    let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type));
     
     roots.forEach(r => {
         const ghostId = `ghost_start_${clusterId}`;
@@ -159,24 +300,11 @@ export const parseDrawioToPseudocode = (xml) => {
         startNodes.push(nodes[ghostId]);
         clusterId++;
         
-        let q = [r.id];
-        assigned.add(r.id);
-        while(q.length > 0) {
-            let curr = q.shift();
-            const node = nodes[curr];
-            if(node && node.next) {
-                node.next.forEach(e => {
-                    if(!assigned.has(e.target)) {
-                        assigned.add(e.target);
-                        q.push(e.target);
-                    }
-                });
-            }
-        }
+        markCluster(r.id);
     });
 
     Object.values(nodes).forEach(n => {
-        if (!assigned.has(n.id) && n.type !== 'COMMENT' && n.type !== 'START' && n.type !== 'END' && n.type !== 'MERGE' && n.type !== 'GROUP_BG' && n.type !== 'LOOP_CONTAINER') {
+        if (!assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type)) {
             const ghostId = `ghost_start_${clusterId}`;
             nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
             edges.push({ source: ghostId, target: n.id, value: '' });
@@ -185,20 +313,7 @@ export const parseDrawioToPseudocode = (xml) => {
             startNodes.push(nodes[ghostId]);
             clusterId++;
             
-            let q = [n.id];
-            assigned.add(n.id);
-            while(q.length > 0) {
-                let curr = q.shift();
-                const node = nodes[curr];
-                if(node && node.next) {
-                    node.next.forEach(e => {
-                        if(!assigned.has(e.target)) {
-                            assigned.add(e.target);
-                            q.push(e.target);
-                        }
-                    });
-                }
-            }
+            markCluster(n.id);
         }
     });
 
@@ -322,28 +437,52 @@ export const parseDrawioToPseudocode = (xml) => {
             if (pathT.includes(curr)) return curr;
             curr = nodes[curr].next.length > 0 ? nodes[curr].next[0].target : null;
         }
-        return null;
-    };
-
-    const loopContainers = Object.values(nodes).filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
-    const isInsideLoop = (node, loop) => {
-        if (!node || !loop) return false;
-        if (node.type === 'START' || node.type === 'START_END' || node.type === 'END') return false;
-        const nW = node.width || 100;
-        const nH = node.height || 50;
-        const coreW = nW * 0.5;
-        const coreH = nH * 0.5;
-        const coreX = node.x + (nW - coreW) / 2;
-        const coreY = node.y + (nH - coreH) / 2;
-        const loopW = loop.width || 300;
-        const loopH = loop.height || 150;
-        const isInside = (coreX < loop.x + loopW && coreX + coreW > loop.x && coreY < loop.y + loopH && coreY + coreH > loop.y);
-        return isInside;
     };
 
     startNodes.forEach((start, index) => {
         let endNodeId = null;
         let endNodeVal = `END${start.entityType || 'FUNCTION'}`;
+
+        const closeLoop = (l, currentIndent, currentScope = new Set()) => {
+            // Process any unvisited unconnected nodes that physically belong inside this container
+            const unvisitedInside = Object.values(nodes).filter(n => 
+                !visited.has(n.id) && 
+                !isIgnoredRootType(n.type) && 
+                n.prev.length === 0 && 
+                n.next.length === 0 && 
+                isInsideLoop(n, l)
+            );
+            unvisitedInside.sort((a, b) => a.y - b.y || a.x - b.x);
+            unvisitedInside.forEach(n => {
+                visited.add(n.id);
+                assigned.add(n.id);
+                generateStatement(n, currentIndent, currentScope);
+            });
+
+            const ind = currentIndent.substring(0, Math.max(0, currentIndent.length - 4));
+            if (l.type === 'FOR_CONTAINER') {
+                appendLine(`${ind}ENDFOR`, l.id);
+            } else if (l.doWhile) {
+                let bodyLines = codeLines.slice(l.startLineIndex || 0);
+                let bodyNodeIds = codeNodeIds.slice(l.startLineIndex || 0);
+                
+                let preLoopLines = bodyLines.map(line => line.replace(/^ {4}/, ''));
+                let preLoopNodeIds = bodyNodeIds.map(() => l.id);
+                
+                let cond = l.value || "";
+                let whileLine = `${ind}WHILE ${cond} DO`;
+                let endWhileLine = `${ind}ENDWHILE`;
+                
+                let beforeLoop = codeLines.slice(0, l.startLineIndex || 0);
+                let beforeLoopIds = codeNodeIds.slice(0, l.startLineIndex || 0);
+                
+                codeLines = [...beforeLoop, ...preLoopLines, whileLine, ...bodyLines, endWhileLine];
+                codeNodeIds = [...beforeLoopIds, ...preLoopNodeIds, l.id, ...bodyNodeIds, l.id];
+            } else {
+                appendLine(`${ind}ENDWHILE`, l.id);
+            }
+            return ind;
+        };
 
         const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null, currentScope = new Set(), currentLoopStack = []) => {
             if (!nodeId || !nodes[nodeId] || visited.has(nodeId)) {
@@ -356,14 +495,7 @@ export const parseDrawioToPseudocode = (xml) => {
             // Handle entering LOOP_CONTAINERs
             const insideLoops = loopContainers.filter(l => isInsideLoop(node, l));
             insideLoops.sort((a, b) => (a.width * a.height) - (b.width * b.height)); // sort by size, smallest (most nested) first
-            
-            // The loop entrance will be handled AFTER exiting loops.
 
-            // Find loops we exited
-            // Wait, if we process exits BEFORE the node, we might close a loop that we just entered? No, newLoops are pushed, so they are in currentLoopStack.
-            // But if a node is NOT in a loop that is currently in the stack, it means we exited it.
-            // Actually, we must process exits BEFORE entering new loops, because we are transitioning from the previous node to this node!
-            // Let's adjust:
             // Find loops we exited
             let loopsToExit = [];
             for (let i = currentLoopStack.length - 1; i >= 0; i--) {
@@ -377,33 +509,12 @@ export const parseDrawioToPseudocode = (xml) => {
             
             loopsToExit.forEach(l => {
                 currentLoopStack.pop();
-                indent = indent.substring(0, indent.length - 4);
-                if (l.doWhile) {
-                    let bodyLines = codeLines.slice(l.startLineIndex);
-                    let bodyNodeIds = codeNodeIds.slice(l.startLineIndex);
-                    
-                    let preLoopLines = bodyLines.map(line => line.replace(/^ {4}/, ''));
-                    let preLoopNodeIds = bodyNodeIds.map(() => l.id);
-                    
-                    let cond = l.value || "";
-                    let whileLine = `${indent}WHILE ${cond} DO`;
-                    let endWhileLine = `${indent}ENDWHILE`;
-                    
-                    let beforeLoop = codeLines.slice(0, l.startLineIndex);
-                    let beforeLoopIds = codeNodeIds.slice(0, l.startLineIndex);
-                    
-                    codeLines = [...beforeLoop, ...preLoopLines, whileLine, ...bodyLines, endWhileLine];
-                    codeNodeIds = [...beforeLoopIds, ...preLoopNodeIds, l.id, ...bodyNodeIds, l.id];
-                } else if (l.type === 'FOR_CONTAINER') {
-                    appendLine(`${indent}ENDFOR`, l.id);
-                } else {
-                    appendLine(`${indent}ENDWHILE`, l.id);
-                }
+                indent = closeLoop(l, indent, currentScope);
             });
 
             // Now enter new loops
             const loopsToEnter = insideLoops.filter(l => !currentLoopStack.includes(l));
-            // Wait, we need to sort them from largest to smallest for entering!
+            // Sort from largest to smallest for entering
             loopsToEnter.sort((a, b) => (b.width * b.height) - (a.width * a.height));
             loopsToEnter.forEach(l => {
                 if (l.type === 'FOR_CONTAINER') {
@@ -430,26 +541,57 @@ export const parseDrawioToPseudocode = (xml) => {
                 appendLine(`${indent}${node.entityType} ${fName}()`, node.id);
                 if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId, currentScope, [...currentLoopStack]);
                 else if (!stopId) {
-                    currentLoopStack.slice().reverse().forEach(l => {
-                        indent = indent.substring(0, indent.length - 4);
-                        if (l.type === 'FOR_CONTAINER') appendLine(`${indent}ENDFOR`, l.id);
-                        else if (l.doWhile) appendLine(`${indent}WHILE ${l.value || "True"}`, l.id);
-                        else appendLine(`${indent}ENDWHILE`, l.id);
-                    });
+                    while (currentLoopStack.length > 0) {
+                        const l = currentLoopStack.pop();
+                        indent = closeLoop(l, indent, currentScope);
+                    }
                 }
                 printCommentsBeforeY(Infinity, indent + "    ");
             }
-            else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE') {
-                generateStatement(node, indent, currentScope);
+
+            else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE' || node.type === 'CASE_CONTAINER') {
+                if (node.type === 'CASE_CONTAINER') {
+                    if (node.isDefault) appendLine(`${indent}DEFAULT:`, node.id);
+                    else appendLine(`${indent}CASE ${node.caseVal || '1'}:`, node.id);
+                    indent += "    ";
+                } else {
+                    generateStatement(node, indent, currentScope);
+                }
+                
                 if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
                     traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack]);
                 } else if (!stopId) {
-                    currentLoopStack.slice().reverse().forEach(l => {
-                        indent = indent.substring(0, indent.length - 4);
-                        if (l.type === 'FOR_CONTAINER') appendLine(`${indent}ENDFOR`, l.id);
-                        else if (l.doWhile) appendLine(`${indent}WHILE ${l.value || "True"}`, l.id);
-                        else appendLine(`${indent}ENDWHILE`, l.id);
+                    while (currentLoopStack.length > 0) {
+                        const l = currentLoopStack.pop();
+                        indent = closeLoop(l, indent, currentScope);
+                    }
+                }
+            }
+            else if (node.type === 'SWITCH_CONTAINER') {
+                printCommentsBeforeY(node.y, indent);
+                appendLine(`${indent}SWITCH ${node.switchVar || 'x'}`, node.id);
+                
+                // Find merge node
+                let mergeNode = null;
+                if (node.next.length > 1) {
+                    mergeNode = node.next.map(e => e.target).reduce((acc, target) => {
+                        if (acc === null) return null;
+                        return findConvergence(acc, target);
                     });
+                } else if (node.next.length === 1) {
+                    mergeNode = node.next[0].target;
+                }
+
+                node.next.forEach(e => {
+                    if (!inPath.has(e.target)) {
+                        traverse(e.target, indent + "    ", new Set(inPath), mergeNode, currentScope, [...currentLoopStack]);
+                    }
+                });
+                
+                appendLine(`${indent}ENDSWITCH`, node.id);
+
+                if (mergeNode && !inPath.has(mergeNode)) {
+                    traverse(mergeNode, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack]);
                 }
             }
             else if (node.type === 'CONDITION') {

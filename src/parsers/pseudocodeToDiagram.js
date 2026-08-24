@@ -150,6 +150,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             : "shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;size=0.15;fillColor=#ffe6cc;strokeColor=#d79b00;",
         COMMENT: "shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;strokeColor=#d6b656;",
         MERGE: "ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;resizable=0;movable=0;rotatable=0;",
+        SWITCH_CONTAINER: "swimlane;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#f97316;SWITCH_CONTAINER;",
+        CASE_CONTAINER: "swimlane;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#f97316;CASE_CONTAINER;",
         EDGE: "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;"
     };
 
@@ -183,7 +185,21 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         }
 
         let yOffset = 40;
-        let startPos = getPos(funcName || "main", 'START_END', globalGroupX, yOffset);
+        let effectiveStartDefX = globalGroupX;
+        const normalize = (t) => t.replace(/\(\)$/g, '').replace(/\s+/g, ' ').trim();
+        const existingStart = existingNodes.find(n => !n.used && n.type === 'START_END' && normalize(n.val) === normalize(funcName || "main"));
+        if (!existingStart) {
+            const firstMatched = existingNodes.find(n => !n.used && n.type !== 'START_END');
+            if (firstMatched) {
+                if (firstMatched.type === 'LOOP_CONTAINER' || firstMatched.type === 'FOR_CONTAINER') {
+                    effectiveStartDefX = firstMatched.x + 90;
+                } else {
+                    effectiveStartDefX = firstMatched.x;
+                }
+            }
+        }
+
+        let startPos = getPos(funcName || "main", 'START_END', effectiveStartDefX, yOffset);
         let startId = startPos.oldId;
         outNodes.push({ id: startId, text: funcName || "main", type: 'START_END', x: startPos.x, y: startPos.y, mode: 'start', entityType });
         
@@ -202,8 +218,18 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         let pendingExits = [{ id: startId, text: "", handle: "s-bottom" }];
 
         const addNode = (text, type, defaultX, extraProps = {}, originalLineText = null) => {
+            // Find active case if any
+            let parentIdAttr = '1';
+            for (let i = stack.length - 1; i >= 0; i--) {
+                if (stack[i].type === 'SWITCH' && stack[i].currentCaseId) {
+                    parentIdAttr = stack[i].currentCaseId;
+                    break;
+                }
+            }
+            if (extraProps.parentId) parentIdAttr = extraProps.parentId; // override
+            
             const pos = getPos(text, type, defaultX, yOffset);
-            outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y, matched: pos.matched, ...extraProps });
+            outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y, matched: pos.matched, parentId: parentIdAttr, ...extraProps });
             yOffset = Math.max(yOffset, pos.y) + (type === 'CONDITION' ? 160 : 100);
             
             if (originalLineText !== null) {
@@ -283,6 +309,55 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 yOffset = Math.max(yOffset, currentIf.trueMaxY || currentIf.branchStartY);
             }
 
+
+            else if (upper.startsWith('SWITCH ')) {
+                let switchVar = line.substring(7).trim();
+                let switchId = addNode(switchVar, 'SWITCH_CONTAINER', getXPos(), { switchVar, parentId: '1' }, line);
+                pendingExits.forEach(exit => addEdge(exit.id, switchId, exit.text, exit.handle, "t-left"));
+                stack.push({ type: 'SWITCH', id: switchId, cases: [], switchVar, startY: yOffset, currentCaseExits: null, maxCaseY: yOffset });
+                pendingExits = []; // Nothing flows straight out of switch, it flows into cases
+            }
+            else if (upper.startsWith('CASE ') || upper === 'DEFAULT:') {
+                let currentSwitch = stack[stack.length - 1];
+                if (currentSwitch.type === 'SWITCH') {
+                    // Save previous case exits
+                    if (currentSwitch.currentCaseExits) {
+                        currentSwitch.cases.push([...currentSwitch.currentCaseExits, ...pendingExits]);
+                        currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
+                    }
+                    
+                    let caseVal = '';
+                    let isDefault = false;
+                    if (upper === 'DEFAULT:') {
+                        isDefault = true;
+                    } else {
+                        caseVal = line.substring(5, line.lastIndexOf(':')).trim();
+                    }
+                    
+                    let caseId = addNode(`Case ${isDefault ? 'default' : caseVal}`, 'CASE_CONTAINER', getXPos(), { caseVal, isDefault, parentId: currentSwitch.id }, line);
+                    
+                    yOffset = currentSwitch.startY + 60; // Start inside case container
+                    pendingExits = [{ id: caseId, text: "", handle: "s-bottom" }];
+                    currentSwitch.currentCaseExits = [];
+                    currentSwitch.currentCaseId = caseId;
+                }
+            }
+            else if (upper === 'ENDSWITCH') {
+                const currentSwitch = stack.pop();
+                if (currentSwitch.currentCaseExits) {
+                    currentSwitch.cases.push([...currentSwitch.currentCaseExits, ...pendingExits]);
+                    currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
+                }
+                pendingExits = currentSwitch.cases.flat();
+                yOffset = currentSwitch.maxCaseY + 60; // Padding after switch
+                
+                // Adjust SWITCH_CONTAINER size
+                const swNode = outNodes.find(n => n.id === currentSwitch.id);
+                if (swNode) {
+                    swNode.h = Math.max(150, currentSwitch.maxCaseY - currentSwitch.startY + 100);
+                    swNode.w = Math.max(300, currentSwitch.cases.length * 250);
+                }
+            }
             else if (upper.startsWith('WHILE ') || upper.startsWith('FOR ')) {
                 const isFor = upper.startsWith('FOR ');
                 let doIndex = upper.lastIndexOf(' DO');
@@ -321,7 +396,6 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 }
 
                 if (editorMode === 'simple') {
-                    // Simple mode loop (WHILE or FOR)
                     yOffset += 60;
                     stack.push({ type: 'LOOP', id: getNewId(), isSimple: true, condText: (isFor ? upper : condText), startY: yOffset, entryExits: [...pendingExits], doWhile: false, outNodesStartIndex: outNodes.length, isFor, forVar, forStep, forInit, forLimit });
                 } else {
@@ -482,7 +556,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         }
 
         if (hasEnd) {
-            const endId = addNode(endLineText, 'START_END', globalGroupX, { mode: 'end' }, originalEndLine);
+            const endId = addNode(endLineText, 'START_END', startPos.x, { mode: 'end' }, originalEndLine);
             pendingExits.forEach(exit => addEdge(exit.id, endId, exit.text, exit.handle, "t-top"));
             pendingExits = [];
         }
@@ -509,15 +583,21 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         if (n.ioType) style += `ioType=${n.ioType};`; 
 
         let extraAttrs = "";
-        if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') {
+        if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') {
             extraAttrs = ` type="${n.type}" doWhile="${n.doWhile ? 'true' : 'false'}"`;
             if (n.type === 'FOR_CONTAINER') {
                 extraAttrs += ` forInit="${encodeURIComponent(n.forInit || '')}" forLimit="${encodeURIComponent(n.forLimit || '')}" forStep="${encodeURIComponent(n.forStep || '1')}"`;
             }
+            if (n.type === 'SWITCH_CONTAINER') {
+                extraAttrs += ` switchVar="${encodeURIComponent(n.switchVar || '')}"`;
+            }
+            if (n.type === 'CASE_CONTAINER') {
+                extraAttrs += ` caseVal="${encodeURIComponent(n.caseVal || '')}" isDefault="${n.isDefault ? 'true' : 'false'}"`;
+            }
         }
 
         const safeText = (n.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}"${extraAttrs} vertex="1" parent="1">\n`;
+        xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}"${extraAttrs} vertex="1" parent="${n.parentId || '1'}">\n`;
         xml += `      <mxGeometry x="${n.x}" y="${n.y}" width="${w}" height="${h}" as="geometry" />\n`;
         xml += `    </mxCell>\n`;
     });

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import { useReactFlow, useStoreApi } from '@xyflow/react';
 import { calculateStretchLimits } from '../../utils/stretchLimits';
 
-export function useContainerBounds(id, data, dragging, minWidth = 300, minHeight = 150) {
+export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight = 200) {
     const { setNodes, getNodes } = useReactFlow();
     const store = useStoreApi();
 
@@ -14,32 +14,51 @@ export function useContainerBounds(id, data, dragging, minWidth = 300, minHeight
             const myNode = nds.find(n => n.id === id);
             if (!myNode || myNode.selected) return nds;
             
-            const myX = myNode.position.x;
-            const myY = myNode.position.y;
-            const candidateNodes = nds.filter(n => n.id !== id && !['LOOP_CONTAINER', 'FOR_CONTAINER', 'GROUP_BG'].includes(n.type));
-            
-            const nodesBelow = candidateNodes.filter(n => 
-                n.position.y >= myY && 
-                n.position.x >= myX - 100 && 
-                n.position.x <= myX + 400
-            ).sort((a, b) => a.position.y - b.position.y);
-            
-            if (nodesBelow.length > 0) {
-                const lastNode = nodesBelow[nodesBelow.length - 1];
-                const h = lastNode.measured?.height || lastNode.height || (lastNode.type === 'CONDITION' ? 70 : 50);
-                const newHeight = (lastNode.position.y + h - myY) + 50;
-                
-                return nds.map(n => {
-                    if (n.id === id) {
-                        const finalH = Math.max(minHeight, newHeight);
-                        const finalW = Math.max(minWidth, n.style?.width ? parseInt(n.style.width) : minWidth);
-                        return { ...n, data: { ...n.data, isNew: false }, zIndex: -Math.round(finalW), style: { ...n.style, height: finalH, width: finalW } };
-                    }
-                    return n;
-                });
+            let myX = myNode.position.x;
+            let myY = myNode.position.y;
+            if (myNode.parentId) {
+                let parent = nds.find(n => n.id === myNode.parentId);
+                if (parent) {
+                    myX += parent.position.x;
+                    myY += parent.position.y;
+                }
             }
             
-            return nds.map(n => n.id === id ? { ...n, data: { ...n.data, isNew: false } } : n);
+            // The absolute best way to ensure NO snap-back is to read the exact visual dimensions 
+            // that checkBounds just finished mutating on the DOM during the drag.
+            let targetWidth = minWidth;
+            let targetHeight = minHeight;
+            
+            if (containerRef.current) {
+                const domW = parseInt(containerRef.current.style.width);
+                const domH = parseInt(containerRef.current.style.height);
+                if (!isNaN(domW)) targetWidth = Math.max(minWidth, domW);
+                if (!isNaN(domH)) targetHeight = Math.max(minHeight, domH);
+            } else {
+                // Fallback math if ref is missing for some reason
+                const candidateNodes = nds.filter(n => n.id !== id && !['GROUP_BG', 'START_END', 'COMMENT'].includes(n.type));
+                const ownedNodes = candidateNodes.filter(n => ownedNodeIds.current.has(n.id));
+                if (ownedNodes.length > 0) {
+                    let rMaxX = -Infinity, rMaxY = -Infinity;
+                    ownedNodes.forEach(n => {
+                        const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || (n.type === 'FOR_CONTAINER' ? 350 : 300))) : (n.measured?.width || n.width || 100);
+                        const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || (n.type === 'FOR_CONTAINER' ? 200 : 150))) : (n.measured?.height || n.height || 50);
+                        const x2 = n.position.x + nW;
+                        const y2 = n.position.y + nH;
+                        if (x2 > rMaxX) rMaxX = x2;
+                        if (y2 > rMaxY) rMaxY = y2;
+                    });
+                    targetWidth = Math.max(minWidth, (rMaxX - myX) + 20);
+                    targetHeight = Math.max(minHeight, (rMaxY - myY) + 50);
+                }
+            }
+            
+            return nds.map(n => {
+                if (n.id === id) {
+                    return { ...n, data: { ...n.data, isNew: false }, zIndex: -Math.round(targetWidth), style: { ...n.style, height: targetHeight, width: targetWidth } };
+                }
+                return n;
+            });
         });
     }, [id, setNodes, minWidth, minHeight]);
 
@@ -79,10 +98,25 @@ export function useContainerBounds(id, data, dragging, minWidth = 300, minHeight
                 return;
             }
 
-            const myY = myNode.position.y;
-            const myX = myNode.position.x;
-            const myHeight = myNode.style?.height ? parseInt(myNode.style.height) : minHeight;
-            const myWidth = myNode.style?.width ? parseInt(myNode.style.width) : minWidth;
+            let myY = myNode.position.y;
+            let myX = myNode.position.x;
+            if (myNode.parentId) {
+                let parent = nds.find(n => n.id === myNode.parentId);
+                if (parent) {
+                    myX += parent.position.x;
+                    myY += parent.position.y;
+                }
+            }
+            let myHeight = myNode.style?.height ? parseInt(myNode.style.height) : minHeight;
+            let myWidth = myNode.style?.width ? parseInt(myNode.style.width) : minWidth;
+            
+            // Use dynamically stretched DOM size for accurate hitboxes during drag
+            if (containerRef.current) {
+                const domW = parseInt(containerRef.current.style.width);
+                const domH = parseInt(containerRef.current.style.height);
+                if (!isNaN(domW)) myWidth = domW;
+                if (!isNaN(domH)) myHeight = domH;
+            }
             
             const candidateNodes = nds.filter(n => n.id !== id && n.type !== 'GROUP_BG' && n.type !== 'COMMENT' && n.type !== 'START_END');
             
@@ -90,8 +124,8 @@ export function useContainerBounds(id, data, dragging, minWidth = 300, minHeight
             let hasPendingIn = false;
             
             candidateNodes.forEach(n => {
-                const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || (n.type === 'FOR_CONTAINER' ? 350 : 300))) : (n.measured?.width || n.width || 100);
-                const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || (n.type === 'FOR_CONTAINER' ? 200 : 150))) : (n.measured?.height || n.height || 50);
+                const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || 350)) : (n.measured?.width || n.width || 100);
+                const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || 200)) : (n.measured?.height || n.height || 50);
                 const coreW = nW * 0.5;
                 const coreH = nH * 0.5;
                 const coreX = n.position.x + (nW - coreW) / 2;
@@ -100,11 +134,11 @@ export function useContainerBounds(id, data, dragging, minWidth = 300, minHeight
                 // is mathematically positioned at or after my top-left corner. This prevents a child container 
                 // from accidentally claiming ownership of its own parent!
                 const isInside = (n.position.x >= myX - 5) && (n.position.y >= myY - 5) && 
-                                 (coreX < myX + myWidth && coreX + coreW > myX && coreY < myY + myHeight + 150 && coreY + coreH > myY - 50);
+                                 (coreX < myX + myWidth && coreX + coreW > myX && coreY < myY + myHeight && coreY + coreH > myY - 10);
                 
                 if (isInside) {
                     currentOwned.add(n.id);
-                    if (n.dragging && !n.selected) {
+                    if (n.dragging) {
                         hasPendingIn = true;
                     }
                 } else if (!n.dragging) {
@@ -164,17 +198,16 @@ export function useContainerBounds(id, data, dragging, minWidth = 300, minHeight
                 
                 if (desiredWidth > ASL_Width) {
                     newWidth = ASL_Width;
-                    atStretchLimitRight = true;
-                    stretchDistRight = desiredWidth - ASL_Width;
                 }
                 if (desiredHeight > ASL_Height) {
                     newHeight = ASL_Height;
-                    atStretchLimitBottom = true;
-                    stretchDistBottom = desiredHeight - ASL_Height;
                 }
                 
-                const draggingNode = ownedNodes.find(n => n.dragging);
-                if (draggingNode) {
+                const draggingNodes = ownedNodes.filter(n => n.dragging);
+                let anyAtLimitRight = false;
+                let anyAtLimitBottom = false;
+
+                draggingNodes.forEach(draggingNode => {
                     const nW = draggingNode.measured?.width || 120;
                     const nH = draggingNode.measured?.height || 50;
                     const maxXNode = draggingNode.position.x + nW;
@@ -188,8 +221,8 @@ export function useContainerBounds(id, data, dragging, minWidth = 300, minHeight
                     desiredWidth = Math.max(desiredWidth, reqW);
                     desiredHeight = Math.max(desiredHeight, reqH);
 
-                    stretchDistRight = reqW - ASL_Width;
-                    stretchDistBottom = reqH - ASL_Height;
+                    const nodeStretchDistRight = reqW - ASL_Width;
+                    const nodeStretchDistBottom = reqH - ASL_Height;
                     const stretchDistLeft = myX - minXNode;
                     const stretchDistTop = myY - minYNode;
                     
@@ -201,27 +234,22 @@ export function useContainerBounds(id, data, dragging, minWidth = 300, minHeight
                         dragState.joinedThisDrag = true;
                     }
 
-                    const POP_TOLERANCE_RIGHT = 70;
-                    const POP_TOLERANCE_BOTTOM = 70;
+                    const POP_TOLERANCE_RIGHT = paddingSides;
+                    const POP_TOLERANCE_BOTTOM = paddingBottom;
                     const POP_TOLERANCE_LEFT = 0;
                     const POP_TOLERANCE_TOP = 0;
                     
-                    if (stretchDistRight > POP_TOLERANCE_RIGHT || stretchDistBottom > POP_TOLERANCE_BOTTOM || stretchDistLeft > POP_TOLERANCE_LEFT || stretchDistTop > POP_TOLERANCE_TOP) {
+                    if (nodeStretchDistRight > POP_TOLERANCE_RIGHT || nodeStretchDistBottom > POP_TOLERANCE_BOTTOM || stretchDistLeft > POP_TOLERANCE_LEFT || stretchDistTop > POP_TOLERANCE_TOP) {
                         currentOwned.delete(draggingNode.id);
                         popped = true;
-                        atStretchLimitRight = false;
-                        atStretchLimitBottom = false;
                     } else {
-                        // The block will pop out if it exceeds the POP_TOLERANCE.
-                        // But the visual border feedback should ALWAYS show if the CURRENTLY DRAGGED block is exceeding the absolute ASL limits,
-                        // EVEN IF it was just inserted during this drag!
-                        atStretchLimitRight = stretchDistRight > 0;
-                        atStretchLimitBottom = stretchDistBottom > 0;
+                        if (nodeStretchDistRight > 0) anyAtLimitRight = true;
+                        if (nodeStretchDistBottom > 0) anyAtLimitBottom = true;
                     }
-                } else {
-                    atStretchLimitRight = false;
-                    atStretchLimitBottom = false;
-                }
+                });
+
+                if (anyAtLimitRight && !popped) atStretchLimitRight = true;
+                if (anyAtLimitBottom && !popped) atStretchLimitBottom = true;
                 
                 if (popped) {
                     // Recalculate based on remaining nodes
@@ -274,12 +302,6 @@ export function useContainerBounds(id, data, dragging, minWidth = 300, minHeight
                     'border-b-indigo-500', 'border-r-indigo-500', 'border-l-indigo-500', 'border-t-indigo-500'
                 );
                 
-                const highlightColorClass1 = n => n.type === 'FOR_CONTAINER' ? 'bg-indigo-100/50' : 'bg-purple-100/50';
-                const highlightColorClass2 = n => n.type === 'FOR_CONTAINER' ? 'dark:bg-indigo-800/30' : 'dark:bg-purple-800/30';
-                const highlightColorClass3 = n => n.type === 'FOR_CONTAINER' ? 'bg-indigo-100' : 'bg-purple-100';
-                const highlightColorClass4 = n => n.type === 'FOR_CONTAINER' ? 'dark:bg-indigo-900/30' : 'dark:bg-purple-900/30';
-                const ringColorClass = n => n.type === 'FOR_CONTAINER' ? 'ring-indigo-400' : 'ring-purple-400';
-
                 const isFor = data.isForContainer; // I will add this flag from the component
                 
                 if (atStretchLimitRight || atStretchLimitBottom) {
@@ -347,8 +369,15 @@ export function useContainerBounds(id, data, dragging, minWidth = 300, minHeight
             const myNode = nds.find(n => n.id === id);
             if (!myNode) return nds;
             
-            const myX = myNode.position.x;
-            const myY = myNode.position.y;
+            let myX = myNode.position.x;
+            let myY = myNode.position.y;
+            if (myNode.parentId) {
+                let parent = nds.find(n => n.id === myNode.parentId);
+                if (parent) {
+                    myX += parent.position.x;
+                    myY += parent.position.y;
+                }
+            }
             const myW = myNode.style?.width ? parseInt(myNode.style.width) : minWidth;
             const myH = myNode.style?.height ? parseInt(myNode.style.height) : minHeight;
             

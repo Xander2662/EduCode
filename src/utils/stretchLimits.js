@@ -15,7 +15,6 @@
 export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, containerY, baseWidth = 300, baseHeight = 150) {
     const PADDING_SIDES = 20;
     const PADDING_BOTTOM = 50;
-    const STRETCH_MARGIN = 120; // How much empty space users can pull into before popping out
 
     let numConditions = 0;
     ownedNodes.forEach(n => {
@@ -43,8 +42,8 @@ export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, 
         });
         
         // Base padding (empty space) is 100px (since baseHeight is 150 and the first block takes 50, leaving 100 padding. 
-        // We add 100 padding + total heights + 50 gap per block after the first).
-        SSL_Height = (baseHeight - 50) + totalChildHeight + (ownedNodes.length - 1) * 50;
+        // We add 100 padding + total heights + 100 gap per block after the first).
+        SSL_Height = (baseHeight - 50) + totalChildHeight + (ownedNodes.length - 1) * 100;
         
         // IF blocks expand horizontally. We treat loops like an IF block (+320).
         SSL_Width = baseWidth + (numConditions * 320);
@@ -95,8 +94,8 @@ export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, 
             let w = n.measured?.width || 120;
             let h = n.measured?.height || 50;
             if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') {
-                const defW = n.type === 'FOR_CONTAINER' ? 350 : 300;
-                const defH = n.type === 'FOR_CONTAINER' ? 200 : 150;
+                const defW = 350;
+                const defH = 200;
                 w = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || defW);
                 h = n.style?.height ? parseInt(n.style.height) : (n.measured?.height || defH);
             }
@@ -105,10 +104,16 @@ export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, 
         }
     });
 
-    const dynamicStretchMarginWidth = Math.max(STRETCH_MARGIN, maxDraggedWidth + 20);
-    const dynamicStretchMarginHeight = Math.max(STRETCH_MARGIN, maxDraggedHeight + 20);
+    const dynamicStretchMarginHeight = Math.max(300, maxDraggedHeight + 150);
 
-    let ASL_Width = Math.min(SSL_Width, requiredIfWidth + dynamicStretchMarginWidth);
+    const dynamicStretchMarginWidth = Math.max(320, maxDraggedWidth + 100);
+
+    // If there are conditions, allow stretching horizontally past the right-most condition to fit exactly 1 block + gap (320px).
+    // If there are no conditions, strictly clamp to SSL_Width (which is baseWidth, preventing ANY horizontal drag).
+    let ASL_Width = Math.min(SSL_Width, numConditions > 0 ? (requiredIfWidth + dynamicStretchMarginWidth) : SSL_Width);
+    
+    // Y-coordinate stretch: We want to allow generous stretching downwards for nested groups and large gaps.
+    // However, if the user tries to drag infinitely, SSL_Height (now with 100px gaps per block) will eventually stop them.
     let ASL_Height = Math.min(SSL_Height, requiredHeight + dynamicStretchMarginHeight);
     
     // Ensure ASL doesn't shrink below the base size

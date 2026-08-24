@@ -104,4 +104,49 @@ describe('While Group Roundtrip Tests (Pseudocode -> XML -> Pseudocode)', () => 
         const matches = secondXml.match(/value="ACTION Operace 1"/g);
         expect(matches.length).toBe(1);
     });
+
+    it('Měl by správně zvládnout roundtrip pro WHILE skupinu s nepropojenými bloky uvnitř', () => {
+        const diagramXml = `<mxGraphModel>
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+    <mxCell id="start" value="main" style="mode=start;entityType=FUNCTION;" vertex="1" parent="1">
+      <mxGeometry x="360" y="40" width="100" height="40" as="geometry" />
+    </mxCell>
+    
+    <mxCell id="loop" value="x &gt; 0" style="LOOP_CONTAINER" type="LOOP_CONTAINER" doWhile="false" vertex="1" parent="1">
+      <mxGeometry x="270" y="130" width="300" height="220" as="geometry" />
+    </mxCell>
+    
+    <mxCell id="action_connected" value="x = x + 1" style="ioType=input;" vertex="1" parent="1">
+      <mxGeometry x="360" y="160" width="120" height="50" as="geometry" />
+    </mxCell>
+    
+    <mxCell id="action_unconnected" value="y = 5" vertex="1" parent="1">
+      <mxGeometry x="360" y="240" width="120" height="50" as="geometry" />
+    </mxCell>
+    
+    <mxCell id="end" value="ENDFUNCTION" style="mode=end;" vertex="1" parent="1">
+      <mxGeometry x="360" y="400" width="100" height="40" as="geometry" />
+    </mxCell>
+    
+    <mxCell id="e1" edge="1" parent="1" source="start" target="action_connected" />
+    <mxCell id="e2" edge="1" parent="1" source="action_connected" target="end" />
+  </root>
+</mxGraphModel>`;
+
+        const { code: pseudo, errors } = parseDrawioToPseudocode(diagramXml);
+        
+        expect(errors.length).toBeLessThan(2);
+        expect(pseudo).toContain('WHILE x > 0 DO');
+        expect(pseudo).toContain('ENDWHILE');
+        expect(pseudo).toContain('y = 5');
+        expect(pseudo).toContain('x = x + 1');
+
+        const { xml: secondXml } = parsePseudocodeToDrawio(pseudo, diagramXml, null, null, 'simple');
+        
+        expect(secondXml).toContain('value="y = 5"');
+        expect(secondXml).toContain('value="x = x + 1"');
+        expect(secondXml).toContain('type="LOOP_CONTAINER"');
+    });
 });

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, HelpCircle, Move, MousePointer, RefreshCcw, Circle, Square, Diamond, Copy, Check, MessageSquare, Box, Hexagon } from 'lucide-react';
+import { X, HelpCircle, Move, MousePointer, RefreshCcw, Circle, Square, Diamond, Copy, Check, MessageSquare, Box, Hexagon, Columns } from 'lucide-react';
 
 const IoIcon = ({ size = 24, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -200,14 +200,14 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
 
                   {activeDeepDive === 'CONDITION' && (
                       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                          <div className="bg-orange-50 dark:bg-orange-900/20 border-b border-orange-100 dark:border-orange-800/50 p-6 flex items-start justify-between gap-4">
+                          <div className="bg-rose-50 dark:bg-rose-900/20 border-b border-rose-100 dark:border-rose-800/50 p-6 flex items-start justify-between gap-4">
                               <div className="flex items-start gap-4">
-                                  <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-orange-200 dark:border-orange-800 shrink-0">
+                                  <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-rose-200 dark:border-rose-800 shrink-0">
                                       <Diamond size={32} className="text-orange-600 dark:text-orange-500" />
                                   </div>
                                   <div>
-                                      <h3 className="text-2xl font-bold text-orange-900 dark:text-orange-100">Podmínka / Cyklus</h3>
-                                      <p className="text-orange-700 dark:text-orange-300 text-sm mt-1">Umožňuje programu reagovat na situace a dělat rozhodnutí.</p>
+                                      <h3 className="text-2xl font-bold text-rose-900 dark:text-rose-100">Podmínka / Cyklus</h3>
+                                      <p className="text-rose-700 dark:text-rose-300 text-sm mt-1">Umožňuje programu reagovat na situace a dělat rozhodnutí.</p>
                                   </div>
                               </div>
                               <button onClick={() => setActiveDeepDive(null)} className="text-gray-800 hover:text-black dark:text-gray-200 dark:hover:text-white font-bold flex items-center gap-1.5 transition-all text-sm bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 shadow-md hover:shadow-lg whitespace-nowrap shrink-0">
@@ -221,11 +221,11 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                                       Tento blok funguje jako "rozcestník". Obsahuje logický test (např. zkoumá, zda je hodnota větší než 0). Z bloku pak vždy vychází dvě šipky. 
                                       Při použití debuggeru zde názorně uvidíte, jak počítač vyhodnotí stav paměti a následně "fyzicky" odbočí do správné větve (Ano / Ne) podle toho, zda je podmínka splněna.
                                   </p>
-                                  <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 p-4 rounded-lg flex gap-3 mt-4">
+                                  <div className="bg-orange-50 dark:bg-orange-900/20 border border-rose-200 dark:border-rose-800 p-4 rounded-lg flex gap-3 mt-4">
                                       <RefreshCcw className="text-orange-600 shrink-0 mt-0.5" size={20} />
                                       <div>
                                           <strong className="text-orange-800 dark:text-orange-400">Vytvoření cyklu (WHILE):</strong>
-                                          <p className="text-sm mt-1 text-orange-700 dark:text-orange-300">Pro vytvoření opakujícího se cyklu nemusíte psát žádný speciální příkaz. Stačí jednoduše vzít odchozí šipku z konce jakékoliv větve a navést ji <strong>zpět do tohoto oranžového bloku</strong>. EduCode z tohoto zapojení cyklus automaticky sestaví.</p>
+                                          <p className="text-sm mt-1 text-rose-700 dark:text-rose-300">Pro vytvoření opakujícího se cyklu nemusíte psát žádný speciální příkaz. Stačí jednoduše vzít odchozí šipku z konce jakékoliv větve a navést ji <strong>zpět do tohoto oranžového bloku</strong>. EduCode z tohoto zapojení cyklus automaticky sestaví.</p>
                                       </div>
                                   </div>
                               </div>
@@ -287,32 +287,25 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                               <hr className="border-gray-100 dark:border-gray-700/50" />
                               <div>
                                   <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Tipy a varování</h4>
-                                  <p className="text-sm leading-relaxed mb-4 text-orange-700 dark:text-orange-300 bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border border-orange-200 dark:border-orange-800">
+                                  <p className="text-sm leading-relaxed mb-4 text-rose-700 dark:text-rose-300 bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border border-rose-200 dark:border-rose-800">
                                       <strong>Nespojujte šipku ven z kontejneru a zase zpět!</strong> Kontejner <em>automaticky</em> zacyklí veškeré bloky umístěné uvnitř. Nepotřebujete kreslit zpětnou šipku pro zacyklení, kontejner to vyřeší sám.
                                   </p>
                               </div>
                               <hr className="border-gray-100 dark:border-gray-700/50" />
                               <div>
-                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg">Příklad použití</h4>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                      <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                                          <h5 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Vizuální reprezentace</h5>
-                                          <div className="flex flex-col gap-2 relative z-0">
-                                              <div className="bg-indigo-50/50 dark:bg-indigo-900/20 border border-indigo-300 dark:border-indigo-700 rounded p-3 pt-6 min-h-[100px] relative">
-                                                  <div className="absolute top-1 left-2 text-[10px] text-indigo-500 font-bold uppercase">FOR i = 0 TO 10</div>
-                                                  <div className="bg-blue-100 dark:bg-blue-900/40 border border-blue-400 dark:border-blue-600 rounded p-2 text-center text-sm font-mono mt-2">
-                                                      print(i)
-                                                  </div>
-                                              </div>
-                                          </div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Příklady</h4>
+                                  <div className="grid gap-3 text-sm">
+                                      <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 items-start sm:items-center bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-100 dark:border-gray-800">
+                                          <code className="bg-white dark:bg-gray-800 text-indigo-600 px-2 py-1 rounded border border-gray-200 dark:border-gray-700 shadow-sm shrink-0 font-bold min-w-[150px] text-center">i = 1 TO 10</code>
+                                          <span>Opakuje tělo cyklu 10krát. Proměnná <code className="text-xs">i</code> se postupně zvyšuje od 1 do 10.</span>
                                       </div>
-                                      <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 flex flex-col justify-center">
-                                          <h5 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Výsledný pseudokód</h5>
-                                          <pre className="text-xs bg-black text-green-400 p-3 rounded font-mono overflow-x-auto">
-{`FOR i = 0 TO 10 DO
-    print(i)
-ENDFOR`}
-                                          </pre>
+                                      <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 items-start sm:items-center bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-100 dark:border-gray-800">
+                                          <code className="bg-white dark:bg-gray-800 text-indigo-600 px-2 py-1 rounded border border-gray-200 dark:border-gray-700 shadow-sm shrink-0 font-bold min-w-[150px] text-center">k = 0 TO 100 STEP 5</code>
+                                          <span>Opakuje cyklus, přičemž proměnná <code className="text-xs">k</code> roste po pěti (0, 5, 10... 100).</span>
+                                      </div>
+                                      <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 items-start sm:items-center bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-100 dark:border-gray-800">
+                                          <code className="bg-white dark:bg-gray-800 text-indigo-600 px-2 py-1 rounded border border-gray-200 dark:border-gray-700 shadow-sm shrink-0 font-bold min-w-[150px] text-center">x = 10 TO 1 STEP -1</code>
+                                          <span>Odpočítává od 10 do 1 (krok je záporný).</span>
                                       </div>
                                   </div>
                               </div>
@@ -394,9 +387,45 @@ ENDFOR`}
                               <hr className="border-gray-100 dark:border-gray-700/50" />
                               <div>
                                   <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Tipy a varování</h4>
-                                  <p className="text-sm leading-relaxed mb-4 text-orange-700 dark:text-orange-300 bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border border-orange-200 dark:border-orange-800">
+                                  <p className="text-sm leading-relaxed mb-4 text-rose-700 dark:text-rose-300 bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border border-rose-200 dark:border-rose-800">
                                       <strong>Nespojujte šipku ven z kontejneru a zase zpět!</strong> Kontejner <em>automaticky</em> zacyklí veškeré bloky umístěné uvnitř. Až exekuce doběhne k poslednímu bloku uvnitř, program se automaticky vrací na kontrolu podmínky kontejneru.
                                   </p>
+                              </div>
+                          </div>
+                      </div>
+                  )}
+                  {activeDeepDive === 'SWITCH_CONTAINER' && (
+                      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                          <div className="bg-rose-50 dark:bg-rose-900/20 border-b border-rose-100 dark:border-rose-800/50 p-6 flex items-start justify-between gap-4">
+                              <div className="flex items-start gap-4">
+                                  <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-rose-200 dark:border-rose-800 shrink-0">
+                                      <Columns size={32} className="text-rose-600 dark:text-rose-500" />
+                                  </div>
+                                  <div>
+                                      <h3 className="text-2xl font-bold text-rose-900 dark:text-rose-100">Větvení (Switch)</h3>
+                                      <p className="text-rose-700 dark:text-rose-300 text-sm mt-1">Strukturální blok pro rychlé vytvoření mnoha paralelních podmínek (případů).</p>
+                                  </div>
+                              </div>
+                              <button onClick={() => setActiveDeepDive(null)} className="text-gray-800 hover:text-black dark:text-gray-200 dark:hover:text-white font-bold flex items-center gap-1.5 transition-all text-sm bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 shadow-md hover:shadow-lg whitespace-nowrap shrink-0">
+                                  Zpět na přehled &rarr;
+                              </button>
+                          </div>
+                          <div className="p-6 space-y-6 text-gray-700 dark:text-gray-300">
+                              <div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Jak funguje</h4>
+                                  <p className="text-sm leading-relaxed mb-4">
+                                      Switch block (Větvení) vyhodnotí zadanou proměnnou a porovná ji se všemi vytvořenými případy (Cases). Pokud najde shodu, spustí kód pouze uvnitř daného případu a následně automaticky opustí celý Switch.
+                                  </p>
+                              </div>
+                              <hr className="border-gray-100 dark:border-gray-700/50" />
+                              <div>
+                                  <h4 className="font-bold text-gray-900 dark:text-white mb-3 text-lg flex items-center gap-2">Práce s kontejnerem</h4>
+                                  <ul className="list-disc pl-5 space-y-2 text-sm">
+                                      <li><strong>Přidávání případů:</strong> V záhlaví Switch bloku najdete tlačítka <code>+ Case</code> (případ s konkrétní hodnotou) a <code>+ Default</code> (výchozí případ, pokud žádná jiná hodnota nesedí).</li>
+                                      <li><strong>Umísťování bloků:</strong> Každý případ se chová jako samostatný vizuální kontejner. Přetáhněte libovolné bloky z levého panelu přímo <strong>dovnitř</strong> případu. Kontejner se sám automaticky zvětší do hloubky.</li>
+                                      <li><strong>Automatické šipky:</strong> Není potřeba ručně propojovat šipky z hlavního bloku do případů, editor provádí vnitřní trasování automaticky. Pouze propojte šipkou horní část Switche (přívod do struktury) a ze spodu jednoho z případů vyveďte šipku do dalšího kódu – ta určí bod, kde se všechny případy po dokončení opět sloučí.</li>
+                                      <li><strong>Mazání:</strong> Pro smazání případu (Case) na něj stačí kliknout a stisknout Delete. Smažou se tím i všechny bloky uvnitř případu.</li>
+                                  </ul>
                               </div>
                           </div>
                       </div>
@@ -435,7 +464,7 @@ ENDFOR`}
                   <p className="text-xs mt-1">Pro získání hodnoty od uživatele. Blok má vodoznak, takže dovnitř stačí napsat jen proměnnou (např. <code>x</code>) nebo dosazení (<code>x = 1</code>).</p>
                 </div>
               </div>
-              <div onClick={() => setActiveDeepDive('CONDITION')} className="border border-orange-200 bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
+              <div onClick={() => setActiveDeepDive('CONDITION')} className="border border-rose-200 bg-rose-50 dark:bg-rose-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
                 <Diamond size={24} className="text-orange-600 mt-1 shrink-0" />
                 <div>
                   <h4 className="font-bold text-orange-800 dark:text-orange-400">Podmínka (IF / WHILE)</h4>
@@ -454,6 +483,13 @@ ENDFOR`}
                 <div>
                   <h4 className="font-bold text-indigo-800 dark:text-indigo-400">FOR Cyklus</h4>
                   <p className="text-xs mt-1">Iterační cyklus pro opakování bloku kódu s přesným počtem kroků (např. i od 0 do 10).</p>
+                </div>
+              </div>
+              <div onClick={() => setActiveDeepDive('SWITCH_CONTAINER')} className="border border-rose-200 bg-rose-50 dark:bg-rose-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
+                <Columns size={24} className="text-rose-600 mt-1 shrink-0" />
+                <div>
+                  <h4 className="font-bold text-rose-800 dark:text-rose-400">Větvení (Switch)</h4>
+                  <p className="text-xs mt-1">Strukturální blok pro rychlé rozdělení kódu do mnoha paralelních případů podle jedné hodnoty.</p>
                 </div>
               </div>
               <div onClick={() => setActiveDeepDive('COMMENT')} className="border border-yellow-200 bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">

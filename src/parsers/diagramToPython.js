@@ -42,6 +42,9 @@ export const parseDrawioToPython = (xml) => {
         let forInit = '';
         let forLimit = '';
         let forStep = '';
+        let switchVar = '';
+        let caseVal = '';
+        let isDefault = false;
         
         let type = 'ACTION';
         if (style.includes('shape=note') || style.includes('fillColor=#fff2cc') || value.startsWith('#') || value.startsWith('//')) type = 'COMMENT';
@@ -56,8 +59,11 @@ export const parseDrawioToPython = (xml) => {
         else if (style.includes('shape=parallelogram') || cellTypeAttr === 'IO' || cellTypeAttr === 'io') {
             type = 'IO';
         }
-        else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellTypeAttr === 'LOOP_CONTAINER') {
-            type = 'LOOP_CONTAINER';
+        else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellTypeAttr === 'LOOP_CONTAINER' || style.includes('SWITCH_CONTAINER') || style.includes('CASE_CONTAINER')) {
+            if (style.includes('SWITCH_CONTAINER')) type = 'SWITCH_CONTAINER';
+            else if (style.includes('CASE_CONTAINER')) type = 'CASE_CONTAINER';
+            else type = 'LOOP_CONTAINER';
+            
             try {
                 doWhile = cell.getAttribute('doWhile') === 'true';
                 if (!doWhile && style.includes('doWhile=true')) {
@@ -76,6 +82,18 @@ export const parseDrawioToPython = (xml) => {
                 const stepMatch = style.match(/forStep=([^;]+)/);
                 if (stepMatch) forStep = decodeURIComponent(stepMatch[1]);
             }
+            if (style.includes('switchVar=')) {
+                const svMatch = style.match(/switchVar=([^;]+)/);
+                if (svMatch) switchVar = decodeURIComponent(svMatch[1]);
+            }
+            if (style.includes('caseVal=')) {
+                const cvMatch = style.match(/caseVal=([^;]+)/);
+                if (cvMatch) caseVal = decodeURIComponent(cvMatch[1]);
+            }
+            if (style.includes('isDefault=')) {
+                const defMatch = style.match(/isDefault=([^;]+)/);
+                if (defMatch) isDefault = defMatch[1] === 'true';
+            }
         }
         
         const entityMatch = style.match(/entityType=([^;]+)/);
@@ -86,8 +104,9 @@ export const parseDrawioToPython = (xml) => {
 
         const width = geo ? parseFloat(geo.getAttribute('width') || 0) : 0;
         const height = geo ? parseFloat(geo.getAttribute('height') || 0) : 0;
+        const parentId = cell.getAttribute('parent');
 
-        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep };
+        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep, switchVar, caseVal, isDefault, parentId };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
@@ -104,32 +123,155 @@ export const parseDrawioToPython = (xml) => {
       }
     });
 
+    Object.values(nodes).filter(n => n.type === 'SWITCH_CONTAINER').forEach(switchNode => {
+        const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && n.parentId === switchNode.id);
+        cases.sort((a, b) => {
+            if (a.isDefault) return 1;
+            if (b.isDefault) return -1;
+            return a.x - b.x;
+        });
+        const mergeEdges = [...switchNode.next];
+        switchNode.next = [];
+        
+        cases.forEach(caseNode => {
+            const edgeToCase = { source: switchNode.id, target: caseNode.id, value: caseNode.isDefault ? 'default' : caseNode.caseVal };
+            switchNode.next.push(edgeToCase);
+            caseNode.prev.push(edgeToCase);
+            
+            const blocksInside = Object.values(nodes).filter(n => n.id !== caseNode.id && n.parentId === caseNode.id);
+            if (blocksInside.length > 0) {
+                blocksInside.sort((a, b) => a.y - b.y);
+                
+                for (let i = 0; i < blocksInside.length - 1; i++) {
+                    const curr = blocksInside[i];
+                    const nxt = blocksInside[i+1];
+                    if (curr.next.length === 0) {
+                        const internalEdge = { source: curr.id, target: nxt.id, value: '' };
+                        curr.next.push(internalEdge);
+                        nxt.prev.push(internalEdge);
+                    }
+                }
+
+                const firstBlock = blocksInside[0];
+                const lastBlocks = blocksInside.filter(b => b.next.length === 0);
+                
+                const edgeToFirst = { source: caseNode.id, target: firstBlock.id, value: '' };
+                caseNode.next.push(edgeToFirst);
+                firstBlock.prev.push(edgeToFirst);
+                
+                lastBlocks.forEach(lb => {
+                    mergeEdges.forEach(me => {
+                        const edgeFromLast = { source: lb.id, target: me.target, value: '' };
+                        lb.next.push(edgeFromLast);
+                        if (nodes[me.target]) nodes[me.target].prev.push(edgeFromLast);
+                    });
+                });
+            } else {
+                mergeEdges.forEach(me => {
+                    const edgeFromCase = { source: caseNode.id, target: me.target, value: '' };
+                    caseNode.next.push(edgeFromCase);
+                    if (nodes[me.target]) nodes[me.target].prev.push(edgeFromCase);
+                });
+            }
+        });
+        
+        mergeEdges.forEach(me => {
+            if (nodes[me.target]) {
+                nodes[me.target].prev = nodes[me.target].prev.filter(p => p.source !== switchNode.id);
+            }
+        });
+    });
+
+    const isIgnoredRootType = (t) => ['COMMENT', 'MERGE', 'END', 'GROUP_BG', 'LOOP_CONTAINER', 'FOR_CONTAINER', 'SWITCH_CONTAINER', 'CASE_CONTAINER'].includes(t);
+
+    const loopContainers = Object.values(nodes).filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
+    const isInsideLoop = (node, loop) => {
+        if (!node || !loop) return false;
+        if (node.type === 'START' || node.type === 'START_END' || node.type === 'END') return false;
+        const nW = node.width || 100;
+        const nH = node.height || 50;
+        const coreW = nW * 0.5;
+        const coreH = nH * 0.5;
+        const coreX = node.x + (nW - coreW) / 2;
+        const coreY = node.y + (nH - coreH) / 2;
+        const loopW = loop.width || 300;
+        const loopH = loop.height || 150;
+        const isInside = (coreX < loop.x + loopW && coreX + coreW > loop.x && coreY < loop.y + loopH && coreY + coreH > loop.y);
+        return isInside;
+    };
+
+    loopContainers.forEach(loopNode => {
+        const blocksInside = Object.values(nodes).filter(n => !isIgnoredRootType(n.type) && isInsideLoop(n, loopNode));
+        if (blocksInside.length > 0) {
+            blocksInside.sort((a, b) => a.y - b.y || a.x - b.x);
+            
+            for (let i = 0; i < blocksInside.length - 1; i++) {
+                const curr = blocksInside[i];
+                const nxt = blocksInside[i+1];
+                
+                // If curr has an exit edge leaving the loop, move it to the last block
+                const exitEdges = curr.next.filter(e => !isInsideLoop(nodes[e.target], loopNode));
+                if (exitEdges.length > 0 && curr.next.every(e => !isInsideLoop(nodes[e.target], loopNode))) {
+                    curr.next = curr.next.filter(e => isInsideLoop(nodes[e.target], loopNode));
+                    const lastBlock = blocksInside[blocksInside.length - 1];
+                    exitEdges.forEach(ee => {
+                        const newExit = { source: lastBlock.id, target: ee.target, value: ee.value };
+                        lastBlock.next.push(newExit);
+                        if (nodes[ee.target]) {
+                            nodes[ee.target].prev = nodes[ee.target].prev.map(p => p.source === curr.id ? newExit : p);
+                        }
+                    });
+                }
+
+                if (curr.next.length === 0) {
+                    const internalEdge = { source: curr.id, target: nxt.id, value: '' };
+                    curr.next.push(internalEdge);
+                    nxt.prev.push(internalEdge);
+                }
+            }
+        }
+    });
+
     const startNodes = Object.values(nodes).filter(n => n.type === 'START');
     startNodes.sort((a, b) => a.x - b.x || a.y - b.y);
 
     let clusterId = 1;
     let assigned = new Set();
     
-    startNodes.forEach(sn => {
-        let q = [sn.id];
-        assigned.add(sn.id);
+    const markCluster = (startId) => {
+        let q = [startId];
+        assigned.add(startId);
         while(q.length > 0) {
             let curr = q.shift();
             const node = nodes[curr];
-            if (node && node.next) {
-                node.next.forEach(e => {
-                    if(!assigned.has(e.target)) {
-                        assigned.add(e.target);
-                        q.push(e.target);
-                    }
+            if (node) {
+                const insideLoops = loopContainers.filter(l => isInsideLoop(node, l));
+                insideLoops.forEach(l => {
+                    Object.values(nodes).forEach(inNode => {
+                        if (!assigned.has(inNode.id) && !isIgnoredRootType(inNode.type) && inNode.prev.length === 0 && isInsideLoop(inNode, l)) {
+                            assigned.add(inNode.id);
+                            q.push(inNode.id);
+                        }
+                    });
                 });
+
+                if (node.next) {
+                    node.next.forEach(e => {
+                        if(!assigned.has(e.target)) {
+                            assigned.add(e.target);
+                            q.push(e.target);
+                        }
+                    });
+                }
             }
         }
-    });
+    };
+
+    startNodes.forEach(sn => markCluster(sn.id));
 
     const realStartsCount = startNodes.length;
 
-    let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && n.type !== 'COMMENT' && n.type !== 'MERGE' && n.type !== 'END' && n.type !== 'GROUP_BG');
+    let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type));
     
     roots.forEach(r => {
         const ghostId = `ghost_start_${clusterId}`;
@@ -140,24 +282,11 @@ export const parseDrawioToPython = (xml) => {
         startNodes.push(nodes[ghostId]);
         clusterId++;
         
-        let q = [r.id];
-        assigned.add(r.id);
-        while(q.length > 0) {
-            let curr = q.shift();
-            const node = nodes[curr];
-            if(node && node.next) {
-                node.next.forEach(e => {
-                    if(!assigned.has(e.target)) {
-                        assigned.add(e.target);
-                        q.push(e.target);
-                    }
-                });
-            }
-        }
+        markCluster(r.id);
     });
 
     Object.values(nodes).forEach(n => {
-        if (!assigned.has(n.id) && n.type !== 'COMMENT' && n.type !== 'START' && n.type !== 'END' && n.type !== 'MERGE' && n.type !== 'GROUP_BG') {
+        if (!assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type)) {
             const ghostId = `ghost_start_${clusterId}`;
             nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
             edges.push({ source: ghostId, target: n.id, value: '' });
@@ -166,20 +295,7 @@ export const parseDrawioToPython = (xml) => {
             startNodes.push(nodes[ghostId]);
             clusterId++;
             
-            let q = [n.id];
-            assigned.add(n.id);
-            while(q.length > 0) {
-                let curr = q.shift();
-                const node = nodes[curr];
-                if(node && node.next) {
-                    node.next.forEach(e => {
-                        if(!assigned.has(e.target)) {
-                            assigned.add(e.target);
-                            q.push(e.target);
-                        }
-                    });
-                }
-            }
+            markCluster(n.id);
         }
     });
 
@@ -325,10 +441,38 @@ export const parseDrawioToPython = (xml) => {
                 
                 printCommentsBeforeY(Infinity, indent + "    ");
             }
-            else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE') {
-                generateStatement(node, indent);
+            else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE' || node.type === 'CASE_CONTAINER') {
+                if (node.type === 'CASE_CONTAINER') {
+                    if (node.isDefault) appendLine(`${indent}case _:`, node.id);
+                    else appendLine(`${indent}case ${node.caseVal || '1'}:`, node.id);
+                    indent += "    ";
+                } else {
+                    generateStatement(node, indent);
+                }
+                
                 if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
                     traverse(node.next[0].target, indent, new Set(inPath), stopId);
+                }
+            }
+            else if (node.type === 'SWITCH_CONTAINER') {
+                printCommentsBeforeY(node.y, indent);
+                appendLine(`${indent}match ${node.switchVar || 'x'}:`, node.id);
+                
+                let mergeNode = null;
+                if (node.next.length > 1) {
+                    mergeNode = node.next.map(e => e.target).reduce((acc, target) => findConvergence(acc, target));
+                } else if (node.next.length === 1) {
+                    mergeNode = node.next[0].target;
+                }
+
+                node.next.forEach(e => {
+                    if (!inPath.has(e.target)) {
+                        traverse(e.target, indent + "    ", new Set(inPath), mergeNode);
+                    }
+                });
+                
+                if (mergeNode && !inPath.has(mergeNode)) {
+                    traverse(mergeNode, indent, new Set(inPath), stopId);
                 }
             }
             else if (node.type === 'CONDITION') {

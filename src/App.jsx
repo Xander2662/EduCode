@@ -319,36 +319,22 @@ const ToggleSwitch = ({ checked, onChange, label }) => (
 );
 
 const CustomSelect = ({ value, options, onChange, label }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const selectedOption = options.find(o => o.value === value) || options[0];
-
   return (
     <div className="relative mb-5">
       {label && <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">{label}</label>}
-      <button 
-        onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
-        className="w-full text-sm bg-gray-50/50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg outline-none px-3 py-2 flex items-center justify-between text-gray-700 dark:text-gray-300 hover:border-indigo-400 transition-colors"
+      <select 
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full text-sm bg-gray-50/50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg outline-none px-3 py-2 text-gray-700 dark:text-gray-300 hover:border-indigo-400 transition-colors appearance-none cursor-pointer"
+        onClick={(e) => e.stopPropagation()}
       >
-        <span>{selectedOption?.label}</span>
-        <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-      
-      {isOpen && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setIsOpen(false); }}></div>
-          <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden border">
-            {options.map(opt => (
-              <button 
-                key={opt.value}
-                onClick={(e) => { e.stopPropagation(); onChange(opt.value); setIsOpen(false); }}
-                className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 ${value === opt.value ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+        {options.map(opt => (
+          <option key={opt.value} value={opt.value} className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={14} className="absolute right-3 top-9 pointer-events-none text-gray-500" />
     </div>
   );
 };
@@ -379,7 +365,7 @@ function AppContent() {
   const [groupColoring, setGroupColoring] = useState(localStorage.getItem('groupColoring') === 'true');
   const [showDebugger, setShowDebugger] = useState(localStorage.getItem('showDebugger') === 'true');
   const [conditionShape, setConditionShape] = useState(localStorage.getItem('conditionShape') || 'hexagon');
-  const [editorMode, setEditorMode] = useState(localStorage.getItem('editorMode') || 'advanced');
+  const [editorMode, setEditorMode] = useState(localStorage.getItem('editorMode') || 'simple');
 
   const [selectedNodeIds, setSelectedNodeIds] = useState([]);
   const [externalSelectedIds, setExternalSelectedIds] = useState([]);
@@ -581,6 +567,11 @@ function AppContent() {
   // DO NOT MODIFY THIS LOGIC WITHOUT A THOROUGH UNDERSTANDING OF THE BIDIRECTIONAL SYNC.
   // =========================================================================================
 
+  const latestDiagramXmlRef = useRef(diagramXml);
+  useEffect(() => {
+    latestDiagramXmlRef.current = diagramXml;
+  }, [diagramXml]);
+
   // SYNC 1: Diagram -> Pseudocode
   useEffect(() => {
     if (!panels.includes('pseudocode')) return;
@@ -620,8 +611,6 @@ function AppContent() {
   </root>
 </mxGraphModel>`;
 
-
-
     const timeoutId = setTimeout(() => {
       try {
         if (!pseudocode || pseudocode.trim() === '') {
@@ -630,7 +619,7 @@ function AppContent() {
             return;
         }
 
-        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode, diagramXml, edgeStyle, conditionShape, editorMode);
+        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode, latestDiagramXmlRef.current, edgeStyle, conditionShape, editorMode);
         
         const parser = new DOMParser();
         const doc = parser.parseFromString(generatedXml, "text/xml");
@@ -659,7 +648,7 @@ function AppContent() {
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [pseudocode, diagramXml, editorMode, flow, edgeStyle, conditionShape, logAction, syncTrigger, panels]);
+  }, [pseudocode, editorMode, flow, edgeStyle, conditionShape, logAction, syncTrigger, panels]);
 
   // SYNC 3: Python -> Diagram
   useEffect(() => {
@@ -677,7 +666,7 @@ function AppContent() {
         }
         
         const intermediatePseudocode = parsePythonToPseudocode(pythonCode);
-        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(intermediatePseudocode, diagramXml, edgeStyle, conditionShape, editorMode);
+        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(intermediatePseudocode, latestDiagramXmlRef.current, edgeStyle, conditionShape, editorMode);
 
         setDiagramXml(prev => {
             if (prev !== generatedXml) {
@@ -692,7 +681,7 @@ function AppContent() {
       }
     }, 400);
     return () => clearTimeout(timeoutId);
-  }, [pythonCode, diagramXml, editorMode, flow, edgeStyle, conditionShape, logAction, syncTrigger, panels]);
+  }, [pythonCode, editorMode, flow, edgeStyle, conditionShape, logAction, syncTrigger, panels]);
 
   useEffect(() => {
     if (panels.includes('python')) {

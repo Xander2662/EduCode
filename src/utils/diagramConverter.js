@@ -13,6 +13,7 @@ export const drawioToReactFlow = (xml) => {
     const edge = cell.getAttribute('edge');
 
     if (vertex === '1') {
+      const parentId = cell.getAttribute('parent');
       let value = cell.getAttribute('value') || '';
       value = value.replace(/<br\s*\/?>/gi, '\n')
                    .replace(/<\/div>/gi, '\n')
@@ -37,8 +38,10 @@ export const drawioToReactFlow = (xml) => {
       else if (style.includes('rhombus') || style.includes('hexagon')) type = 'CONDITION';
       else if (style.includes('shape=parallelogram')) type = 'IO';
       else if (style.includes('shape=note') || style.includes('fillColor=#fff2cc')) type = 'COMMENT';
-      else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER')) {
-          type = style.includes('forInit=') ? 'FOR_CONTAINER' : 'LOOP_CONTAINER';
+      else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || style.includes('SWITCH_CONTAINER') || style.includes('CASE_CONTAINER')) {
+          if (style.includes('SWITCH_CONTAINER')) type = 'SWITCH_CONTAINER';
+          else if (style.includes('CASE_CONTAINER')) type = 'CASE_CONTAINER';
+          else type = style.includes('forInit=') ? 'FOR_CONTAINER' : 'LOOP_CONTAINER';
       }
 
       const modeMatch = style.match(/mode=([^;]+)/);
@@ -59,14 +62,31 @@ export const drawioToReactFlow = (xml) => {
               doWhile: doWhileAttr ? doWhileAttr === 'true' : (doWhileMatch ? doWhileMatch[1] === 'true' : false),
               forInit: style.match(/forInit=([^;]+)/) ? decodeURIComponent(style.match(/forInit=([^;]+)/)[1]) : undefined,
               forLimit: style.match(/forLimit=([^;]+)/) ? decodeURIComponent(style.match(/forLimit=([^;]+)/)[1]) : undefined,
-              forStep: style.match(/forStep=([^;]+)/) ? decodeURIComponent(style.match(/forStep=([^;]+)/)[1]) : undefined
+              forStep: style.match(/forStep=([^;]+)/) ? decodeURIComponent(style.match(/forStep=([^;]+)/)[1]) : undefined,
+              switchVar: style.match(/switchVar=([^;]+)/) ? decodeURIComponent(style.match(/switchVar=([^;]+)/)[1]) : undefined,
+              caseVal: style.match(/caseVal=([^;]+)/) ? decodeURIComponent(style.match(/caseVal=([^;]+)/)[1]) : undefined,
+              isDefault: style.match(/isDefault=([^;]+)/) ? style.match(/isDefault=([^;]+)/)[1] === 'true' : false
           } 
       };
-      if (type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER' || type === 'GROUP_BG') {
+      
+      if (parentId && parentId !== '0' && parentId !== '1') {
+          nodeObj.parentId = parentId;
+          nodeObj.extent = 'parent';
+      }
+
+      if (type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER' || type === 'GROUP_BG' || type === 'SWITCH_CONTAINER') {
+          nodeObj.zIndex = -1;
+      }
+      if (type === 'CASE_CONTAINER') {
+          nodeObj.zIndex = 5;
+      }
+
+      if (type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER' || type === 'GROUP_BG' || type === 'SWITCH_CONTAINER' || type === 'CASE_CONTAINER') {
           const w = geo ? parseFloat(geo.getAttribute('width') || 0) : 300;
           const h = geo ? parseFloat(geo.getAttribute('height') || 0) : 300;
           nodeObj.style = { width: w, height: h };
       }
+      
       nodes.push(nodeObj);
     } else if (edge === '1') {
       const source = cell.getAttribute('source');
@@ -108,6 +128,8 @@ export const reactFlowToDrawio = (nodes, edges) => {
     MERGE: "ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;resizable=0;movable=0;rotatable=0;",
     LOOP_CONTAINER: "swimlane;whiteSpace=wrap;html=1;dashed=1;fillColor=none;",
     FOR_CONTAINER: "swimlane;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#4f46e5;",
+    SWITCH_CONTAINER: "swimlane;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#f97316;SWITCH_CONTAINER;",
+    CASE_CONTAINER: "swimlane;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#f97316;CASE_CONTAINER;",
     EDGE: "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;"
   };
 
@@ -119,7 +141,7 @@ export const reactFlowToDrawio = (nodes, edges) => {
     if (n.type === 'START_END') { w = 100; h = 40; }
     if (n.type === 'COMMENT') { w = 140; h = 50; }
     if (n.type === 'MERGE') { w = 10; h = 10; }
-    if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'GROUP_BG') {
+    if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'GROUP_BG' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') {
         w = parseInt(n.style?.width) || 300;
         h = parseInt(n.style?.height) || 300;
     }
@@ -134,8 +156,12 @@ export const reactFlowToDrawio = (nodes, edges) => {
     if (n.data?.forInit !== undefined) style += `forInit=${encodeURIComponent(n.data.forInit)};`;
     if (n.data?.forLimit !== undefined) style += `forLimit=${encodeURIComponent(n.data.forLimit)};`;
     if (n.data?.forStep !== undefined) style += `forStep=${encodeURIComponent(n.data.forStep)};`;
+    if (n.data?.switchVar !== undefined) style += `switchVar=${encodeURIComponent(n.data.switchVar)};`;
+    if (n.data?.caseVal !== undefined) style += `caseVal=${encodeURIComponent(n.data.caseVal)};`;
+    if (n.data?.isDefault !== undefined) style += `isDefault=${n.data.isDefault};`;
 
-    xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}" vertex="1" parent="1">\n`;
+    const parentAttr = n.parentId ? n.parentId : '1';
+    xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}" vertex="1" parent="${parentAttr}">\n`;
     xml += `      <mxGeometry x="${Math.round(n.position.x)}" y="${Math.round(n.position.y)}" width="${w}" height="${h}" as="geometry" />\n`;
     xml += `    </mxCell>\n`;
   });

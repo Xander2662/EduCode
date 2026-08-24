@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, Background, MarkerType, useReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Download, Upload, Square, Circle, Diamond, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box, Hexagon } from 'lucide-react';
+import { Download, Upload, Square, Circle, Diamond, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box, Hexagon, Columns } from 'lucide-react';
 import { drawioToReactFlow, reactFlowToDrawio } from '../utils/diagramConverter';
 import { calculateGroupNodes } from '../utils/grouping';
+import { calculateRestructuredLayout } from '../utils/visualLayoutEngine';
 import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
-import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode, LoopContainerNode, ForContainerNode } from './diagram/CustomNodes';
+import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode, LoopContainerNode, ForContainerNode, SwitchContainerNode, CaseContainerNode } from './diagram/CustomNodes';
 
 const IoIcon = ({ size = 24, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -23,7 +24,9 @@ const nodeTypes = {
   MERGE: MergeNode, 
   GROUP_BG: GroupBgNode,
   LOOP_CONTAINER: LoopContainerNode,
-  FOR_CONTAINER: ForContainerNode
+  FOR_CONTAINER: ForContainerNode,
+  SWITCH_CONTAINER: SwitchContainerNode,
+  CASE_CONTAINER: CaseContainerNode
 };
 const edgeTypes = { customEdge: CustomEdge };
 
@@ -130,7 +133,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const mappedNodes = useMemo(() => nodes.map(n => ({
         ...n,
-        zIndex: (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? -1 : 10,
+        zIndex: (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER') ? -1 : 10,
         data: { 
             ...n.data, 
             colorMode, 
@@ -212,10 +215,18 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     if(onLogAction) onLogAction('NODES_DELETED', { count: selectedNodes.length });
     const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
     const selectedEdgeIds = new Set(selectedEdges.map(e => e.id));
+    
+    // Cascade deletes to native children (like Case groups inside a Switch)
+    nodes.forEach(n => {
+        if (n.parentId && selectedNodeIds.has(n.parentId)) {
+            selectedNodeIds.add(n.id);
+        }
+    });
+    
     setNodes(nds => nds.filter(n => !selectedNodeIds.has(n.id)));
     setEdges(eds => eds.filter(e => !selectedEdgeIds.has(e.id) && !selectedNodeIds.has(e.source) && !selectedNodeIds.has(e.target)));
     setDeleteConfirm(false);
-  }, [selectedNodes, selectedEdges, setNodes, setEdges, handleInteract, onLogAction]);
+  }, [selectedNodes, selectedEdges, setNodes, setEdges, handleInteract, onLogAction, nodes]);
 
   const handleCopy = useCallback(() => { 
     if (selectedNodes.length > 0) {
@@ -312,10 +323,51 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
     let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
     if (draggedNodes.length === 0) draggedNodes = [node];
-    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER')) return;
+    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER')) return;
 
     const draggedIds = new Set(draggedNodes.map(n => n.id));
     if (edges.some(e => (draggedIds.has(e.source) && !draggedIds.has(e.target)) || (draggedIds.has(e.target) && !draggedIds.has(e.source)))) return;
+
+    // Morphing logic for dropping multiple nodes into a loop/for container
+    if (draggedNodes.length > 1) {
+        const allContainers = nodes.filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
+        const ptX = node.position.x + (node.measured?.width || 120) / 2;
+        const ptY = node.position.y + (node.measured?.height || 50) / 2;
+        
+        const hoveredContainer = allContainers.find(c => {
+            const cX = c.position.x;
+            const cY = c.position.y;
+            const cW = c.style?.width ? parseInt(c.style.width) : (c.measured?.width || (c.type === 'FOR_CONTAINER' ? 350 : 300));
+            const cH = c.style?.height ? parseInt(c.style.height) : (c.measured?.height || (c.type === 'FOR_CONTAINER' ? 200 : 150));
+            return ptX >= cX && ptX <= cX + cW && ptY >= cY && ptY <= cY + cH;
+        });
+
+        if (hoveredContainer) {
+            const targets = calculateRestructuredLayout(draggedNodes, hoveredContainer);
+            setNodes(nds => nds.map(n => {
+                if (targets.has(n.id)) {
+                    const target = targets.get(n.id);
+                    const dx = target.x - n.position.x;
+                    const dy = target.y - n.position.y;
+                    if (!n.data.morphOffset || Math.abs(n.data.morphOffset.x - dx) > 2 || Math.abs(n.data.morphOffset.y - dy) > 2) {
+                        return { ...n, data: { ...n.data, morphOffset: { x: dx, y: dy } } };
+                    }
+                } else if (n.data.morphOffset) {
+                    return { ...n, data: { ...n.data, morphOffset: null } };
+                }
+                return n;
+            }));
+        } else {
+            let clearedAny = false;
+            setNodes(nds => nds.map(n => {
+                if (n.data.morphOffset) {
+                    clearedAny = true;
+                    return { ...n, data: { ...n.data, morphOffset: null } };
+                }
+                return n;
+            }));
+        }
+    }
 
     const edgeElem = getHitEdge(event, draggedNodes);
     
@@ -327,7 +379,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         edgeElem.classList.add('drop-target');
         hoveredEdgeRef.current = edgeElem;
     }
-  }, [edges, nodes, readOnly]);
+  }, [edges, nodes, readOnly, setNodes]);
 
   const onNodeDragStop = useCallback((event, node) => {
     if (readOnly) return;
@@ -336,10 +388,36 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
     let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
     if (draggedNodes.length === 0) draggedNodes = [node];
-    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER')) return;
+    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER')) return;
 
     const draggedIds = new Set(draggedNodes.map(n => n.id));
     if (edges.some(e => (draggedIds.has(e.source) && !draggedIds.has(e.target)) || (draggedIds.has(e.target) && !draggedIds.has(e.source)))) return;
+
+    if (draggedNodes.length > 1) {
+        let appliedMorph = false;
+        let newNodes = [];
+        
+        nodes.forEach(n => {
+            if (draggedIds.has(n.id) && n.data.morphOffset) {
+                appliedMorph = true;
+                const newPos = {
+                    x: n.position.x + n.data.morphOffset.x,
+                    y: n.position.y + n.data.morphOffset.y
+                };
+                newNodes.push({ ...n, position: newPos, data: { ...n.data, morphOffset: null } });
+            } else if (n.data.morphOffset) {
+                newNodes.push({ ...n, data: { ...n.data, morphOffset: null } });
+            } else {
+                newNodes.push(n);
+            }
+        });
+        
+        if (appliedMorph) {
+            setNodes(newNodes);
+            if(onLogAction) onLogAction('DRAG_AND_DROP_ROUTING', { draggedCount: draggedNodes.length, type: 'MORPH_LAYOUT' });
+            return; // Skip standard edge drop!
+        }
+    }
 
     const edgeElem = getHitEdge(event, draggedNodes);
 
@@ -507,8 +585,9 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             onChange: (e) => updateNodeLabel(newId, e.target.value),
             onUpdateData: (newData) => updateNodeData(newId, newData)
         },
-        ...(type === 'LOOP_CONTAINER' ? { style: { width: 300, height: 150 } } : {}),
-        ...(type === 'FOR_CONTAINER' ? { style: { width: 350, height: 200 } } : {})
+        ...(type === 'LOOP_CONTAINER' ? { style: { width: 350, height: 200 } } : {}),
+        ...(type === 'FOR_CONTAINER' ? { style: { width: 350, height: 200 } } : {}),
+        ...(type === 'SWITCH_CONTAINER' ? { style: { width: 450, height: 250 } } : {})
     }));
   }, [readOnly, handleInteract, onLogAction, screenToFlowPosition, setNodes, updateNodeData, updateNodeLabel]);
 
@@ -645,7 +724,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
                   {type: 'CONDITION', label: 'Podmínka', icon: Diamond, color: colorMode ? "text-orange-500" : "text-gray-500"},
                   ...(editorMode !== 'advanced' ? [
                     {type: 'LOOP_CONTAINER', label: 'Cyklus (Skupina)', icon: Hexagon, color: colorMode ? "text-purple-500" : "text-gray-500"},
-                    {type: 'FOR_CONTAINER', label: 'FOR Cyklus', icon: Box, color: colorMode ? "text-indigo-500" : "text-gray-500"}
+                    {type: 'FOR_CONTAINER', label: 'FOR Cyklus', icon: Box, color: colorMode ? "text-indigo-500" : "text-gray-500"},
+                    {type: 'SWITCH_CONTAINER', label: 'Switch (Větvení)', icon: Columns, color: colorMode ? "text-rose-500" : "text-gray-500"}
                   ] : []),
                   {type: 'COMMENT', label: 'Komentář', icon: MessageSquare, color: colorMode ? "text-yellow-500" : "text-gray-500"}
                 ].map(item => (
@@ -672,6 +752,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           <>
             <button data-testid="Cyklus" onClick={() => { clearHover(); addNodeAt('LOOP_CONTAINER', ''); }} onMouseEnter={(e) => handlePointerDown('LOOP_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('LOOP_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Hexagon size={18} className={colorMode ? "text-purple-600" : ""} /></button>
             <button data-testid="FOR Cyklus" onClick={() => { clearHover(); addNodeAt('FOR_CONTAINER', ''); }} onMouseEnter={(e) => handlePointerDown('FOR_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('FOR_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Box size={18} className={colorMode ? "text-indigo-600" : ""} /></button>
+            <button data-testid="Switch" onClick={() => { clearHover(); addNodeAt('SWITCH_CONTAINER', 'x'); }} onMouseEnter={(e) => handlePointerDown('SWITCH_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('SWITCH_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Columns size={18} className={colorMode ? "text-rose-600" : ""} /></button>
           </>
         )}
         <button data-testid="Komentář" onClick={() => { clearHover(); addNodeAt('COMMENT', '# Komentář'); }} onMouseEnter={(e) => handlePointerDown('COMMENT', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('COMMENT', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
@@ -723,9 +804,10 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           isValidConnection={isValidConnection} 
           nodeTypes={nodeTypes} edgeTypes={edgeTypes} 
           defaultEdgeOptions={{ type: 'customEdge', markerEnd: { type: MarkerType.ArrowClosed } }}
-          fitView deleteKeyCode={null} selectionOnDrag={true} panOnDrag={[1, 2]} panOnScroll={true} selectionMode="partial" multiSelectionKeyCode="Control"
+          fitView deleteKeyCode={null} selectionOnDrag={true} panOnDrag={[1, 2]} panOnScroll={true} selectionMode="full" multiSelectionKeyCode="Control"
           elementsSelectable={!readOnly}
           nodesDraggable={!readOnly}
+          elevateNodesOnSelect={false}
         >
           <Background color="#ccc" gap={16} />
           <Controls />
