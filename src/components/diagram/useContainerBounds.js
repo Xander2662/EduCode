@@ -55,12 +55,13 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
             
             return nds.map(n => {
                 if (n.id === id) {
-                    return { ...n, data: { ...n.data, isNew: false }, zIndex: -Math.round(targetWidth), style: { ...n.style, height: targetHeight, width: targetWidth } };
+                    const nextZIndex = data.isCaseContainer ? -9999 : -Math.round(targetWidth);
+                    return { ...n, data: { ...n.data, isNew: false }, zIndex: nextZIndex, style: { ...n.style, height: targetHeight, width: targetWidth } };
                 }
                 return n;
             });
         });
-    }, [id, setNodes, minWidth, minHeight]);
+    }, [id, setNodes, minWidth, minHeight, data.isCaseContainer]);
 
     useEffect(() => {
         if (data.isNew) {
@@ -133,7 +134,14 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                 // Prevent infinite stretching cycles: A node can ONLY be inside me if its top-left corner 
                 // is mathematically positioned at or after my top-left corner. This prevents a child container 
                 // from accidentally claiming ownership of its own parent!
-                const isInside = (n.position.x >= myX - 5) && (n.position.y >= myY - 5) && 
+                let tagBottomOffset = 15;
+                if (containerRef.current) {
+                    const tag = containerRef.current.querySelector('.custom-drag-handle');
+                    if (tag) {
+                        tagBottomOffset = tag.offsetTop + tag.offsetHeight;
+                    }
+                }
+                const isInside = (n.position.x >= myX - 5) && (n.position.y >= myY + tagBottomOffset) && 
                                  (coreX < myX + myWidth && coreX + coreW > myX && coreY < myY + myHeight && coreY + coreH > myY - 10);
                 
                 if (isInside) {
@@ -224,7 +232,12 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                     const nodeStretchDistRight = reqW - ASL_Width;
                     const nodeStretchDistBottom = reqH - ASL_Height;
                     const stretchDistLeft = myX - minXNode;
-                    const stretchDistTop = myY - minYNode;
+                    let tagBottomOffset = 15;
+                    if (containerRef.current) {
+                        const tag = containerRef.current.querySelector('.custom-drag-handle');
+                        if (tag) tagBottomOffset = tag.offsetTop + tag.offsetHeight;
+                    }
+                    const stretchDistTop = (myY + tagBottomOffset) - minYNode;
                     
                     let dragState = nodeDragStates.current.get(draggingNode.id);
                     if (!dragState) {
@@ -302,12 +315,10 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                     'border-b-indigo-500', 'border-r-indigo-500', 'border-l-indigo-500', 'border-t-indigo-500'
                 );
                 
-                const isFor = data.isForContainer; // I will add this flag from the component
+                const isFor = data.isForContainer;
                 
                 if (atStretchLimitRight || atStretchLimitBottom) {
                     containerRef.current.classList.add(isFor ? 'bg-indigo-100/50' : 'bg-purple-100/50', isFor ? 'dark:bg-indigo-800/30' : 'dark:bg-purple-800/30');
-                } else if (hasPendingIn) {
-                    containerRef.current.classList.add(isFor ? 'bg-indigo-100' : 'bg-purple-100', isFor ? 'dark:bg-indigo-900/30' : 'dark:bg-purple-900/30', 'ring-4', isFor ? 'ring-indigo-400' : 'ring-purple-400');
                 }
             }
             
@@ -323,7 +334,11 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                 if (rfNode) {
                     // Strictly enforce zIndex based on width so parents ALWAYS stay behind children, 
                     // even if React Flow attempts to bring a selected node to the front!
-                    rfNode.style.zIndex = -Math.round(newWidth);
+                    if (!data.isCaseContainer) {
+                        rfNode.style.zIndex = -Math.round(newWidth);
+                    } else {
+                        rfNode.style.zIndex = -9999;
+                    }
                     
                     if (!anyChildDragging || Date.now() < animateResizeUntil.current) {
                         rfNode.classList.add('animate-resize');

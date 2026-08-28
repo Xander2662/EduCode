@@ -9,7 +9,7 @@ describe('diagramToPython parser', () => {
             <mxCell id="1" parent="0"/>
             <mxCell id="start" value="main" style="ellipse" vertex="1" parent="1"/>
             <mxCell id="a1" value="x = 10" style="rounded=1" vertex="1" parent="1"/>
-            <mxCell id="a2" value="&quot;Hello&quot;" style="rounded=1" vertex="1" parent="1"/>
+            <mxCell id="a2" value="doWork()" style="rounded=1" vertex="1" parent="1"/>
             <mxCell id="end" value="ENDFUNCTION" style="ellipse;mode=end" vertex="1" parent="1"/>
             <mxCell id="e1" source="start" target="a1" edge="1" parent="1"/>
             <mxCell id="e2" source="a1" target="a2" edge="1" parent="1"/>
@@ -19,7 +19,7 @@ describe('diagramToPython parser', () => {
         const res = parseDrawioToPython(xml);
         expect(res.code).toContain('def main():');
         expect(res.code).toContain('    x = 10');
-        expect(res.code).toContain('    print("Hello")');
+        expect(res.code).toContain('    doWork()');
         expect(res.code).toContain("if __name__ == '__main__':\n    main()");
     });
 

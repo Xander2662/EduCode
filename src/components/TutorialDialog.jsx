@@ -454,7 +454,7 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                 <Square size={24} className="text-blue-600 mt-1 shrink-0" />
                 <div>
                   <h4 className="font-bold text-blue-800 dark:text-blue-400">Akce (Operace)</h4>
-                  <p className="text-xs mt-1">Matematické operace (<code>x = x + 1</code>) nebo volání funkcí. Pokud napíšete <code>"Text"</code>, vygeneruje se PRINT.</p>
+                  <p className="text-xs mt-1">Matematické operace (<code>x = x + 1</code>), přiřazení nebo volání funkcí. V pokročilém režimu lze pro rychlý výpis napsat přímo <code>"Text"</code> (vygeneruje se PRINT).</p>
                 </div>
               </div>
               <div onClick={() => setActiveDeepDive('IO')} className="border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
@@ -505,6 +505,16 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
           {type === 'drawio' && tab === 'spojovani' && (
             <>
               <div>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><MousePointer size={18}/> Vytvoření bloku při tažení šipky (Pravé tlačítko / Mouse 2)</h3>
+                <p className="mb-4 text-gray-600 dark:text-gray-400">Když táhnete novou šipku z libovolného bodu bloku a kliknete <strong>pravým tlačítkem myši (Mouse 2)</strong> do prázdného prostoru, otevře se nabídka bloků. Výběrem bloku se blok rovnou vytvoří na místě kurzoru a tažená šipka se do něj okamžitě připojí.</p>
+              </div>
+              <hr className="border-gray-200 dark:border-gray-700" />
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><Move size={18}/> Automatické nahrazení předchozích spojení</h3>
+                <p className="mb-4 text-gray-600 dark:text-gray-400">Při napojení nové šipky se <strong>automaticky odebere staré spojení</strong>, které z daného bodu vycházelo, i předchozí šipka mířící do stejného cílového bodu. Nemusíte tak staré šipky ručně mazat.</p>
+              </div>
+              <hr className="border-gray-200 dark:border-gray-700" />
+              <div>
                 <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2 text-base flex items-center gap-2"><Move size={18}/> Vkládání bloků do šipky (Drag & Drop)</h3>
                 <p className="mb-4 text-gray-600 dark:text-gray-400">Nemusíte složitě mazat a znovu tvořit spojení. Pokud přesunete nový nebo existující blok <strong>přímo nad existující šipku</strong>, šipka se zbarví modře a blok se do ní sám vklíní a automaticky se propojí.</p>
               </div>
@@ -524,6 +534,10 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
           {type === 'drawio' && tab === 'klavesy' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Ctrl+Z</kbd> / <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Ctrl+Y</kbd>
+                <p className="mt-2 text-xs">Krok zpět (Undo) a krok vpřed (Redo) v diagramu.</p>
+              </div>
+              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
                 <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Del</kbd>
                 <p className="mt-2 text-xs">Smaže vybraný blok nebo hranu.</p>
               </div>
@@ -536,12 +550,20 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
                 <p className="mt-2 text-xs">Okamžitě edituje text vybraného bloku.</p>
               </div>
               <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Ctrl + Kolečko</kbd>
+                <p className="mt-2 text-xs">Plynulé přiblížení / oddálení celého pohledu (Zoom).</p>
+              </div>
+              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
+                <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Mouse 3 (Kolečko)</kbd>
+                <p className="mt-2 text-xs">Stisknutím prostředního tlačítka myši uchopíte a posunete celé plátno (Pan).</p>
+              </div>
+              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
                 <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Shift + Tažení</kbd>
                 <p className="mt-2 text-xs">Hromadný výběr pomocí obdélníku.</p>
               </div>
               <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
                 <kbd className="bg-white dark:bg-gray-900 border border-gray-300 px-2 py-1 rounded text-xs mr-2 shadow-sm font-mono">Ctrl + Klik</kbd>
-                <p className="mt-2 text-xs">Postupné přidávání bloků do výběru.</p>
+                <p className="mt-2 text-xs">Postupné přidávání/odebíraní bloků do výběru.</p>
               </div>
             </div>
           )}

@@ -10,7 +10,7 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
   const isCondition = nodes.find(n => n.id === source)?.type === 'CONDITION';
   const isTargetMerge = nodes.find(n => n.id === target)?.type === 'MERGE';
 
-  const loopNodes = nodes.filter(n => n.type === 'LOOP_CONTAINER');
+  const loopNodes = nodes.filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
   
   const isInside = (nodeId, loop) => {
       const n = nodes.find(x => x.id === nodeId);
@@ -22,14 +22,14 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
       const coreW = nW * 0.5, coreH = nH * 0.5;
       const coreX = nX + (nW - coreW) / 2, coreY = nY + (nH - coreH) / 2;
       
-      const loopW = loop.measured?.width || loop.width || 300;
-      const loopH = loop.measured?.height || loop.height || 150;
+      const loopW = loop.measured?.width || loop.width || (loop.type === 'FOR_CONTAINER' ? 350 : 300);
+      const loopH = loop.measured?.height || loop.height || (loop.type === 'FOR_CONTAINER' ? 200 : 150);
       
       return (coreX < loop.position.x + loopW && coreX + coreW > loop.position.x && coreY < loop.position.y + loopH && coreY + coreH > loop.position.y);
   };
 
   const [edgePath, labelX, labelY, segments] = (() => {
-    const isBackEdge = sourceY > targetY - 20;
+    const isBackEdge = sourceY > targetY;
     let computedSegments = [];
     
     if (isBackEdge) {
@@ -61,7 +61,7 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
         }
         
         nodes.forEach(n => {
-            const isLoop = n.type === 'LOOP_CONTAINER';
+            const isLoop = n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER';
             if (!connectedNodes.has(n.id) && !isLoop) return;
             
             if (isLoop) {
@@ -70,7 +70,8 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
             
             if (n.position.y >= targetY - 30 && n.position.y <= sourceY + 30) {
                 const nodeX = n.position.x;
-                const nodeMaxX = nodeX + (n.measured?.width || n.width || (isLoop ? 300 : 150));
+                const defaultW = n.type === 'FOR_CONTAINER' ? 350 : (n.type === 'LOOP_CONTAINER' ? 300 : 150);
+                const nodeMaxX = nodeX + (n.measured?.width || n.width || defaultW);
                 if (nodeMaxX > maxX) maxX = nodeMaxX;
                 if (nodeX < minX) minX = nodeX;
             }
@@ -114,51 +115,84 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
         
         let path, finalLabelX;
         
-        if (routeLeft) {
-            const leftEdgeX = Math.min(minX - 40, sourceX - 40, targetX - 40);
-            
-            if (srcIsLeft) {
-                path = `M ${sourceX} ${sourceY} L ${leftEdgeX + r} ${sourceY} A ${r} ${r} 0 0 1 ${leftEdgeX} ${sourceY - r} L ${leftEdgeX} ${topY + r} A ${r} ${r} 0 0 1 ${leftEdgeX + r} ${topY} L ${targetX - r} ${topY} A ${r} ${r} 0 0 1 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
-                computedSegments = [
-                    { x1: sourceX, y1: sourceY, x2: leftEdgeX, y2: sourceY },
-                    { x1: leftEdgeX, y1: sourceY, x2: leftEdgeX, y2: topY },
-                    { x1: leftEdgeX, y1: topY, x2: targetX, y2: topY },
-                    { x1: targetX, y1: topY, x2: targetX, y2: targetY }
-                ];
+        const isTargetMergeOrLoop = loopNodes.some(n => n.id === target) || nodes.some(n => n.id === target && n.type === 'MERGE');
+        const shouldWrap = isTargetMergeOrLoop || (sourceY - targetY > 40);
+        
+        if (shouldWrap) {
+            if (routeLeft) {
+                const leftEdgeX = Math.min(minX - 40, sourceX - 40, targetX - 40);
+                
+                if (srcIsLeft) {
+                    path = `M ${sourceX} ${sourceY} L ${leftEdgeX + r} ${sourceY} A ${r} ${r} 0 0 1 ${leftEdgeX} ${sourceY - r} L ${leftEdgeX} ${topY + r} A ${r} ${r} 0 0 1 ${leftEdgeX + r} ${topY} L ${targetX - r} ${topY} A ${r} ${r} 0 0 1 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
+                    computedSegments = [
+                        { x1: sourceX, y1: sourceY, x2: leftEdgeX, y2: sourceY },
+                        { x1: leftEdgeX, y1: sourceY, x2: leftEdgeX, y2: topY },
+                        { x1: leftEdgeX, y1: topY, x2: targetX, y2: topY },
+                        { x1: targetX, y1: topY, x2: targetX, y2: targetY }
+                    ];
+                } else {
+                    path = `M ${sourceX} ${sourceY} L ${sourceX} ${bottomY - r} A ${r} ${r} 0 0 1 ${sourceX - r} ${bottomY} L ${leftEdgeX + r} ${bottomY} A ${r} ${r} 0 0 1 ${leftEdgeX} ${bottomY - r} L ${leftEdgeX} ${topY + r} A ${r} ${r} 0 0 1 ${leftEdgeX + r} ${topY} L ${targetX - r} ${topY} A ${r} ${r} 0 0 1 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
+                    computedSegments = [
+                        { x1: sourceX, y1: sourceY, x2: sourceX, y2: bottomY },
+                        { x1: sourceX, y1: bottomY, x2: leftEdgeX, y2: bottomY },
+                        { x1: leftEdgeX, y1: bottomY, x2: leftEdgeX, y2: topY },
+                        { x1: leftEdgeX, y1: topY, x2: targetX, y2: topY },
+                        { x1: targetX, y1: topY, x2: targetX, y2: targetY }
+                    ];
+                }
+                finalLabelX = leftEdgeX;
             } else {
-                path = `M ${sourceX} ${sourceY} L ${sourceX} ${bottomY - r} A ${r} ${r} 0 0 1 ${sourceX - r} ${bottomY} L ${leftEdgeX + r} ${bottomY} A ${r} ${r} 0 0 1 ${leftEdgeX} ${bottomY - r} L ${leftEdgeX} ${topY + r} A ${r} ${r} 0 0 1 ${leftEdgeX + r} ${topY} L ${targetX - r} ${topY} A ${r} ${r} 0 0 1 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
-                computedSegments = [
-                    { x1: sourceX, y1: sourceY, x2: sourceX, y2: bottomY },
-                    { x1: sourceX, y1: bottomY, x2: leftEdgeX, y2: bottomY },
-                    { x1: leftEdgeX, y1: bottomY, x2: leftEdgeX, y2: topY },
-                    { x1: leftEdgeX, y1: topY, x2: targetX, y2: topY },
-                    { x1: targetX, y1: topY, x2: targetX, y2: targetY }
-                ];
+                const rightEdgeX = Math.max(maxX + 40, sourceX + 40, targetX + 40);
+                
+                if (srcIsRight) {
+                    path = `M ${sourceX} ${sourceY} L ${rightEdgeX - r} ${sourceY} A ${r} ${r} 0 0 0 ${rightEdgeX} ${sourceY - r} L ${rightEdgeX} ${topY + r} A ${r} ${r} 0 0 0 ${rightEdgeX - r} ${topY} L ${targetX + r} ${topY} A ${r} ${r} 0 0 0 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
+                    computedSegments = [
+                        { x1: sourceX, y1: sourceY, x2: rightEdgeX, y2: sourceY },
+                        { x1: rightEdgeX, y1: sourceY, x2: rightEdgeX, y2: topY },
+                        { x1: rightEdgeX, y1: topY, x2: targetX, y2: topY },
+                        { x1: targetX, y1: topY, x2: targetX, y2: targetY }
+                    ];
+                } else {
+                    path = `M ${sourceX} ${sourceY} L ${sourceX} ${bottomY - r} A ${r} ${r} 0 0 0 ${sourceX + r} ${bottomY} L ${rightEdgeX - r} ${bottomY} A ${r} ${r} 0 0 0 ${rightEdgeX} ${bottomY - r} L ${rightEdgeX} ${topY + r} A ${r} ${r} 0 0 0 ${rightEdgeX - r} ${topY} L ${targetX + r} ${topY} A ${r} ${r} 0 0 0 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
+                    computedSegments = [
+                        { x1: sourceX, y1: sourceY, x2: sourceX, y2: bottomY },
+                        { x1: sourceX, y1: bottomY, x2: rightEdgeX, y2: bottomY },
+                        { x1: rightEdgeX, y1: bottomY, x2: rightEdgeX, y2: topY },
+                        { x1: rightEdgeX, y1: topY, x2: targetX, y2: topY },
+                        { x1: targetX, y1: topY, x2: targetX, y2: targetY }
+                    ];
+                }
+                finalLabelX = rightEdgeX;
             }
-            finalLabelX = leftEdgeX;
         } else {
-            const rightEdgeX = Math.max(maxX + 40, sourceX + 40, targetX + 40);
-            
-            if (srcIsRight) {
-                path = `M ${sourceX} ${sourceY} L ${rightEdgeX - r} ${sourceY} A ${r} ${r} 0 0 0 ${rightEdgeX} ${sourceY - r} L ${rightEdgeX} ${topY + r} A ${r} ${r} 0 0 0 ${rightEdgeX - r} ${topY} L ${targetX + r} ${topY} A ${r} ${r} 0 0 0 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
-                computedSegments = [
-                    { x1: sourceX, y1: sourceY, x2: rightEdgeX, y2: sourceY },
-                    { x1: rightEdgeX, y1: sourceY, x2: rightEdgeX, y2: topY },
-                    { x1: rightEdgeX, y1: topY, x2: targetX, y2: topY },
-                    { x1: targetX, y1: topY, x2: targetX, y2: targetY }
-                ];
-            } else {
-                path = `M ${sourceX} ${sourceY} L ${sourceX} ${bottomY - r} A ${r} ${r} 0 0 0 ${sourceX + r} ${bottomY} L ${rightEdgeX - r} ${bottomY} A ${r} ${r} 0 0 0 ${rightEdgeX} ${bottomY - r} L ${rightEdgeX} ${topY + r} A ${r} ${r} 0 0 0 ${rightEdgeX - r} ${topY} L ${targetX + r} ${topY} A ${r} ${r} 0 0 0 ${targetX} ${topY + r} L ${targetX} ${targetY}`;
-                computedSegments = [
-                    { x1: sourceX, y1: sourceY, x2: sourceX, y2: bottomY },
-                    { x1: sourceX, y1: bottomY, x2: rightEdgeX, y2: bottomY },
-                    { x1: rightEdgeX, y1: bottomY, x2: rightEdgeX, y2: topY },
-                    { x1: rightEdgeX, y1: topY, x2: targetX, y2: topY },
-                    { x1: targetX, y1: topY, x2: targetX, y2: targetY }
-                ];
+            // It's a non-loop edge where sourceY > targetY (back edge but not loop)
+            // Route it neatly avoiding nodes by taking a simple snake route with border radius!
+            let midX = (sourceX + targetX) / 2;
+            if (Math.abs(targetX - sourceX) < 20) {
+                midX = Math.max(maxX + 20, sourceX + 40); // Force it out to the right to create a C-shape
             }
-            finalLabelX = rightEdgeX;
+            
+            const sweep1 = midX > sourceX ? 0 : 1;
+            const sweep2 = targetX > midX ? 1 : 0;
+            const d1 = midX > sourceX ? r : -r;
+            const d2 = targetX > midX ? r : -r;
+            
+            // If the horizontal distance is less than 2*r, we shouldn't curve
+            if (Math.abs(midX - sourceX) < 2 * r || Math.abs(targetX - midX) < 2 * r) {
+                path = `M ${sourceX} ${sourceY} L ${sourceX} ${sourceY + 15} L ${midX} ${sourceY + 15} L ${midX} ${targetY - 15} L ${targetX} ${targetY - 15} L ${targetX} ${targetY}`;
+            } else {
+                path = `M ${sourceX} ${sourceY} L ${sourceX} ${sourceY + 15 - r} A ${r} ${r} 0 0 ${sweep1} ${sourceX + d1} ${sourceY + 15} L ${midX - d1} ${sourceY + 15} A ${r} ${r} 0 0 ${sweep1} ${midX} ${sourceY + 15 - r} L ${midX} ${targetY - 15 + r} A ${r} ${r} 0 0 ${sweep2} ${midX + d2} ${targetY - 15} L ${targetX - d2} ${targetY - 15} A ${r} ${r} 0 0 ${sweep2} ${targetX} ${targetY - 15 + r} L ${targetX} ${targetY}`;
+            }
+            computedSegments = [
+                { x1: sourceX, y1: sourceY, x2: sourceX, y2: sourceY + 15 },
+                { x1: sourceX, y1: sourceY + 15, x2: midX, y2: sourceY + 15 },
+                { x1: midX, y1: sourceY + 15, x2: midX, y2: targetY - 15 },
+                { x1: midX, y1: targetY - 15, x2: targetX, y2: targetY - 15 },
+                { x1: targetX, y1: targetY - 15, x2: targetX, y2: targetY }
+            ];
+            finalLabelX = midX;
         }
+
         
         return [path, finalLabelX, (bottomY + topY) / 2, computedSegments];
     } else {
@@ -185,6 +219,30 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
                 { x1: cX, y1: sourceY, x2: cX, y2: targetY },
                 { x1: cX, y1: targetY, x2: targetX, y2: targetY }
             ];
+        } else if (targetY - sourceY < 30 && sourcePosition !== Position.Right) {
+            // Target is slightly below source, but too close for getSmoothStepPath to route down properly.
+            // Just use a dynamic offset that fits perfectly in the gap!
+            const offset = (targetY - sourceY) / 2;
+            const midY = sourceY + offset;
+            
+            const r = Math.min(5, offset);
+            const sweep1 = targetX > sourceX ? 0 : 1;
+            const sweep2 = targetX > sourceX ? 1 : 0;
+            const dX = targetX > sourceX ? r : -r;
+            
+            if (Math.abs(targetX - sourceX) < 2 * r || r < 1) {
+                path = `M ${sourceX} ${sourceY} L ${sourceX} ${midY} L ${targetX} ${midY} L ${targetX} ${targetY}`;
+            } else {
+                path = `M ${sourceX} ${sourceY} L ${sourceX} ${midY - r} A ${r} ${r} 0 0 ${sweep1} ${sourceX + dX} ${midY} L ${targetX - dX} ${midY} A ${r} ${r} 0 0 ${sweep2} ${targetX} ${midY + r} L ${targetX} ${targetY}`;
+            }
+            
+            computedSegments = [
+                { x1: sourceX, y1: sourceY, x2: sourceX, y2: midY },
+                { x1: sourceX, y1: midY, x2: targetX, y2: midY },
+                { x1: targetX, y1: midY, x2: targetX, y2: targetY }
+            ];
+            finalLabelX = (sourceX + targetX) / 2;
+            finalLabelY = midY;
         } else if (enteringLoop && sourceY + 10 < enteringLoop.position.y + 30) {
             const loopW = enteringLoop.measured?.width || enteringLoop.width || 300;
             const lTop = enteringLoop.position.y;
@@ -257,26 +315,46 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
                 ];
             }
         } else {
-            const [nativePath, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 5 });
-            path = nativePath;
-            finalLabelX = labelX;
-            finalLabelY = labelY;
-            
-            const cX = sourceX + (targetX - sourceX) / 2;
-            const cY = sourceY + (targetY - sourceY) / 2;
-            
-            if (sourcePosition === Position.Right || sourcePosition === Position.Left) {
+            if (sourcePosition === Position.Bottom && targetPosition === Position.Top && targetY >= sourceY - 1) {
+                const midY = sourceY + (targetY - sourceY) / 2;
+                if (Math.abs(targetX - sourceX) <= 1) {
+                    path = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
+                    finalLabelX = sourceX;
+                    finalLabelY = midY;
+                } else {
+                    const r = Math.min(5, Math.abs(targetX - sourceX) / 2, Math.max(0.1, (targetY - sourceY) / 2 - 0.1));
+                    const dir = targetX > sourceX ? 1 : -1;
+                    path = `M ${sourceX} ${sourceY} L ${sourceX} ${midY - r} Q ${sourceX} ${midY} ${sourceX + r * dir} ${midY} L ${targetX - r * dir} ${midY} Q ${targetX} ${midY} ${targetX} ${midY + r} L ${targetX} ${targetY}`;
+                    finalLabelX = sourceX + (targetX - sourceX) / 2;
+                    finalLabelY = midY;
+                }
                 computedSegments = [
-                    { x1: sourceX, y1: sourceY, x2: cX, y2: sourceY },
-                    { x1: cX, y1: sourceY, x2: cX, y2: targetY },
-                    { x1: cX, y1: targetY, x2: targetX, y2: targetY }
+                    { x1: sourceX, y1: sourceY, x2: sourceX, y2: midY },
+                    { x1: sourceX, y1: midY, x2: targetX, y2: midY },
+                    { x1: targetX, y1: midY, x2: targetX, y2: targetY }
                 ];
             } else {
-                computedSegments = [
-                    { x1: sourceX, y1: sourceY, x2: sourceX, y2: cY },
-                    { x1: sourceX, y1: cY, x2: targetX, y2: cY },
-                    { x1: targetX, y1: cY, x2: targetX, y2: targetY }
-                ];
+                const [nativePath, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 5 });
+                path = nativePath;
+                finalLabelX = labelX;
+                finalLabelY = labelY;
+                
+                const cX = sourceX + (targetX - sourceX) / 2;
+                const cY = sourceY + (targetY - sourceY) / 2;
+                
+                if (sourcePosition === Position.Right || sourcePosition === Position.Left) {
+                    computedSegments = [
+                        { x1: sourceX, y1: sourceY, x2: cX, y2: sourceY },
+                        { x1: cX, y1: sourceY, x2: cX, y2: targetY },
+                        { x1: cX, y1: targetY, x2: targetX, y2: targetY }
+                    ];
+                } else {
+                    computedSegments = [
+                        { x1: sourceX, y1: sourceY, x2: sourceX, y2: cY },
+                        { x1: sourceX, y1: cY, x2: targetX, y2: cY },
+                        { x1: targetX, y1: cY, x2: targetX, y2: targetY }
+                    ];
+                }
             }
         }
         
@@ -288,8 +366,8 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
   loopNodes.forEach(loop => {
       const loopX = loop.position.x;
       const loopY = loop.position.y;
-      const loopW = 300;
-      const loopH = 150;
+      const loopW = loop.measured?.width || loop.width || (loop.type === 'FOR_CONTAINER' ? 350 : 300);
+      const loopH = loop.measured?.height || loop.height || (loop.type === 'FOR_CONTAINER' ? 200 : 150);
       
       const sInside = isInside(source, loop);
       const tInside = isInside(target, loop);
@@ -334,10 +412,11 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
           }
           
           if (intersectX !== null) {
+              const isFor = loop.type === 'FOR_CONTAINER';
               catchers.push(
                   <foreignObject key={loop.id} x={intersectX - 8} y={intersectY - 8} width="16" height="16" transform={`rotate(${angle}, ${intersectX}, ${intersectY})`}>
-                      <div className="w-4 h-4 rounded-full border border-purple-300 dark:border-purple-600 bg-white dark:bg-gray-800 flex items-center justify-center shadow-sm pointer-events-auto">
-                          <ChevronRight size={10} className="text-purple-500" style={{ marginLeft: '1px' }} />
+                      <div className={`w-4 h-4 rounded-full border ${isFor ? 'border-indigo-300 dark:border-indigo-600' : 'border-purple-300 dark:border-purple-600'} bg-white dark:bg-gray-800 flex items-center justify-center shadow-sm pointer-events-auto`}>
+                          <ChevronRight size={10} className={isFor ? 'text-indigo-500' : 'text-purple-500'} style={{ marginLeft: '1px' }} />
                       </div>
                   </foreignObject>
               );

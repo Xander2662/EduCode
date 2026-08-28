@@ -334,7 +334,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                         caseVal = line.substring(5, line.lastIndexOf(':')).trim();
                     }
                     
-                    let caseId = addNode(`Case ${isDefault ? 'default' : caseVal}`, 'CASE_CONTAINER', getXPos(), { caseVal, isDefault, parentId: currentSwitch.id }, line);
+                    let caseId = addNode(`Case ${isDefault ? 'default' : caseVal}`, 'CASE_CONTAINER', getXPos(), { caseVal, isDefault, switchId: currentSwitch.id }, line);
                     
                     yOffset = currentSwitch.startY + 60; // Start inside case container
                     pendingExits = [{ id: caseId, text: "", handle: "s-bottom" }];

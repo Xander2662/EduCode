@@ -102,4 +102,28 @@ describe('SVG Edge Routing - Vyhýbání se překážkám s A-oblouky', () => {
         // Radar ji musí vykopnout nad překážku (ny - 25 -> 50 - 25 = 25).
         expect(result.topY).toBe(25);
     });
+
+    it('Správně nahradí existující spojení na výstupu i na vstupu cílového bloku', () => {
+        // Simulace filtrovací logiky onConnect
+        const filterEdges = (existingEdges, newParam, sourceNode) => {
+            return existingEdges.filter(e => {
+                // Odstranění starého výstupního spojení
+                if (sourceNode && sourceNode.type !== 'CONDITION' && e.source === newParam.source) return false;
+                if (sourceNode && sourceNode.type === 'CONDITION' && e.source === newParam.source && e.sourceHandle === newParam.sourceHandle) return false;
+                // Odstranění starého vstupního spojení na cílový handle
+                if (e.target === newParam.target && (e.targetHandle === newParam.targetHandle || (!newParam.targetHandle && !e.targetHandle))) return false;
+                return true;
+            });
+        };
+
+        const existing = [
+            { id: 'e1', source: 'node1', sourceHandle: 's-bottom', target: 'node2', targetHandle: 't-top' },
+            { id: 'e2', source: 'node3', sourceHandle: 's-bottom', target: 'node4', targetHandle: 't-top' }
+        ];
+
+        // Nové spojení z node1 do node4 (nahradí výstup z node1 a vstup do node4)
+        const updated = filterEdges(existing, { source: 'node1', sourceHandle: 's-bottom', target: 'node4', targetHandle: 't-top' }, { id: 'node1', type: 'ACTION' });
+        
+        expect(updated).toEqual([]); // obě staré hrany byly nahrazeny
+    });
 });

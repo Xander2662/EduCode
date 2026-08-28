@@ -40,6 +40,24 @@ export class DiagramRunner {
             if (tgtLoop && (!srcLoop || srcLoop.id !== tgtLoop.id)) {
                 this.loopEntries[tgtLoop.id] = e.target;
             }
+            
+            // Check direct connections to container handles
+            const isSrcContainer = this.loopContainers.some(l => l.id === e.source);
+            if (isSrcContainer) {
+                this.loopExits[e.source] = e.target;
+            }
+            
+            const isTgtContainer = this.loopContainers.some(l => l.id === e.target);
+            if (isTgtContainer) {
+                // If targeting the container, we need to find the top-most node inside it as entry
+                const nodesInside = Object.keys(this.nodeToLoop).filter(id => this.nodeToLoop[id].id === e.target);
+                const entryNode = nodesInside.sort((a, b) => {
+                    const na = this.nodes.find(n => n.id === a);
+                    const nb = this.nodes.find(n => n.id === b);
+                    return (na?.position?.y || 0) - (nb?.position?.y || 0);
+                })[0];
+                if (entryNode) this.loopEntries[e.target] = entryNode;
+            }
         });
 
         let startNode = this.nodes.find(n => n.type === 'START_END' && n.data?.mode === 'start');
@@ -54,17 +72,70 @@ export class DiagramRunner {
     cleanText(html) {
         if (!html) return '';
         let t = html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/div>/gi, '\n').replace(/<\/p>/gi, '\n');
-        t = t.replace(/<\/?[^>]+(>|$)/g, ""); 
+        t = t.replace(/<\/?(?:b|i|u|span|font|div|p|strong|em|strike|s|sub|sup|h[1-6])(?:\s+[^>]*?)?>/gi, ""); 
         t = t.replace(/&nbsp;/gi, ' ').replace(/&gt;/gi, '>').replace(/&lt;/gi, '<').replace(/&amp;/gi, '&').replace(/\u00A0/g, ' ');
         return t.trim();
     }
 
+    getScopeForExpr(jsExpr) {
+        const idRegex = /\b[a-zA-Z_$][a-zA-Z0-9_$]*\b/g;
+        const reserved = new Set([
+            'true', 'false', 'null', 'undefined', 'NaN', 'Infinity',
+            'Math', 'Number', 'String', 'Boolean', 'Array', 'Object', 'Date', 'RegExp',
+            'parseInt', 'parseFloat', 'isNaN', 'isFinite',
+            'typeof', 'instanceof', 'in', 'void', 'delete', 'new',
+            'if', 'else', 'return', 'var', 'let', 'const', 'function', 'this',
+            'case', 'switch', 'break', 'continue', 'default', 'for', 'while', 'do',
+            'try', 'catch', 'finally', 'throw', 'class', 'extends', 'super', 'import', 'export'
+        ]);
+
+        const ids = new Set();
+        let match;
+        while ((match = idRegex.exec(jsExpr)) !== null) {
+            const id = match[0];
+            if (!reserved.has(id)) {
+                ids.add(id);
+            }
+        }
+
+        // Check if string context exists (presence of string literals or known string variables)
+        const hasStringLiteral = /(["'`])(?:\\.|[^\\])*?\1/.test(jsExpr);
+        let hasStringVariable = false;
+        ids.forEach(id => {
+            if (id in this.variables && typeof this.variables[id] === 'string') {
+                hasStringVariable = true;
+            }
+        });
+
+        const isStringContext = hasStringLiteral || hasStringVariable;
+
+        const scope = {};
+        ids.forEach(id => {
+            if (id in this.variables && this.variables[id] !== undefined && this.variables[id] !== null) {
+                scope[id] = this.variables[id];
+            } else {
+                // When nothing is inserted into a variable, default to 0 for numbers and "" for strings
+                scope[id] = isStringContext ? "" : 0;
+            }
+        });
+
+        return scope;
+    }
+
     evalExpr(expr) {
         try {
-            let jsExpr = expr.replace(/\bAND\b/gi, '&&').replace(/\bOR\b/gi, '||').replace(/\bNOT\b/gi, '!');
+            let jsExpr = expr
+                .replace(/\bAND\b/gi, '&&')
+                .replace(/\bOR\b/gi, '||')
+                .replace(/\bNOT\b/gi, '!')
+                .replace(/\bTrue\b/g, 'true')
+                .replace(/\bFalse\b/g, 'false')
+                .replace(/\bNone\b/g, 'null');
             jsExpr = jsExpr.replace(/(?<![<>=!])=(?!=)/g, '==');
-            const keys = Object.keys(this.variables);
-            const values = Object.values(this.variables);
+            
+            const scope = this.getScopeForExpr(jsExpr);
+            const keys = Object.keys(scope);
+            const values = Object.values(scope);
             const fn = new Function(...keys, `return ${jsExpr};`);
             return fn(...values);
         } catch (err) {
@@ -92,7 +163,13 @@ export class DiagramRunner {
                 let text = line.trim();
                 if (!text) return;
                 
-                if (text.includes('=')) {
+                const assignMatch = text.match(/^(?:SET\s+)?([a-zA-Z_]\w*)\s*(?:=|:=|<-)\s*(.*)$/i);
+                if (assignMatch) {
+                    const varName = assignMatch[1].trim();
+                    const expr = assignMatch[2].trim();
+                    const val = this.evalExpr(expr);
+                    if (val !== undefined) this.variables[varName] = val;
+                } else if (text.includes('=')) {
                     const [left, ...rightParts] = text.split('=');
                     const varName = left.trim();
                     const expr = rightParts.join('=').trim();
@@ -100,9 +177,15 @@ export class DiagramRunner {
                     if (val !== undefined) this.variables[varName] = val;
                 } else if (text.toUpperCase().startsWith('PRINT')) {
                     let inner = text.substring(5).trim();
-                    if(inner.startsWith('(')) inner = inner.substring(1, inner.length-1);
+                    if(inner.startsWith('(') && inner.endsWith(')')) inner = inner.substring(1, inner.length-1);
                     const val = this.evalExpr(inner);
-                    this.output.push(val !== undefined ? String(val) : inner);
+                    const outStr = val !== undefined ? String(val) : inner;
+                    this.output.push(outStr);
+                    this.events.push({ type: 'output', msg: outStr });
+                } else if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+                    const inner = text.slice(1, -1);
+                    this.output.push(inner);
+                    this.events.push({ type: 'output', msg: inner });
                 }
             });
             if (outEdges.length > 0) nextNodeId = outEdges[0].target;
@@ -120,10 +203,10 @@ export class DiagramRunner {
                 this.events.push({ type: 'output', msg: outStr });
                 if (outEdges.length > 0) nextNodeId = outEdges[0].target;
             } 
-            else if (text.includes('=')) {
-                const [left, ...rightParts] = text.split('=');
-                const varName = left.trim();
-                const expr = rightParts.join('=').trim();
+            else if (text.includes('=') || text.includes('<-') || text.includes(':=')) {
+                const assignMatch = text.match(/^(?:SET\s+)?([a-zA-Z_]\w*)\s*(?:=|:=|<-)\s*(.*)$/i);
+                const varName = assignMatch ? assignMatch[1].trim() : text.split('=')[0].trim();
+                const expr = assignMatch ? assignMatch[2].trim() : text.split('=').slice(1).join('=').trim();
                 const val = this.evalExpr(expr);
                 if (val !== undefined) this.variables[varName] = val;
                 if (outEdges.length > 0) nextNodeId = outEdges[0].target;
@@ -172,6 +255,22 @@ export class DiagramRunner {
         else if (node.type === 'COMMENT' || node.type === 'MERGE' || node.type === 'GROUP_BG') {
             if (outEdges.length > 0) nextNodeId = outEdges[0].target;
         }
+        else if (node.type === 'SWITCH_CONTAINER') {
+            const switchVar = this.cleanText(node.data?.switchVar || 'x');
+            const switchVal = this.evalExpr(switchVar);
+            
+            const cases = this.nodes.filter(n => n.type === 'CASE_CONTAINER' && n.data?.switchId === node.id);
+            let targetCase = cases.find(c => !c.data?.isDefault && String(this.evalExpr(this.cleanText(c.data?.caseVal || '1'))) === String(switchVal));
+            if (!targetCase) targetCase = cases.find(c => c.data?.isDefault);
+            
+            if (targetCase) {
+                const caseEdge = this.edges.find(e => e.source === targetCase.id);
+                if (caseEdge) nextNodeId = caseEdge.target;
+                else if (outEdges.length > 0) nextNodeId = outEdges[0].target;
+            } else {
+                if (outEdges.length > 0) nextNodeId = outEdges[0].target;
+            }
+        }
 
         const currentLoop = this.nodeToLoop[this.currentNodeId];
         
@@ -186,6 +285,17 @@ export class DiagramRunner {
                 if (this.loopEntries[currentLoop.id]) {
                     nextNodeId = this.loopEntries[currentLoop.id];
                 }
+            }
+        }
+
+        // --- LOOP_CONTAINER: Redirect direct targets ---
+        // If an edge targets the loop container itself, redirect to its entry node
+        if (nextNodeId && this.loopContainers.some(l => l.id === nextNodeId)) {
+            if (this.loopEntries[nextNodeId]) {
+                nextNodeId = this.loopEntries[nextNodeId];
+            } else {
+                // If the loop has no entry, it's empty, we should just exit it
+                nextNodeId = this.loopExits[nextNodeId] || null;
             }
         }
 

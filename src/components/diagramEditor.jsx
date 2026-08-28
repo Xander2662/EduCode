@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, Background, MarkerType, useReactFlow } from '@xyflow/react';
+import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, Background, MarkerType, useReactFlow, ConnectionLineType } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Download, Upload, Square, Circle, Diamond, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box, Hexagon, Columns } from 'lucide-react';
+import { Download, Upload, Square, Circle, Diamond, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box, Hexagon, Columns, Link2 } from 'lucide-react';
 import { drawioToReactFlow, reactFlowToDrawio } from '../utils/diagramConverter';
 import { calculateGroupNodes } from '../utils/grouping';
 import { calculateRestructuredLayout } from '../utils/visualLayoutEngine';
@@ -30,7 +30,7 @@ const nodeTypes = {
 };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, groupColoring, showDebugger, conditionShape, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction, onRequestTutorial, editorMode }) {
+function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, isDarkMode, groupColoring, showDebugger, conditionShape, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction, onRequestTutorial, editorMode }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
@@ -38,10 +38,19 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const [pendingImport, setPendingImport] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const { screenToFlowPosition, getNode, getEdges } = useReactFlow();
+  const reactFlowInstance = useReactFlow();
+  const { screenToFlowPosition, flowToScreenPosition, getNode, getEdges } = reactFlowInstance;
+
   
   const hoveredEdgeRef = useRef(null);
   const lastXmlRef = useRef(''); 
+
+  const lastMousePosRef = useRef({ x: 0, y: 0 });
+  useEffect(() => {
+    const handleMouseMove = (e) => { lastMousePosRef.current = { x: e.clientX, y: e.clientY }; };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
 
   const [hoveredToolbarItem, setHoveredToolbarItem] = useState(null);
   const [hoverProgress, setHoverProgress] = useState(0);
@@ -116,24 +125,173 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     if (onInteractRef.current) onInteractRef.current();
   }, []);
 
+  const historyRef = useRef({ past: [], future: [] });
+
+  const takeSnapshot = useCallback(() => {
+    if (readOnly) return;
+    const exportNodes = nodes.filter(n => n.type !== 'GROUP_BG');
+    const snapshot = {
+      nodes: exportNodes.map(n => ({
+        id: n.id,
+        type: n.type,
+        position: { ...n.position },
+        selected: false,
+        style: n.style ? { ...n.style } : undefined,
+        parentId: n.parentId,
+        data: { ...n.data, onChange: undefined, onUpdateData: undefined, onToggleIOType: undefined, onToggleEntityType: undefined, onBreakpointToggle: undefined }
+      })),
+      edges: edges.map(e => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+        type: e.type,
+        selected: false,
+        data: { ...e.data }
+      }))
+    };
+
+    const past = historyRef.current.past;
+    if (past.length > 0) {
+      const top = past[past.length - 1];
+      if (JSON.stringify(top) === JSON.stringify(snapshot)) {
+        return;
+      }
+    }
+
+    historyRef.current.past.push(snapshot);
+    if (historyRef.current.past.length > 50) {
+      historyRef.current.past.shift();
+    }
+    historyRef.current.future = [];
+  }, [nodes, edges, readOnly]);
+
   const updateNodeData = useCallback((nodeId, newData) => {
+      takeSnapshot();
       handleInteract();
       setNodes((nds) => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, ...newData } } : n));
-  }, [setNodes, handleInteract]);
+  }, [setNodes, handleInteract, takeSnapshot]);
 
   const updateNodeLabel = useCallback((nodeId, newLabel) => updateNodeData(nodeId, { label: newLabel }), [updateNodeData]);
 
   const toggleIOType = useCallback((nodeId, currentType) => {
+      takeSnapshot();
       updateNodeData(nodeId, { ioType: currentType === 'input' ? 'output' : 'input' });
-  }, [updateNodeData]);
+  }, [updateNodeData, takeSnapshot]);
 
   const toggleEntityType = useCallback((nodeId, currentType) => {
+      takeSnapshot();
       updateNodeData(nodeId, { entityType: currentType === 'FUNCTION' ? 'CLASS' : 'FUNCTION' });
-  }, [updateNodeData]);
+  }, [updateNodeData, takeSnapshot]);
+
+  const handleUndo = useCallback(() => {
+    if (readOnly || historyRef.current.past.length === 0) return;
+    handleInteract();
+
+    const exportNodes = nodes.filter(n => n.type !== 'GROUP_BG');
+    const currentSnapshot = {
+      nodes: exportNodes.map(n => ({
+        id: n.id,
+        type: n.type,
+        position: { ...n.position },
+        selected: false,
+        style: n.style ? { ...n.style } : undefined,
+        parentId: n.parentId,
+        data: { ...n.data, onChange: undefined, onUpdateData: undefined, onToggleIOType: undefined, onToggleEntityType: undefined, onBreakpointToggle: undefined }
+      })),
+      edges: edges.map(e => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+        type: e.type,
+        selected: false,
+        data: { ...e.data }
+      }))
+    };
+    historyRef.current.future.push(currentSnapshot);
+
+    const prevState = historyRef.current.past.pop();
+    if (!prevState) return;
+
+    setNodes(prevState.nodes.map(n => ({
+      ...n,
+      data: {
+        ...n.data,
+        readOnly,
+        edgeStyle,
+        onChange: (e) => updateNodeLabel(n.id, e.target.value),
+        onUpdateData: (newData) => updateNodeData(n.id, newData)
+      }
+    })));
+
+    setEdges(prevState.edges.map(e => ({
+      ...e,
+      type: 'customEdge',
+      data: { ...e.data, readOnly, edgeStyle },
+      markerEnd: { type: MarkerType.ArrowClosed }
+    })));
+
+    if (onLogAction) onLogAction('UNDO_PERFORMED');
+  }, [readOnly, nodes, edges, setNodes, setEdges, handleInteract, updateNodeLabel, updateNodeData, edgeStyle, onLogAction]);
+
+  const handleRedo = useCallback(() => {
+    if (readOnly || historyRef.current.future.length === 0) return;
+    handleInteract();
+
+    const exportNodes = nodes.filter(n => n.type !== 'GROUP_BG');
+    const currentSnapshot = {
+      nodes: exportNodes.map(n => ({
+        id: n.id,
+        type: n.type,
+        position: { ...n.position },
+        selected: false,
+        style: n.style ? { ...n.style } : undefined,
+        parentId: n.parentId,
+        data: { ...n.data, onChange: undefined, onUpdateData: undefined, onToggleIOType: undefined, onToggleEntityType: undefined, onBreakpointToggle: undefined }
+      })),
+      edges: edges.map(e => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+        type: e.type,
+        selected: false,
+        data: { ...e.data }
+      }))
+    };
+    historyRef.current.past.push(currentSnapshot);
+
+    const nextState = historyRef.current.future.pop();
+    if (!nextState) return;
+
+    setNodes(nextState.nodes.map(n => ({
+      ...n,
+      data: {
+        ...n.data,
+        readOnly,
+        edgeStyle,
+        onChange: (e) => updateNodeLabel(n.id, e.target.value),
+        onUpdateData: (newData) => updateNodeData(n.id, newData)
+      }
+    })));
+
+    setEdges(nextState.edges.map(e => ({
+      ...e,
+      type: 'customEdge',
+      data: { ...e.data, readOnly, edgeStyle },
+      markerEnd: { type: MarkerType.ArrowClosed }
+    })));
+
+    if (onLogAction) onLogAction('REDO_PERFORMED');
+  }, [readOnly, nodes, edges, setNodes, setEdges, handleInteract, updateNodeLabel, updateNodeData, edgeStyle, onLogAction]);
 
   const mappedNodes = useMemo(() => nodes.map(n => ({
         ...n,
-        zIndex: (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER') ? -1 : 10,
+        zIndex: (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? -1 : (n.type === 'SWITCH_CONTAINER' ? -10000 : (n.type === 'CASE_CONTAINER' ? -9999 : 10)),
         data: { 
             ...n.data, 
             colorMode, 
@@ -211,22 +369,29 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   }, [edgeStyle, nodes.length, nodes, setEdges]); 
 
   const executeDelete = useCallback(() => {
+    takeSnapshot();
     handleInteract();
     if(onLogAction) onLogAction('NODES_DELETED', { count: selectedNodes.length });
     const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
     const selectedEdgeIds = new Set(selectedEdges.map(e => e.id));
     
-    // Cascade deletes to native children (like Case groups inside a Switch)
-    nodes.forEach(n => {
-        if (n.parentId && selectedNodeIds.has(n.parentId)) {
-            selectedNodeIds.add(n.id);
-        }
-    });
+    // Cascade deletes to all descendants
+    let added = true;
+    while (added) {
+        added = false;
+        nodes.forEach(n => {
+            if ((n.parentId && selectedNodeIds.has(n.parentId) && !selectedNodeIds.has(n.id)) ||
+                (n.data?.switchId && selectedNodeIds.has(n.data.switchId) && !selectedNodeIds.has(n.id))) {
+                selectedNodeIds.add(n.id);
+                added = true;
+            }
+        });
+    }
     
     setNodes(nds => nds.filter(n => !selectedNodeIds.has(n.id)));
     setEdges(eds => eds.filter(e => !selectedEdgeIds.has(e.id) && !selectedNodeIds.has(e.source) && !selectedNodeIds.has(e.target)));
     setDeleteConfirm(false);
-  }, [selectedNodes, selectedEdges, setNodes, setEdges, handleInteract, onLogAction, nodes]);
+  }, [selectedNodes, selectedEdges, setNodes, setEdges, handleInteract, onLogAction, nodes, takeSnapshot]);
 
   const handleCopy = useCallback(() => { 
     if (selectedNodes.length > 0) {
@@ -238,18 +403,64 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const handlePaste = useCallback(() => {
     if (clipboard.nodes.length === 0) return;
+    takeSnapshot();
     handleInteract();
     if(onLogAction) onLogAction('NODES_PASTED', { count: clipboard.nodes.length });
+    
+    let pastePos = null;
+    const reactFlowEl = document.querySelector('.react-flow');
+    if (reactFlowEl) {
+        const bounds = reactFlowEl.getBoundingClientRect();
+        const mouse = lastMousePosRef.current;
+        if (mouse.x >= bounds.left && mouse.x <= bounds.right && mouse.y >= bounds.top && mouse.y <= bounds.bottom) {
+            pastePos = screenToFlowPosition({ x: mouse.x, y: mouse.y });
+        } else {
+            const centerX = bounds.left + bounds.width / 2;
+            const centerY = bounds.top + bounds.height / 2;
+            pastePos = screenToFlowPosition({ x: centerX, y: centerY });
+        }
+    }
+    
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+    clipboard.nodes.forEach(n => {
+        const w = parseInt(n.style?.width) || n.width || 150;
+        const h = parseInt(n.style?.height) || n.height || 50;
+        if (n.position.x < minX) minX = n.position.x;
+        if (n.position.y < minY) minY = n.position.y;
+        if (n.position.x + w > maxX) maxX = n.position.x + w;
+        if (n.position.y + h > maxY) maxY = n.position.y + h;
+    });
+    
+    const pasteCenterX = minX === Infinity ? 0 : (minX + maxX) / 2;
+    const pasteCenterY = minY === Infinity ? 0 : (minY + maxY) / 2;
+    
+    const offsetX = pastePos ? pastePos.x - pasteCenterX : 30;
+    const offsetY = pastePos ? pastePos.y - pasteCenterY : 30;
+    
     const idMap = {};
     const newNodes = clipboard.nodes.map(n => {
       const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
       idMap[n.id] = newId;
-      return { ...n, id: newId, position: { x: n.position.x + 30, y: n.position.y + 30 }, selected: true, data: { ...n.data, onChange: (e) => updateNodeLabel(newId, e.target.value), onUpdateData: (newData) => updateNodeData(newId, newData) } };
+      return { 
+          ...n, 
+          id: newId, 
+          position: { 
+              x: pastePos ? Math.round((n.position.x + offsetX) / 10) * 10 : n.position.x + 30, 
+              y: pastePos ? Math.round((n.position.y + offsetY) / 10) * 10 : n.position.y + 30 
+          }, 
+          selected: true, 
+          data: { 
+              ...n.data, 
+              onChange: (e) => updateNodeLabel(newId, e.target.value), 
+              onUpdateData: (newData) => updateNodeData(newId, newData) 
+          } 
+      };
     });
     const newEdges = clipboard.edges.map(e => ({ ...e, id: Date.now().toString() + Math.random().toString(36).substr(2, 5), source: idMap[e.source], target: idMap[e.target], selected: true }));
     setNodes(nds => nds.map(n => ({ ...n, selected: false })).concat(newNodes));
     setEdges(eds => eds.map(e => ({ ...e, selected: false })).concat(newEdges));
-  }, [clipboard, onLogAction, updateNodeLabel, updateNodeData, setNodes, setEdges, handleInteract]);
+  }, [clipboard, onLogAction, updateNodeLabel, updateNodeData, setNodes, setEdges, handleInteract, screenToFlowPosition, takeSnapshot]);
 
   const handleDuplicate = useCallback(() => { handleCopy(); setTimeout(handlePaste, 10); }, [handleCopy, handlePaste]);
 
@@ -288,12 +499,24 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       }
       if (e.key === 'c' && (e.ctrlKey || e.metaKey) && !isInput) { e.preventDefault(); handleCopy(); }
       if (e.key === 'v' && (e.ctrlKey || e.metaKey) && !isInput) { e.preventDefault(); handlePaste(); }
+      if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey || e.altKey) && !isInput) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      }
+      if ((e.key === 'y' || e.key === 'Y') && (e.ctrlKey || e.metaKey || e.altKey) && !isInput) {
+        e.preventDefault();
+        handleRedo();
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete, handleCopy, handlePaste, setNodes, setEdges]);
+  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete, handleCopy, handlePaste, handleUndo, handleRedo, setNodes, setEdges]);
 
-  const getHitEdge = (event, draggedNodes) => {
+  const getHitEdge = (event, draggedNodes, currentEdges) => {
     const clientX = event.clientX || (event.touches && event.touches[0].clientX);
     const clientY = event.clientY || (event.touches && event.touches[0].clientY);
     if (!clientX || !clientY) return null;
@@ -305,11 +528,22 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     });
 
     let foundEdge = null;
+    const draggedIds = new Set(draggedNodes.map(n => n.id));
+    
     for (let dx = -40; dx <= 40; dx += 20) {
         for (let dy = -40; dy <= 40; dy += 20) {
             const elemBelow = document.elementFromPoint(clientX + dx, clientY + dy);
             const closestEdge = elemBelow?.closest('.react-flow__edge');
-            if (closestEdge) { foundEdge = closestEdge; break; }
+            if (closestEdge) { 
+                const edgeId = closestEdge.getAttribute('data-id');
+                const targetEdge = currentEdges.find(e => e.id === edgeId);
+                // Ignore edges that are internal to the dragged cluster
+                if (targetEdge && draggedIds.has(targetEdge.source) && draggedIds.has(targetEdge.target)) {
+                    continue;
+                }
+                foundEdge = closestEdge; 
+                break; 
+            }
         }
         if (foundEdge) break;
     }
@@ -369,7 +603,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         }
     }
 
-    const edgeElem = getHitEdge(event, draggedNodes);
+    const edgeElem = getHitEdge(event, draggedNodes, edges);
     
     if (hoveredEdgeRef.current && hoveredEdgeRef.current !== edgeElem) {
         hoveredEdgeRef.current.classList.remove('drop-target');
@@ -419,7 +653,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         }
     }
 
-    const edgeElem = getHitEdge(event, draggedNodes);
+    const edgeElem = getHitEdge(event, draggedNodes, edges);
 
     if (edgeElem) {
         const edgeId = edgeElem.getAttribute('data-id');
@@ -479,52 +713,37 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   // =========================================================================================
   useEffect(() => {
     if (readOnly) return;
-    if (nodes.length > 0 || edges.length > 0) {
-      const timer = setTimeout(() => {
-        const exportNodes = nodes.filter(n => n.type !== 'GROUP_BG');
-        const generatedXml = reactFlowToDrawio(exportNodes, edges);
-        if (generatedXml !== lastXmlRef.current) { 
-            lastXmlRef.current = generatedXml; 
-            if (onXmlChangeRef.current) onXmlChangeRef.current(generatedXml, isUserInteractionRef.current); 
-            isUserInteractionRef.current = false;
-        }
-      }, 300);
-      return () => clearTimeout(timer);
-    }
+    
+    const timer = setTimeout(() => {
+      const exportNodes = nodes.filter(n => n.type !== 'GROUP_BG');
+      const generatedXml = reactFlowToDrawio(exportNodes, edges);
+      if (generatedXml !== lastXmlRef.current) { 
+          lastXmlRef.current = generatedXml; 
+          if (onXmlChangeRef.current) onXmlChangeRef.current(generatedXml, isUserInteractionRef.current); 
+          isUserInteractionRef.current = false;
+      }
+    }, 300);
+    return () => clearTimeout(timer);
   }, [nodes, edges, readOnly]);
 
   const isValidConnection = useCallback((connection) => {
     const sourceNode = getNode(connection.source);
     const targetNode = getNode(connection.target);
-    const currentEdges = getEdges();
 
     if (!sourceNode || !targetNode) return false;
-    const sourceEdges = currentEdges.filter(e => e.source === connection.source);
 
     if (targetNode.type === 'START_END' && targetNode.data?.mode === 'start') return false;
     if (sourceNode.type === 'START_END' && sourceNode.data?.mode === 'end') return false;
     if (targetNode.type === 'START_END' && targetNode.data?.mode === 'end' && connection.targetHandle !== 't-top') return false;
-    if (sourceNode.type === 'CONDITION' ? sourceEdges.length >= 2 : sourceEdges.length >= 1) return false;
-    
-    if (targetNode.position.y <= sourceNode.position.y) {
-        let hasCond = false, currentIds = [sourceNode.id], visited = new Set();
-        while(currentIds.length > 0) {
-            let nextIds = [];
-            for (let cid of currentIds) {
-                if (visited.has(cid)) continue; visited.add(cid);
-                const n = getNode(cid);
-                if (n && n.type === 'CONDITION') { hasCond = true; break; }
-                nextIds.push(...currentEdges.filter(e => e.target === cid).map(e => e.source));
-            }
-            if (hasCond) break;
-            currentIds = nextIds;
-        }
-        if (!hasCond) return false;
-    }
+    if (connection.source === connection.target && sourceNode.type !== 'CONDITION') return false;
+
     return true;
-  }, [getNode, getEdges]);
+  }, [getNode]);
+
+  const connectingNodeRef = useRef(null);
 
   const onConnect = useCallback((params) => {
+    takeSnapshot();
     handleInteract();
     if(onLogAction) onLogAction('EDGE_CONNECTED', { source: params.source, target: params.target });
     const sourceNode = getNode(params.source);
@@ -551,16 +770,23 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     }
 
     setEdges(eds => {
-        let filteredEds = eds;
-        if (sourceNode && sourceNode.type !== 'CONDITION') {
-            filteredEds = eds.filter(e => e.source !== params.source);
-        }
+        let filteredEds = eds.filter(e => {
+            // Remove existing outgoing edge on the source handle
+            if (sourceNode && sourceNode.type !== 'CONDITION' && e.source === params.source) return false;
+            if (sourceNode && sourceNode.type === 'CONDITION' && e.source === params.source && e.sourceHandle === params.sourceHandle) return false;
+            
+            // Remove existing incoming edge on the target handle
+            if (e.target === params.target && (e.targetHandle === params.targetHandle || (!params.targetHandle && !e.targetHandle))) return false;
+
+            return true;
+        });
         return addEdge({ ...params, type: 'customEdge', data, markerEnd: { type: MarkerType.ArrowClosed } }, filteredEds);
     });
-  }, [edgeStyle, updateNodeData, handleInteract, setEdges, getNode, onLogAction, getEdges]);
+  }, [edgeStyle, updateNodeData, handleInteract, setEdges, getNode, onLogAction, getEdges, takeSnapshot]);
 
-  const addNodeAt = React.useCallback((type, label, clientPos = null) => {
+  const addNodeAt = React.useCallback((type, label, clientPos = null, connectSource = null) => {
     if (readOnly) return;
+    takeSnapshot();
     handleInteract();
     if(onLogAction) onLogAction('NODE_ADDED', { type, label });
     const newId = 'node_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
@@ -589,9 +815,26 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         ...(type === 'FOR_CONTAINER' ? { style: { width: 350, height: 200 } } : {}),
         ...(type === 'SWITCH_CONTAINER' ? { style: { width: 450, height: 250 } } : {})
     }));
-  }, [readOnly, handleInteract, onLogAction, screenToFlowPosition, setNodes, updateNodeData, updateNodeLabel]);
 
-  const handlePaneContextMenu = useCallback((e) => { if (readOnly) return; e.preventDefault(); setContextMenu({ mouseX: e.clientX, mouseY: e.clientY }); }, [readOnly]);
+    const conn = connectSource || clientPos?.connectSource;
+    if (conn && conn.nodeId) {
+        setTimeout(() => {
+            onConnect({
+                source: conn.nodeId,
+                sourceHandle: conn.handleId || 's-bottom',
+                target: newId,
+                targetHandle: 't-top'
+            });
+        }, 50);
+    }
+  }, [readOnly, handleInteract, onLogAction, screenToFlowPosition, setNodes, updateNodeData, updateNodeLabel, takeSnapshot, onConnect]);
+
+  const handlePaneContextMenu = useCallback((e) => { 
+    if (readOnly) return; 
+    e.preventDefault(); 
+    setContextMenu({ mouseX: e.clientX, mouseY: e.clientY, connectSource: connectingNodeRef.current }); 
+    connectingNodeRef.current = null;
+  }, [readOnly]);
 
   const handleExportEduCode = () => {
     setShowExportMenu(false);
@@ -612,10 +855,76 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     setPendingImport(null);
     
     if (mode === 'replace') {
-        if(onImportXmlRef.current) onImportXmlRef.current(xmlData);
-        else if(onXmlChangeRef.current) onXmlChangeRef.current(xmlData);
+        const { nodes: newNodes, edges: newEdges } = drawioToReactFlow(xmlData);
+        if (screenToFlowPosition) {
+            const centerPos = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+            let minNewX = Infinity, minNewY = Infinity, maxNewX = -Infinity, maxNewY = -Infinity;
+            newNodes.forEach(n => {
+                if (n.position.x < minNewX) minNewX = n.position.x;
+                if (n.position.y < minNewY) minNewY = n.position.y;
+                if (n.position.x > maxNewX) maxNewX = n.position.x + 150;
+                if (n.position.y > maxNewY) maxNewY = n.position.y + 50;
+            });
+            if (minNewX !== Infinity) {
+                const centerX = (minNewX + maxNewX) / 2;
+                const centerY = (minNewY + maxNewY) / 2;
+                const offsetX = centerPos.x - centerX;
+                const offsetY = centerPos.y - centerY;
+                newNodes.forEach(n => {
+                    n.position.x += offsetX;
+                    n.position.y += offsetY;
+                });
+            }
+        }
+        const updatedXml = reactFlowToDrawio(newNodes, newEdges);
+        if(onImportXmlRef.current) onImportXmlRef.current(updatedXml);
+        else if(onXmlChangeRef.current) onXmlChangeRef.current(updatedXml);
     } else if (mode === 'add') {
         const { nodes: newNodes, edges: newEdges } = drawioToReactFlow(xmlData);
+        
+        let offsetX = 0;
+        let offsetY = 0;
+        
+        const existingRealNodes = nodes.filter(n => n.type !== 'GROUP_BG');
+        if (existingRealNodes.length > 0) {
+            let maxCurrentX = -Infinity;
+            let currentMinY = Infinity;
+            existingRealNodes.forEach(n => {
+                const rightEdge = n.position.x + (n.measured?.width || 150);
+                if (rightEdge > maxCurrentX) maxCurrentX = rightEdge;
+                if (n.position.y < currentMinY) currentMinY = n.position.y;
+            });
+            
+            let minNewX = Infinity;
+            let minNewY = Infinity;
+            newNodes.forEach(n => {
+                if (n.position.x < minNewX) minNewX = n.position.x;
+                if (n.position.y < minNewY) minNewY = n.position.y;
+            });
+
+            if (maxCurrentX !== -Infinity && minNewX !== Infinity) {
+                offsetX = (maxCurrentX + 100) - minNewX;
+                offsetY = currentMinY - minNewY;
+            }
+        } else {
+            const centerPos = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+            let minNewX = Infinity;
+            let minNewY = Infinity;
+            let maxNewX = -Infinity;
+            let maxNewY = -Infinity;
+            newNodes.forEach(n => {
+                if (n.position.x < minNewX) minNewX = n.position.x;
+                if (n.position.y < minNewY) minNewY = n.position.y;
+                if (n.position.x > maxNewX) maxNewX = n.position.x + 150;
+                if (n.position.y > maxNewY) maxNewY = n.position.y + 50;
+            });
+            if (minNewX !== Infinity) {
+                const centerX = (minNewX + maxNewX) / 2;
+                const centerY = (minNewY + maxNewY) / 2;
+                offsetX = centerPos.x - centerX;
+                offsetY = centerPos.y - centerY;
+            }
+        }
         
         const idMap = {};
         const mappedNodes = newNodes.map(n => {
@@ -624,7 +933,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             return { 
                 ...n, 
                 id: newId, 
-                position: { x: n.position.x + 40, y: n.position.y + 40 }, 
+                position: { x: n.position.x + offsetX, y: n.position.y + offsetY }, 
                 selected: true, 
                 data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(newId, e.target.value), onUpdateData: (newData) => updateNodeData(newId, newData) } 
             };
@@ -691,8 +1000,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           <div className="bg-white dark:bg-gray-800 p-4 rounded shadow-lg border border-gray-200 dark:border-gray-700">
             <h3 className="font-bold mb-2 dark:text-gray-100">Smazat vybrané prvky?</h3>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleteConfirm(false)} className="px-3 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-sm dark:text-gray-300 transition-colors">Zrušit</button>
-              <button onClick={executeDelete} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm transition-colors">Smazat</button>
+              <button onClick={() => setDeleteConfirm(false)} className="px-3 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-sm dark:text-gray-300 transition-colors">Zrušit (Esc)</button>
+              <button onClick={executeDelete} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm transition-colors">Smazat (Enter)</button>
             </div>
           </div>
         </div>
@@ -714,9 +1023,99 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
       {contextMenu && (
         <>
-            <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} onContextMenu={(e) => e.preventDefault()} />
-            <div className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl flex flex-col py-1 min-w-[160px]" style={{ top: contextMenu.mouseY, left: contextMenu.mouseX }}>
-                <div className="px-3 py-1.5 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700 mb-1">Přidat blok</div>
+            <div className="fixed inset-0 z-[9998]" onClick={() => setContextMenu(null)} onContextMenu={(e) => e.preventDefault()} />
+            
+            {contextMenu.connectSource && (() => {
+              const srcNode = getNode(contextMenu.connectSource.nodeId);
+              if (!srcNode || !reactFlowInstance.getViewport) return null;
+              
+              let portOffsetX = (srcNode.measured?.width || 140) / 2;
+              let portOffsetY = (srcNode.measured?.height || 50) / 2;
+              
+              if (contextMenu.connectSource.handleId === 's-bottom') {
+                  portOffsetY = srcNode.measured?.height || 50;
+              } else if (contextMenu.connectSource.handleId === 's-right') {
+                  portOffsetX = srcNode.measured?.width || 140;
+              }
+              
+              const { x: transformX, y: transformY, zoom } = reactFlowInstance.getViewport();
+              const flowEl = document.querySelector('.react-flow');
+              const bounds = flowEl ? flowEl.getBoundingClientRect() : { left: 0, top: 0 };
+              
+              const screenPos = {
+                  x: (srcNode.position.x + portOffsetX) * zoom + transformX + bounds.left,
+                  y: (srcNode.position.y + portOffsetY) * zoom + transformY + bounds.top
+              };
+              
+              const menuWidth = 170;
+              const menuHeight = 260; 
+              
+              let menuLeft = contextMenu.mouseX;
+              if (contextMenu.mouseX + menuWidth > window.innerWidth) {
+                  menuLeft = window.innerWidth - (window.innerWidth - contextMenu.mouseX) - menuWidth;
+              }
+              
+              let menuTop = contextMenu.mouseY;
+              if (contextMenu.mouseY + menuHeight > window.innerHeight) {
+                  menuTop = window.innerHeight - (window.innerHeight - contextMenu.mouseY) - menuHeight;
+              }
+              
+              const targetX = menuLeft + menuWidth / 2;
+              const targetY = menuTop;
+              
+              const isRight = contextMenu.connectSource.handleId === 's-right';
+              let pathD = '';
+              if (isRight) {
+                  const midX = (screenPos.x + targetX) / 2;
+                  pathD = `M ${screenPos.x} ${screenPos.y} L ${midX} ${screenPos.y} L ${midX} ${targetY} L ${targetX} ${targetY}`;
+              } else {
+                  const midY = (screenPos.y + targetY) / 2;
+                  pathD = `M ${screenPos.x} ${screenPos.y} L ${screenPos.x} ${midY} L ${targetX} ${midY} L ${targetX} ${targetY}`;
+              }
+              
+              return (
+                <svg className="fixed inset-0 pointer-events-none z-[9997]" style={{ width: '100vw', height: '100vh' }}>
+                  <path d={pathD} fill="none" stroke="#6366f1" strokeWidth="3" strokeLinejoin="round" strokeDasharray="6,6" className="animate-pulse drop-shadow-md" />
+                  <circle cx={screenPos.x} cy={screenPos.y} r="4" fill="#6366f1" />
+                  <polygon points={`${targetX-4},${targetY-8} ${targetX+4},${targetY-8} ${targetX},${targetY}`} fill="#6366f1" />
+                </svg>
+              );
+            })()}
+
+            {(() => {
+                const menuWidth = 170;
+                const menuHeight = 260; // Estimated height with items
+                let style = {};
+                
+                if (contextMenu.mouseX + menuWidth > window.innerWidth) {
+                    style.right = window.innerWidth - contextMenu.mouseX;
+                } else {
+                    style.left = contextMenu.mouseX;
+                }
+                
+                if (contextMenu.mouseY + menuHeight > window.innerHeight) {
+                    style.bottom = window.innerHeight - contextMenu.mouseY;
+                } else {
+                    style.top = contextMenu.mouseY;
+                }
+
+                return (
+                  <div 
+                    className={`fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl flex flex-col pb-1 overflow-hidden min-w-[170px] ${!contextMenu.connectSource ? 'pt-1' : ''}`} 
+                    style={style}
+                  >
+                {contextMenu.connectSource ? (
+                  <div className="px-3 py-1.5 bg-indigo-50/80 dark:bg-indigo-950/60 border-b border-indigo-100 dark:border-indigo-800/60 flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                      <Link2 size={13} className="animate-pulse shrink-0" />
+                      <span>Napojit na blok</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="px-3 py-1 border-b border-gray-100 dark:border-gray-700/50 mb-1 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                    Přidat blok
+                  </div>
+                )}
                 {[
                   {type: 'START_END', label: 'Start/End', icon: Circle, color: colorMode ? "text-fuchsia-500" : "text-gray-500"},
                   {type: 'ACTION', label: 'Operace', icon: Square, color: colorMode ? "text-blue-500" : "text-gray-500"},
@@ -728,20 +1127,38 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
                     {type: 'SWITCH_CONTAINER', label: 'Switch (Větvení)', icon: Columns, color: colorMode ? "text-rose-500" : "text-gray-500"}
                   ] : []),
                   {type: 'COMMENT', label: 'Komentář', icon: MessageSquare, color: colorMode ? "text-yellow-500" : "text-gray-500"}
-                ].map(item => (
+                ].filter(item => {
+                  if (!contextMenu.connectSource) return true;
+                  return item.type !== 'COMMENT';
+                }).map(item => (
                   <button key={item.type} onClick={() => { 
                     let t = item.type;
                     let txt = item.type === 'COMMENT'?'#':(item.type==='CONDITION'?'x>0':(item.type==='IO'?'x':(item.type==='LOOP_CONTAINER'?'':'')));
-                    if (t === 'FOR_CONTAINER') { txt = ''; }
+                    if (t === 'FOR_CONTAINER' || t === 'SWITCH_CONTAINER') { txt = ''; }
+                    
+                    if (contextMenu.connectSource && (t === 'LOOP_CONTAINER' || t === 'FOR_CONTAINER')) {
+                        // Create the container at the current position without connecting it
+                        addNodeAt(t, txt, { mouseX: contextMenu.mouseX, mouseY: contextMenu.mouseY });
+                        // Move the context menu slightly so the inner block is spawned inside the container
+                        setContextMenu({
+                            ...contextMenu,
+                            mouseX: contextMenu.mouseX + 40,
+                            mouseY: contextMenu.mouseY + 40
+                        });
+                        return;
+                    }
+                    
                     addNodeAt(t, txt, contextMenu); 
                     setContextMenu(null); 
                   }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
                     {item.type === 'IO' ? <IoIcon size={14} className={item.color} /> : <item.icon size={14} className={item.color} />} {item.label}
                   </button>
-                ))}  
-            </div>
+                ))}                </div>
+                );
+            })()}
         </>
       )}
+
 
       <div className="absolute top-4 left-4 z-10 flex gap-2 bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700">
         <button data-testid="Start/Konec" onClick={() => { clearHover(); addNodeAt('START_END', ''); }} onMouseEnter={(e) => handlePointerDown('START_END', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('START_END', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Circle size={18} className={colorMode ? "text-fuchsia-600" : ""} /></button>
@@ -785,6 +1202,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       <div className="w-full h-full" onContextMenu={handlePaneContextMenu}>
         <ReactFlow 
           nodes={allNodes} edges={edges} 
+          multiSelectionKeyCode={['Control', 'Meta', 'Shift']}
           onNodesChange={(changes) => { 
               const isUserChange = changes.some(c => c.type !== 'dimensions' && c.type !== 'replace');
               if (isUserChange) handleInteract(); 
@@ -796,7 +1214,9 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
               if (!readOnly) onEdgesChange(changes); 
           }} 
           onConnect={(params) => { if (!readOnly) onConnect(params); }} 
-          onNodeDragStart={handleInteract}
+          onConnectStart={(event, params) => { connectingNodeRef.current = params; }}
+          onConnectEnd={() => { setTimeout(() => { if (!contextMenu) connectingNodeRef.current = null; }, 150); }}
+          onNodeDragStart={() => { takeSnapshot(); handleInteract(); }}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
           onPaneClick={() => { handleInteract(); setContextMenu(null); setShowExportMenu(false); if (onPaneClickRef.current) onPaneClickRef.current(); }}
@@ -804,12 +1224,18 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           isValidConnection={isValidConnection} 
           nodeTypes={nodeTypes} edgeTypes={edgeTypes} 
           defaultEdgeOptions={{ type: 'customEdge', markerEnd: { type: MarkerType.ArrowClosed } }}
-          fitView deleteKeyCode={null} selectionOnDrag={true} panOnDrag={[1, 2]} panOnScroll={true} selectionMode="full" multiSelectionKeyCode="Control"
+          fitView 
+          fitViewOptions={{ maxZoom: 1.1, padding: 0.2 }}
+          defaultViewport={{ x: 0, y: 0, zoom: 0.85 }}
+          minZoom={0.2}
+          maxZoom={3.0}
+          connectionLineType={ConnectionLineType.SmoothStep}
+          deleteKeyCode={null} selectionOnDrag={true} panOnDrag={[1, 2]} panOnScroll={true} selectionMode="full"
           elementsSelectable={!readOnly}
           nodesDraggable={!readOnly}
           elevateNodesOnSelect={false}
         >
-          <Background color="#ccc" gap={16} />
+          <Background color={isDarkMode ? "#334155" : "#cbd5e1"} gap={16} />
           <Controls />
         </ReactFlow>
       </div>

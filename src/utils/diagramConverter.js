@@ -65,7 +65,8 @@ export const drawioToReactFlow = (xml) => {
               forStep: style.match(/forStep=([^;]+)/) ? decodeURIComponent(style.match(/forStep=([^;]+)/)[1]) : undefined,
               switchVar: style.match(/switchVar=([^;]+)/) ? decodeURIComponent(style.match(/switchVar=([^;]+)/)[1]) : undefined,
               caseVal: style.match(/caseVal=([^;]+)/) ? decodeURIComponent(style.match(/caseVal=([^;]+)/)[1]) : undefined,
-              isDefault: style.match(/isDefault=([^;]+)/) ? style.match(/isDefault=([^;]+)/)[1] === 'true' : false
+              isDefault: style.match(/isDefault=([^;]+)/) ? style.match(/isDefault=([^;]+)/)[1] === 'true' : false,
+              switchId: style.match(/switchId=([^;]+)/) ? decodeURIComponent(style.match(/switchId=([^;]+)/)[1]) : undefined
           } 
       };
       
@@ -159,6 +160,7 @@ export const reactFlowToDrawio = (nodes, edges) => {
     if (n.data?.switchVar !== undefined) style += `switchVar=${encodeURIComponent(n.data.switchVar)};`;
     if (n.data?.caseVal !== undefined) style += `caseVal=${encodeURIComponent(n.data.caseVal)};`;
     if (n.data?.isDefault !== undefined) style += `isDefault=${n.data.isDefault};`;
+    if (n.data?.switchId !== undefined) style += `switchId=${encodeURIComponent(n.data.switchId)};`;
 
     const parentAttr = n.parentId ? n.parentId : '1';
     xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}" vertex="1" parent="${parentAttr}">\n`;

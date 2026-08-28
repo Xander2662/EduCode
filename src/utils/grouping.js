@@ -168,7 +168,7 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
              height: groupH, 
              data: { bgColor, borderColor, width: groupW, height: groupH },
              style: { width: groupW, height: groupH, pointerEvents: 'none', opacity: 1 },
-             zIndex: g.type === 'LOOP' ? -2 : -1,
+             zIndex: -15000,
              selectable: false,
              draggable: false,
              focusable: false,

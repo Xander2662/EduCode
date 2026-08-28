@@ -1,6 +1,6 @@
 import React from 'react';
 import { Handle, Position, useReactFlow, useEdges, NodeResizeControl, useStoreApi } from '@xyflow/react';
-import { RefreshCcw, MousePointer2 } from 'lucide-react';
+import { RefreshCcw, MousePointer2, Columns, Plus } from 'lucide-react';
 import { calculateStretchLimits } from '../../utils/stretchLimits';
 import { useContainerBounds } from './useContainerBounds';
 import { edgeLabels, getHighlightClass } from './constants';
@@ -50,6 +50,15 @@ export const GroupBgNode = ({ data }) => (
     <div style={{ backgroundColor: data.bgColor, borderColor: data.borderColor }} className="w-full h-full rounded-[2rem] border-[3px] border-dashed pointer-events-none" />
 );
 
+const handleBaseClass = "!w-2 !h-2 after:content-[''] after:absolute after:-top-3 after:-bottom-3 after:-left-3 after:-right-3 after:cursor-crosshair";
+
+const breakpointButtonClass = (isBreakpoint, offsetClass = "-left-3.5") => 
+  `absolute ${offsetClass} top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white dark:border-gray-800 shadow-md z-30 transition-colors pointer-events-auto ${
+    isBreakpoint 
+      ? 'bg-red-500 hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-500' 
+      : 'bg-gray-300 dark:bg-gray-600 hover:bg-red-400 dark:hover:bg-red-500/50'
+  }`;
+
 export const StartEndNode = ({ id, data, selected }) => {
   const { setNodes } = useReactFlow();
   let mode = data.mode || 'unassigned';
@@ -73,12 +82,12 @@ export const StartEndNode = ({ id, data, selected }) => {
   const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, borderClass);
 
   return (
-    <div className={`${bgClass} border-2 rounded-[2rem] min-w-[140px] min-h-[40px] flex flex-col justify-center items-center p-2 transition-all relative ${highlightClass} ${data.isBreakpoint ? 'ring-4 ring-red-500 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : ''}`}>
+    <div className={`${bgClass} border-2 rounded-[2rem] min-w-[140px] min-h-[40px] flex flex-col justify-center items-center p-2 transition-all relative ${highlightClass} ${data.isBreakpoint ? 'ring-2 ring-red-500 border-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={breakpointButtonClass(data.isBreakpoint, "-left-3")} title="Zarážka (Breakpoint)" />
       )}
 
-      {mode !== 'start' && <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />}
+      {mode !== 'start' && <Handle type="target" position={Position.Top} id="t-top" className={`${handleBaseClass} ${handleClass}`} />}
       
       {mode === 'unassigned' && (
         <>
@@ -110,7 +119,7 @@ export const StartEndNode = ({ id, data, selected }) => {
         </div>
       )}
 
-      {mode !== 'end' && <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />}
+      {mode !== 'end' && <Handle type="source" position={Position.Bottom} id="s-bottom" className={`${handleBaseClass} ${handleClass}`} />}
     </div>
   );
 };
@@ -126,16 +135,16 @@ export const ActionNode = ({ id, data, selected }) => {
   const morphStyle = data.morphOffset ? { transform: `translate(${data.morphOffset.x}px, ${data.morphOffset.y}px)`, transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)', zIndex: 100 } : { transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)' };
 
   return (
-    <div style={morphStyle} onDoubleClick={onDoubleClick} className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass} ${data.isBreakpoint ? 'ring-4 ring-red-500 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : ''}`}>
+    <div style={morphStyle} onDoubleClick={onDoubleClick} className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass} ${data.isBreakpoint ? 'ring-2 ring-red-500 border-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={breakpointButtonClass(data.isBreakpoint, "-left-3.5")} title="Zarážka (Breakpoint)" />
       )}
       
-      <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
+      <Handle type="target" position={Position.Top} id="t-top" className={`${handleBaseClass} ${handleClass}`} />
 
       <DragHandle />
       <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-900 dark:text-gray-100 ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} />
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className={`${handleBaseClass} ${handleClass}`} />
     </div>
   );
 };
@@ -160,7 +169,7 @@ export const IONode = ({ id, data, selected }) => {
       : (isInput ? 'text-emerald-700/60 dark:text-emerald-400/60' : 'text-cyan-700/60 dark:text-cyan-400/60');
   
   let strokeClass = defaultStroke;
-  let shadowClass = '';
+  let shadowClass = 'drop-shadow-none';
   let strokeW = "2";
   
   if (data.isRuntimeActive) {
@@ -177,8 +186,8 @@ export const IONode = ({ id, data, selected }) => {
 
   if (data.isBreakpoint) {
       strokeClass = 'text-red-500';
-      shadowClass = 'drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]';
-      strokeW = "4";
+      shadowClass = 'drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]';
+      strokeW = "2.5";
   }
 
   const handleUserChange = (e) => {
@@ -206,14 +215,14 @@ export const IONode = ({ id, data, selected }) => {
   return (
     <div style={morphStyle} onDoubleClick={onDoubleClick} className={`relative min-w-[120px] min-h-[50px] flex flex-col transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={breakpointButtonClass(data.isBreakpoint, "-left-3.5")} title="Zarážka (Breakpoint)" />
       )}
       
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
         <polygon points="15,2 98,2 85,98 2,98" className={fillClass} stroke="currentColor" strokeWidth={strokeW} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
       
-      <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
+      <Handle type="target" position={Position.Top} id="t-top" className={`${handleBaseClass} ${handleClass}`} />
       
       <div className="pt-2 z-10"><DragHandle /></div>
       
@@ -224,7 +233,7 @@ export const IONode = ({ id, data, selected }) => {
       
       <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={handleUserChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`w-full flex-1 text-center outline-none bg-transparent text-sm font-mono nodrag resize-none overflow-hidden text-gray-900 dark:text-gray-100 ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'} relative z-10 px-[35px] pt-1`} />
       
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-2 !h-2 ${handleClass}`} />
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className={`${handleBaseClass} ${handleClass}`} />
     </div>
   );
 };
@@ -242,7 +251,7 @@ export const ConditionNode = ({ id, data, selected }) => {
   const handleClass = isGray ? '!bg-gray-400' : '!bg-orange-600';
   
   let strokeClass = defaultStroke;
-  let shadowClass = '';
+  let shadowClass = 'drop-shadow-none';
   let strokeW = "2";
   
   if (data.isRuntimeActive) {
@@ -259,8 +268,8 @@ export const ConditionNode = ({ id, data, selected }) => {
 
   if (data.isBreakpoint) {
       strokeClass = 'text-red-500';
-      shadowClass = 'drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]';
-      strokeW = "4";
+      shadowClass = 'drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]';
+      strokeW = "2.5";
   }
   
   const pref = edgeLabels[data.edgeStyle || 'true-false'];
@@ -316,13 +325,13 @@ export const ConditionNode = ({ id, data, selected }) => {
     // Zvětšeno z min-w-[120px] min-h-[60px] na 160px x 80px, aby se posuvník pohodlně vešel do obou tvarů
     <div style={morphStyle} onDoubleClick={onDoubleClick} className={`relative flex flex-col items-center justify-center min-w-[160px] min-h-[80px] transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={`absolute -left-6 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-md z-50 transition-colors ${data.isBreakpoint ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200 hover:bg-red-400'}`} title="Zarážka (Breakpoint)" />
+          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={breakpointButtonClass(data.isBreakpoint, "-left-4")} title="Zarážka (Breakpoint)" />
       )}
 
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
         <polygon points={polygonPoints} className={fillClass} stroke="currentColor" strokeWidth={strokeW} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
-      <Handle type="target" position={Position.Top} id="t-top" className={`!w-2 !h-2 ${handleClass}`} />
+      <Handle type="target" position={Position.Top} id="t-top" className={`${handleBaseClass} ${handleClass}`} />
 
       {/* Změněno z top-1 na top-2.5, aby se u kosočtverce drag handle neřezal o hranu (přidává to padding zespoda špičky) */}
       <div className="absolute top-2.5 z-10"><DragHandle /></div>
@@ -330,8 +339,8 @@ export const ConditionNode = ({ id, data, selected }) => {
       {/* Větší max šířka textarea, protože celý blok je nyní větší */}
       <textarea ref={inputRef} rows={1} defaultValue={data.label} onChange={data.onChange} onKeyDown={handleNodeKeyDown} onBlur={onBlur} onInput={handleInputResize} onMouseDown={(e) => { if(isEditing) e.stopPropagation(); else handleInputMouseDown(e, selected); }} readOnly={data.readOnly || !isEditing} className={`min-w-[90px] max-w-[130px] text-center outline-none bg-transparent text-sm font-mono nodrag mt-3 z-10 resize-none overflow-hidden text-gray-900 dark:text-gray-100 px-1 ${hasWarning ? 'text-red-700 dark:text-red-400 font-bold' : ''} ${isEditing ? 'pointer-events-auto' : 'pointer-events-none cursor-text'}`} />
       
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${bottomBorderColor} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair leading-none p-0`}>{bottomChar}</Handle>
-      <Handle type="source" position={Position.Right} id="s-right" className={`!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${rightBorderColor} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair leading-none p-0`}>{rightChar}</Handle>
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className={`!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] after:content-[''] after:absolute after:-top-3 after:-bottom-3 after:-left-3 after:-right-3 after:cursor-crosshair !bg-white dark:!bg-gray-800 !border-2 ${bottomBorderColor} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair leading-none p-0`}>{bottomChar}</Handle>
+      <Handle type="source" position={Position.Right} id="s-right" className={`!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] after:content-[''] after:absolute after:-top-3 after:-bottom-3 after:-left-3 after:-right-3 after:cursor-crosshair !bg-white dark:!bg-gray-800 !border-2 ${rightBorderColor} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair leading-none p-0`}>{rightChar}</Handle>
     </div>
   );
 };
@@ -439,6 +448,8 @@ export const LoopContainerNode = ({ id, data, selected, dragging }) => {
       {/* Bottom Limit Extensions */}
       <div ref={bottomLimitLeftRef} className="absolute right-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-purple-400 opacity-0 transition-opacity pointer-events-none" />
       <div ref={bottomLimitRightRef} className="absolute left-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-purple-400 opacity-0 transition-opacity pointer-events-none" />
+      <Handle type="target" position={Position.Top} id="t-top" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className="opacity-0 pointer-events-none" isConnectable={false} />
     </div>
   );
 };
@@ -515,36 +526,246 @@ export const ForContainerNode = ({ id, data, selected, dragging }) => {
       
       <div ref={bottomLimitLeftRef} className="absolute right-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-indigo-400 opacity-0 transition-opacity pointer-events-none" />
       <div ref={bottomLimitRightRef} className="absolute left-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-indigo-400 opacity-0 transition-opacity pointer-events-none" />
+      <Handle type="target" position={Position.Top} id="t-top" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className="opacity-0 pointer-events-none" isConnectable={false} />
     </div>
   );
 };
 
 export const SwitchContainerNode = ({ id, data, selected }) => {
+  const { setNodes, getNodes } = useReactFlow();
   const isGray = data.colorMode === false;
-  const borderColor = selected ? 'border-rose-500' : (isGray ? 'border-gray-400 dark:border-gray-600' : 'border-rose-300 dark:border-rose-700/50');
-  const bgColor = isGray ? 'bg-gray-50/50 dark:bg-gray-900/50' : 'bg-rose-50/30 dark:bg-rose-900/10';
+  const borderColor = (selected || data.isRuntimeActive) ? 'border-rose-500' : (isGray ? 'border-gray-400 dark:border-gray-600' : 'border-rose-400 dark:border-rose-600');
+  const bgColor = isGray ? 'bg-gray-50/50 dark:bg-gray-900/50' : 'bg-rose-50/20 dark:bg-rose-900/10';
+
+  const [cases, setCases] = React.useState([]);
+  const [containerHeight, setContainerHeight] = React.useState(250);
+  const [containerWidth, setContainerWidth] = React.useState(290);
+  const [hasDefault, setHasDefault] = React.useState(false);
+
+  // Layout Engine Effect
+  React.useEffect(() => {
+    const layoutEngine = () => {
+        const nds = getNodes();
+        const myNode = nds.find(n => n.id === id);
+        if (!myNode) return;
+
+        const myCases = nds.filter(n => n.type === 'CASE_CONTAINER' && n.data?.switchId === id);
+        myCases.sort((a, b) => {
+            if (a.data.isDefault) return -1;
+            if (b.data.isDefault) return 1;
+            return a.position.x - b.position.x;
+        });
+
+        const currentHasDefault = myCases.some(c => c.data.isDefault);
+        if (currentHasDefault !== hasDefault) {
+            setHasDefault(currentHasDefault);
+        }
+
+        if (myCases.length === 0) {
+            if (cases.length !== 0) setCases([]);
+            if (containerWidth !== 290) setContainerWidth(290);
+            if (containerHeight !== 230) setContainerHeight(230);
+            
+            if (myNode.style?.width !== 290 || myNode.style?.height !== 230) {
+                setNodes(nodes => nodes.map(n => n.id === id ? { ...n, style: { ...n.style, width: 290, height: 230 }, zIndex: -1000 } : n));
+            }
+            return;
+        }
+
+        const PADDING_TOP = 40;
+        const PADDING_BOTTOM = 20;
+        const GAP = 15;
+        const CASE_MIN_WIDTH = 250;
+        
+        let currentX = GAP;
+        let maxHeight = 0;
+        let changed = false;
+
+        const caseData = [];
+
+        myCases.forEach((c) => {
+            const w = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
+            const h = c.style?.height ? parseInt(c.style.height) : 150;
+            if (h > maxHeight) maxHeight = h;
+
+            const targetX = Math.round(myNode.position.x + currentX);
+            const targetY = Math.round(myNode.position.y + PADDING_TOP);
+            
+            if (Math.round(c.position.x) !== targetX || Math.round(c.position.y) !== targetY) {
+                changed = true;
+            }
+            
+            caseData.push({ id: c.id, x: targetX, y: targetY, w, h, isDefault: c.data.isDefault });
+            currentX += w + GAP;
+        });
+
+        const targetContainerWidth = Math.max(290, currentX);
+        const targetContainerHeight = Math.round(maxHeight + PADDING_TOP + PADDING_BOTTOM);
+
+        setCases(caseData);
+        setContainerHeight(targetContainerHeight);
+        setContainerWidth(targetContainerWidth);
+
+        const myW = myNode.style?.width ? parseInt(myNode.style.width) : 290;
+        const myH = myNode.style?.height ? parseInt(myNode.style.height) : 230;
+
+        if (changed || myW !== targetContainerWidth || myH !== targetContainerHeight) {
+            setNodes(nodes => nodes.map(n => {
+                if (n.id === id) {
+                    return { ...n, style: { ...n.style, width: targetContainerWidth, height: targetContainerHeight }, zIndex: -10000 };
+                }
+                const caseInfo = caseData.find(cd => cd.id === n.id);
+                if (caseInfo) {
+                    if (n.position.x !== caseInfo.x || n.position.y !== caseInfo.y) {
+                        return { ...n, position: { x: caseInfo.x, y: caseInfo.y } };
+                    }
+                }
+                return n;
+            }));
+        }
+    };
+    
+    const interval = setInterval(layoutEngine, 50);
+    return () => clearInterval(interval);
+  }, [id, getNodes, setNodes, cases.length, containerWidth, containerHeight, hasDefault]);
+
+  const addCase = () => {
+      setNodes(nds => {
+          const myNode = nds.find(n => n.id === id);
+          const newCaseId = `case_${Date.now()}`;
+          const newCase = {
+              id: newCaseId,
+              type: 'CASE_CONTAINER',
+              position: { x: myNode ? myNode.position.x + 20 : 20, y: myNode ? myNode.position.y + 60 : 60 },
+              data: { caseVal: '1', isDefault: false, colorMode: data.colorMode, switchId: id },
+              style: { width: 250, height: 150 },
+              zIndex: 10,
+              draggable: true,
+              selectable: true
+          };
+          return [...nds, newCase];
+      });
+  };
+
+  const toggleDefaultCase = () => {
+      if (hasDefault) {
+          // Remove default case
+          setNodes(nds => nds.filter(n => !(n.type === 'CASE_CONTAINER' && n.data?.switchId === id && n.data.isDefault)));
+      } else {
+          // Add default case
+          setNodes(nds => {
+              const myNode = nds.find(n => n.id === id);
+              const newCaseId = `case_def_${Date.now()}`;
+              const newCase = {
+                  id: newCaseId,
+                  type: 'CASE_CONTAINER',
+                  position: { x: myNode ? myNode.position.x + 20 : 20, y: myNode ? myNode.position.y + 60 : 60 },
+                  data: { caseVal: 'default', isDefault: true, colorMode: data.colorMode, switchId: id },
+                  style: { width: 250, height: 150 },
+                  zIndex: 10,
+                  draggable: true,
+                  selectable: true
+              };
+              return [...nds, newCase];
+          });
+      }
+  };
+
+  const updateField = (field, value) => {
+      if (data.onUpdateData) data.onUpdateData({ [field]: value });
+      else setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, [field]: value } } : n));
+  };
+
+  const handleClass = `!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${isGray ? '!border-gray-500' : '!border-rose-500'} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair p-0`;
 
   return (
-    <div className={`relative w-full h-full rounded-lg border-2 border-dashed ${borderColor} ${bgColor} flex flex-col overflow-visible pointer-events-none ${selected ? 'ring-2 ring-rose-400/50 ring-offset-2 ring-offset-rose-50/50' : ''}`}>
-      <div className={`absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded text-xs font-bold border-2 ${selected ? 'border-rose-500 bg-rose-50 dark:bg-rose-900 text-rose-700 dark:text-rose-300' : (isGray ? 'border-gray-400 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300' : 'border-rose-300 bg-rose-50 dark:bg-rose-900/50 text-rose-600 dark:text-rose-400')} select-none`}>
-        SWITCH {data.switchVar && `(${data.switchVar})`}
+    <div className={`relative w-full h-full rounded-lg border-2 border-dashed ${borderColor} ${bgColor} flex flex-col overflow-visible ${selected ? 'ring-2 ring-rose-500 ring-offset-2 ring-offset-rose-50/50' : ''}`}>
+      <Handle type="target" position={Position.Top} id="t-top" className={handleClass}></Handle>
+      
+      <div className={`custom-drag-handle absolute -top-4 left-4 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing z-20`}>
+        <Columns size={12} className="text-rose-500" />
+        <span className="text-rose-700 dark:text-rose-300">SWITCH</span>
+        <input 
+            type="text" 
+            value={data.switchVar || 'x'} 
+            onChange={(e) => updateField('switchVar', e.target.value)}
+            onMouseDown={e => e.stopPropagation()}
+            className="outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-[10px] font-mono w-16 border border-transparent focus:border-rose-300 cursor-text"
+            placeholder="Var"
+            title="Proměnná (např. x)"
+        />
+        <div className="flex items-center gap-1 ml-1 pl-2 border-l border-gray-200 dark:border-gray-600 pointer-events-auto">
+            <span className="text-[10px] font-bold text-gray-500">DEFAULT</span>
+            <div 
+                onMouseDown={e => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); toggleDefaultCase(); }}
+                className={`w-7 h-3.5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors ${hasDefault ? 'bg-rose-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                title="Přepnout výchozí případ (Default)"
+            >
+                <div className={`bg-white w-2.5 h-2.5 rounded-full shadow-md transform transition-transform ${hasDefault ? 'translate-x-3.5' : 'translate-x-0'}`}></div>
+            </div>
+        </div>
+        
+        <div className="border-l border-gray-200 dark:border-gray-600 pl-2 ml-1 pointer-events-auto">
+            <button 
+                onMouseDown={e => e.stopPropagation()} 
+                onClick={(e) => { e.stopPropagation(); addCase(); }} 
+                className="w-5 h-5 rounded bg-rose-100 dark:bg-rose-900/50 hover:bg-rose-200 dark:hover:bg-rose-800 text-rose-700 dark:text-rose-300 transition-colors flex items-center justify-center cursor-pointer"
+                title="Přidat případ (Case)"
+            >
+                <Plus size={12} />
+            </button>
+        </div>
       </div>
-      <div className="flex-1 pointer-events-none" />
+
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className={handleClass}></Handle>
     </div>
   );
 };
 
-export const CaseContainerNode = ({ id, data, selected }) => {
+export const CaseContainerNode = ({ id, data, selected, dragging }) => {
+  const { setNodes } = useReactFlow();
   const isGray = data.colorMode === false;
-  const borderColor = selected ? 'border-orange-500' : (isGray ? 'border-gray-300 dark:border-gray-700' : 'border-orange-300 dark:border-orange-700/50');
-  const bgColor = isGray ? 'bg-gray-50/30 dark:bg-gray-900/30' : 'bg-orange-50/20 dark:bg-orange-900/10';
+  const borderColor = (selected || data.isRuntimeActive) ? 'border-rose-400' : (isGray ? 'border-gray-300 dark:border-gray-700' : 'border-rose-300 dark:border-rose-700/50');
+  const bgColor = isGray ? 'bg-white dark:bg-gray-800' : 'bg-rose-50/50 dark:bg-rose-950/30';
+  
+  const {
+      containerRef
+  } = useContainerBounds(id, { ...data, isCaseContainer: true }, dragging, 250, 150);
+
+  const updateField = (field, value) => {
+      if (data.onUpdateData) data.onUpdateData({ [field]: value });
+      else setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, [field]: value } } : n));
+  };
+
+  const handleClass = `!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${isGray ? '!border-gray-500' : '!border-rose-500'} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair p-0`;
 
   return (
-    <div className={`relative w-full h-full rounded border border-dotted ${borderColor} ${bgColor} pointer-events-auto ${selected ? 'ring-1 ring-orange-400/50' : ''}`}>
-      <div className={`absolute -top-2 left-2 px-1 text-[10px] font-semibold ${isGray ? 'text-gray-500 bg-gray-50 dark:bg-gray-900' : 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-gray-900'} rounded select-none`}>
-        {data.isDefault ? 'DEFAULT' : `CASE ${data.caseVal}`}
+    <div 
+      ref={containerRef} 
+      className={`nodrag relative w-full h-full rounded border border-solid ${borderColor} ${bgColor} flex flex-col z-10 shadow-sm ${selected ? 'ring-2 ring-rose-400' : ''}`}
+    >
+      <div className={`w-full h-8 border-b ${borderColor} flex items-center justify-center px-2 bg-white/50 dark:bg-gray-900/50 rounded-t cursor-pointer`}>
+        <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-100 dark:bg-rose-900/40 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-800">
+                {data.isDefault ? 'DEFAULT' : 'CASE'}
+            </span>
+            {!data.isDefault && (
+                <input 
+                    type="text" 
+                    value={data.caseVal || '1'} 
+                    onChange={(e) => updateField('caseVal', e.target.value)}
+                    onMouseDown={e => e.stopPropagation()}
+                    onPointerDown={e => e.stopPropagation()}
+                    className="outline-none bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 px-2 py-0.5 rounded text-xs font-mono w-16 font-bold border border-rose-200 dark:border-rose-700 focus:border-rose-400 cursor-text shadow-inner"
+                    placeholder="Hodnota"
+                />
+            )}
+        </div>
       </div>
-      <div className="w-full h-full pointer-events-none" />
+      <Handle type="target" position={Position.Top} id="t-top" className="opacity-0 !w-0 !h-0 border-0"></Handle>
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className="opacity-0 !w-0 !h-0 border-0"></Handle>
     </div>
   );
 };

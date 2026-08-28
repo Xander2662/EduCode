@@ -319,22 +319,36 @@ const ToggleSwitch = ({ checked, onChange, label }) => (
 );
 
 const CustomSelect = ({ value, options, onChange, label }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const selectedOption = options.find(o => o.value === value) || options[0];
+
   return (
     <div className="relative mb-5">
       {label && <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">{label}</label>}
-      <select 
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full text-sm bg-gray-50/50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg outline-none px-3 py-2 text-gray-700 dark:text-gray-300 hover:border-indigo-400 transition-colors appearance-none cursor-pointer"
-        onClick={(e) => e.stopPropagation()}
+      <button 
+        onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
+        className="w-full text-sm bg-gray-50/50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg outline-none px-3 py-2 flex items-center justify-between text-gray-700 dark:text-gray-300 hover:border-indigo-400 transition-colors"
       >
-        {options.map(opt => (
-          <option key={opt.value} value={opt.value} className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown size={14} className="absolute right-3 top-9 pointer-events-none text-gray-500" />
+        <span>{selectedOption?.label}</span>
+        <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setIsOpen(false); }}></div>
+          <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden border">
+            {options.map(opt => (
+              <button 
+                key={opt.value}
+                onClick={(e) => { e.stopPropagation(); onChange(opt.value); setIsOpen(false); }}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 ${value === opt.value ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -483,20 +497,25 @@ function AppContent() {
 
   useEffect(() => { breakpointsRef.current = breakpoints; }, [breakpoints]);
   
-  useEffect(() => { 
-      debugSpeedRef.current = debugSpeedPercent === 0 ? 3000 : Math.max(50, 800 * (100 / debugSpeedPercent)); 
-  }, [debugSpeedPercent]);
+
 
   useEffect(() => {
-      const handleClickOutside = () => {
+      const handleClickOutside = (e) => {
+          if (e.target.closest('.speed-adjuster-panel') ||
+              e.target.closest('.dropdown-container') ||
+              e.target.closest('.interactive-popup') ||
+              e.target.closest('.watcher-panel') ||
+              e.target.closest('.settings-panel')) {
+              return;
+          }
           setShowDebugSettings(false);
           setShowWatcherInfo(false);
           setActiveDropdown(null);
           setSettingsDropdown(null);
       };
       
-      window.addEventListener('click', handleClickOutside);
-      return () => window.removeEventListener('click', handleClickOutside);
+      window.addEventListener('pointerdown', handleClickOutside);
+      return () => window.removeEventListener('pointerdown', handleClickOutside);
   }, []);
 
   useEffect(() => {
@@ -790,9 +809,6 @@ function AppContent() {
           stopDebugger(false);
       } else {
           setRuntimeActiveNodeId(res.nextNodeId); 
-          if (!isManualStep && breakpointsRef.current.includes(res.nextNodeId)) {
-              setIsPlaying(false);
-          }
       }
       
       if (!res.finished) {
@@ -800,33 +816,49 @@ function AppContent() {
       }
   }, [startDebugger, setIsPlaying, stopDebugger]);
 
-  const executeAutoPlay = useCallback(function play() {
+  const executeAutoPlay = useCallback(function play(skipBreakpointCheckForCurrent = false) {
       if (!isPlayingRef.current) return;
+      
+      const currentRunner = runnerRef.current;
+      if (!skipBreakpointCheckForCurrent && currentRunner && breakpointsRef.current.includes(currentRunner.currentNodeId)) {
+          setIsPlaying(false);
+          return;
+      }
+
       doStep(false);
       if (isPlayingRef.current) {
-          playTimeoutRef.current = setTimeout(play, debugSpeedRef.current);
+          playTimeoutRef.current = setTimeout(() => play(false), debugSpeedRef.current);
       }
-  }, [doStep]);
+  }, [doStep, setIsPlaying]);
+
+  useEffect(() => {
+      debugSpeedRef.current = debugSpeedPercent === 0 ? 3000 : Math.max(50, 800 * (100 / debugSpeedPercent));
+      if (isPlayingRef.current && !inputRequest) {
+          if (playTimeoutRef.current) clearTimeout(playTimeoutRef.current);
+          playTimeoutRef.current = setTimeout(() => executeAutoPlay(false), debugSpeedRef.current);
+      }
+  }, [debugSpeedPercent, executeAutoPlay, inputRequest]);
 
   const togglePlay = useCallback(() => {
-      if (!runnerRef.current) startDebugger();
+      const isNew = !runnerRef.current;
+      if (isNew) startDebugger();
       if (isPlayingRef.current) {
           setIsPlaying(false);
           if (playTimeoutRef.current) clearTimeout(playTimeoutRef.current);
       } else {
           setIsPlaying(true);
-          playTimeoutRef.current = setTimeout(executeAutoPlay, debugSpeedRef.current);
+          playTimeoutRef.current = setTimeout(() => executeAutoPlay(!isNew), debugSpeedRef.current);
       }
   }, [startDebugger, executeAutoPlay, setIsPlaying]);
 
   const handleInputSubmit = (val) => {
       const resumePlay = inputRequest.wasPlaying;
       setInputRequest(null);
-      doStep(true, val);
+      doStep(!resumePlay, val);
       
       if (resumePlay && runnerRef.current && !runnerRef.current.isFinished) {
           setIsPlaying(true);
-          playTimeoutRef.current = setTimeout(executeAutoPlay, debugSpeedRef.current);
+          playTimeoutRef.current = setTimeout(() => executeAutoPlay(false), debugSpeedRef.current);
       }
   };
 
@@ -860,6 +892,7 @@ function AppContent() {
           <DiagramEditor
             editorMode={editorMode}
             xml={diagramXml}
+            isDarkMode={isDarkMode}
             edgeStyle={edgeStyle}
             colorMode={colorMode}
             groupColoring={groupColoring}
@@ -897,7 +930,7 @@ function AppContent() {
           />
           
           {inputRequest && (
-              <div className="absolute inset-0 z-[100] flex items-center justify-center bg-gray-900/40 dark:bg-black/60 backdrop-blur-sm">
+              <div className="absolute inset-0 z-[200] flex items-center justify-center bg-gray-900/40 dark:bg-black/60 backdrop-blur-sm">
                   <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-80">
                       <h2 className="font-bold text-lg mb-2 text-gray-800 dark:text-gray-100">Vyžadován vstup</h2>
                       <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{inputRequest.message}</p>
@@ -953,18 +986,19 @@ function AppContent() {
                                   else if (typeof val === 'string') vType = 'String';
 
                                   return (
-                                    <div key={k} className="flex justify-between items-center text-sm font-mono hover:bg-gray-50 dark:hover:bg-gray-700/50 px-1 py-0.5 rounded transition-colors">
-                                        <span className="text-gray-700 dark:text-gray-300 flex items-baseline gap-1.5">
-                                            {k}
-                                            <span className="text-[10px] text-gray-400 dark:text-gray-500 italic font-normal tracking-wide">
-                                                {vType}
-                                            </span>
-                                        </span>
-                                        <span className="font-bold text-indigo-600 dark:text-indigo-400 max-w-[100px] truncate" title={val}>
-                                            {typeof val === 'boolean' ? (val ? 'True' : 'False') : val}
-                                        </span>
-                                    </div>
-                                  );
+                                     <div key={k} className="grid grid-cols-[1fr_auto_1fr] items-center text-sm font-mono hover:bg-gray-50 dark:hover:bg-gray-700/50 px-2 py-0.5 rounded transition-colors gap-2">
+                                         <span className="text-gray-700 dark:text-gray-300 flex items-baseline gap-1.5 truncate">
+                                             {k}
+                                             <span className="text-[10px] text-gray-400 dark:text-gray-500 italic font-normal tracking-wide shrink-0">
+                                                 {vType}
+                                             </span>
+                                         </span>
+                                         <span className="text-gray-400 dark:text-gray-500 font-light select-none text-xs text-center px-1">=</span>
+                                         <span className="font-bold text-indigo-600 dark:text-indigo-400 truncate text-right" title={val}>
+                                             {typeof val === 'boolean' ? (val ? 'True' : 'False') : val}
+                                         </span>
+                                     </div>
+                                   );
                               })
                           )}
                        </div>
@@ -977,17 +1011,17 @@ function AppContent() {
                     <div className="flex gap-2 items-end pointer-events-auto relative">
                         <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2 flex gap-2">
                             <button onClick={() => doStep(true)} disabled={isPlayingState || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all" aria-label="Krokovat vpřed (ignoruje zarážky)" title="Krokovat vpřed (ignoruje zarážky)"><StepForward size={20} /></button>
-                            <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlayingState ? 'bg-amber-100 text-amber-600 hover:bg-amber-200' : 'bg-green-100 text-green-600 hover:bg-green-200'}`} aria-label={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"} title={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
+                            <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlayingState ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-800/50' : 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50'}`} aria-label={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"} title={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
                                 {isPlayingState ? <Pause size={20} /> : <Play size={20} />}
                             </button>
-                            <button onClick={() => stopDebugger(true)} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 disabled:opacity-30 transition-all" aria-label="Ukončit debugger a vymazat data" title="Ukončit debugger a vymazat data"><StopSquare size={20} /></button>
+                            <button onClick={() => stopDebugger(true)} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 dark:text-red-400 disabled:opacity-30 transition-all" aria-label="Ukončit debugger a vymazat data" title="Ukončit debugger a vymazat data"><StopSquare size={20} /></button>
                         </div>
-                        <div className="relative">
+                        <div className="relative speed-adjuster-panel" onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
                             <button onClick={(e) => { e.stopPropagation(); setShowDebugSettings(!showDebugSettings); }} className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" aria-label="Nastavení rychlosti" title="Nastavení rychlosti">
                                 <Settings size={18} />
                             </button>
                             {showDebugSettings && (
-                                <div className="absolute bottom-full right-0 mb-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-2xl p-4 w-56" onClick={e => e.stopPropagation()}>
+                                <div className="absolute bottom-full right-0 mb-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-2xl p-4 w-56">
                                     <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
                                         Rychlost <span>{debugSpeedPercent}%</span>
                                     </label>
@@ -998,7 +1032,9 @@ function AppContent() {
                                         step="10" 
                                         value={debugSpeedPercent} 
                                         onChange={(e) => setDebugSpeedPercent(Number(e.target.value))} 
-                                        className="w-full accent-indigo-600" 
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        className="w-full accent-indigo-600 cursor-pointer nodrag touch-action-none" 
                                     />
                                 </div>
                             )}
@@ -1095,7 +1131,7 @@ function AppContent() {
   };
 
   return (
-    <div className="h-screen bg-gray-100 dark:bg-gray-950 flex flex-col font-sans overflow-hidden transition-colors" onClick={() => { setActiveDropdown(null); setSettingsDropdown(null); setShowDebugSettings(false); }}>
+    <div className="h-screen bg-gray-100 dark:bg-gray-950 flex flex-col font-sans overflow-hidden transition-colors">
       {/* Zpráva o nepodporovaném zobrazení na malých displejích */}
       <div className="flex md:hidden fixed inset-0 bg-gray-900 text-white z-[9999] flex-col items-center justify-center p-6 text-center">
         <AlertCircle size={48} className="text-red-500 mb-4" />
@@ -1111,8 +1147,8 @@ function AppContent() {
             <h3 className="text-lg font-bold mb-2 text-gray-900 dark:text-white">{dialog.title}</h3>
             <p className="text-gray-600 dark:text-gray-300 mb-6 text-sm">{dialog.desc}</p>
             <div className="flex justify-end gap-3">
-              <button onClick={() => setDialog(null)} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors text-sm font-semibold">Zrušit</button>
-              <button onClick={dialog.onConfirm} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded transition-colors text-sm font-semibold">Zavřít</button>
+              <button onClick={() => setDialog(null)} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors text-sm font-semibold">Zrušit (Esc)</button>
+              <button onClick={dialog.onConfirm} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded transition-colors text-sm font-semibold">{dialog.confirmText || 'Smazat (Enter)'}</button>
             </div>
           </div>
         </div>
@@ -1165,7 +1201,7 @@ function AppContent() {
                 <div className="flex items-center gap-2">
                   
                   {type === 'drawio' && (
-                    <div className="relative mr-1">
+                    <div className="relative mr-1 settings-panel">
                       <button onClick={(e) => { e.stopPropagation(); setSettingsDropdown(settingsDropdown === index ? null : index); setActiveDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors" title="Nastavení diagramu">
                         <Settings size={16} />
                       </button>
@@ -1216,7 +1252,7 @@ function AppContent() {
                     </div>
                   )}
 
-                  <div className="relative ml-1">
+                  <div className="relative ml-1 dropdown-container">
                     <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === index ? null : index); setSettingsDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors" title="Změnit okno">
                       <ChevronDown size={16} />
                     </button>
@@ -1297,7 +1333,6 @@ function AppContent() {
                 onPointerDownCapture={() => { 
                   setActiveDropdown(null); 
                   setSettingsDropdown(null); 
-                  setShowDebugSettings(false); 
                 }}
               >
                 {renderPanelContent(type)}

@@ -105,4 +105,18 @@ describe('diagramToPseudocode', () => {
         expect(pos2).toBeLessThan(pos3);
         expect(pos3).toBeLessThan(posEnd);
     });
+
+    it('ACTION bloky generují standardní operace / volání funkcí bez PRINT', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="start" value="main" type="START_END" mode="start" vertex="1" parent="1"><mxGeometry x="100" y="100"/></mxCell>
+            <mxCell id="act" value="doWork" type="ACTION" vertex="1" parent="1"><mxGeometry x="100" y="200"/></mxCell>
+            <mxCell id="end" value="ENDFUNCTION" type="START_END" mode="end" vertex="1" parent="1"><mxGeometry x="100" y="300"/></mxCell>
+            <mxCell id="e1" source="start" target="act" edge="1" parent="1"/>
+            <mxCell id="e2" source="act" target="end" edge="1" parent="1"/>
+        </root></mxGraphModel>`;
+
+        const { code } = parseDrawioToPseudocode(xml);
+        expect(code).toContain('doWork()');
+        expect(code).not.toContain('PRINT(doWork)');
+    });
 });
