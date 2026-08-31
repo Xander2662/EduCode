@@ -334,7 +334,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                         caseVal = line.substring(5, line.lastIndexOf(':')).trim();
                     }
                     
-                    let caseId = addNode(`Case ${isDefault ? 'default' : caseVal}`, 'CASE_CONTAINER', getXPos(), { caseVal, isDefault, switchId: currentSwitch.id }, line);
+                    let caseId = addNode(`Case ${isDefault ? 'default' : caseVal}`, 'CASE_CONTAINER', getXPos(), { caseVal, isDefault, switchId: currentSwitch.id, parentId: currentSwitch.id }, line);
                     
                     yOffset = currentSwitch.startY + 60; // Start inside case container
                     pendingExits = [{ id: caseId, text: "", handle: "s-bottom" }];
@@ -596,9 +596,19 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             }
         }
 
+        let relX = n.x;
+        let relY = n.y;
+        if (n.parentId && n.parentId !== '1') {
+            const parentNode = outNodes.find(p => p.id === n.parentId);
+            if (parentNode) {
+                relX -= parentNode.x;
+                relY -= parentNode.y;
+            }
+        }
+
         const safeText = (n.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}"${extraAttrs} vertex="1" parent="${n.parentId || '1'}">\n`;
-        xml += `      <mxGeometry x="${n.x}" y="${n.y}" width="${w}" height="${h}" as="geometry" />\n`;
+        xml += `      <mxGeometry x="${relX}" y="${relY}" width="${w}" height="${h}" as="geometry" />\n`;
         xml += `    </mxCell>\n`;
     });
 

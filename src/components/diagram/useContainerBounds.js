@@ -36,13 +36,20 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                 if (!isNaN(domH)) targetHeight = Math.max(minHeight, domH);
             } else {
                 // Fallback math if ref is missing for some reason
-                const candidateNodes = nds.filter(n => n.id !== id && !['GROUP_BG', 'START_END', 'COMMENT'].includes(n.type));
+                const candidateNodes = nds.filter(n => {
+                    if (n.id === id) return false;
+                    if (n.type === 'GROUP_BG' || n.type === 'START_END') return false;
+                    if (n.type === 'COMMENT' && !data.isCaseContainer) return false;
+                    if (n.type === 'CASE_CONTAINER' && !data.isSwitchContainer) return false;
+                    if (n.type === 'SWITCH_CONTAINER' && data.isCaseContainer) return false;
+                    return true;
+                });
                 const ownedNodes = candidateNodes.filter(n => ownedNodeIds.current.has(n.id));
                 if (ownedNodes.length > 0) {
                     let rMaxX = -Infinity, rMaxY = -Infinity;
                     ownedNodes.forEach(n => {
-                        const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || (n.type === 'FOR_CONTAINER' ? 350 : 300))) : (n.measured?.width || n.width || 100);
-                        const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || (n.type === 'FOR_CONTAINER' ? 200 : 150))) : (n.measured?.height || n.height || 50);
+                        const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || 300)) : (n.measured?.width || n.width || 100);
+                        const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || 200)) : (n.measured?.height || n.height || 50);
                         const x2 = n.position.x + nW;
                         const y2 = n.position.y + nH;
                         if (x2 > rMaxX) rMaxX = x2;
@@ -119,21 +126,26 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                 if (!isNaN(domH)) myHeight = domH;
             }
             
-            const candidateNodes = nds.filter(n => n.id !== id && n.type !== 'GROUP_BG' && n.type !== 'COMMENT' && n.type !== 'START_END');
+            const candidateNodes = nds.filter(n => {
+                if (n.id === id) return false;
+                if (n.type === 'GROUP_BG' || n.type === 'START_END') return false;
+                if (n.type === 'COMMENT' && !data.isCaseContainer) return false;
+                if (n.type === 'CASE_CONTAINER' && !data.isSwitchContainer) return false; // Loop containers do not own case groups
+                if (n.type === 'SWITCH_CONTAINER' && data.isCaseContainer) return false; // Case containers do not own switch groups
+                return true;
+            });
             
             let currentOwned = new Set(ownedNodeIds.current);
             let hasPendingIn = false;
             
             candidateNodes.forEach(n => {
-                const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || 350)) : (n.measured?.width || n.width || 100);
-                const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || 200)) : (n.measured?.height || n.height || 50);
+                const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || 300)) : (n.measured?.width || n.width || 100);
+                const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || 200)) : (n.measured?.height || n.height || 50);
                 const coreW = nW * 0.5;
                 const coreH = nH * 0.5;
                 const coreX = n.position.x + (nW - coreW) / 2;
                 const coreY = n.position.y + (nH - coreH) / 2;
-                // Prevent infinite stretching cycles: A node can ONLY be inside me if its top-left corner 
-                // is mathematically positioned at or after my top-left corner. This prevents a child container 
-                // from accidentally claiming ownership of its own parent!
+                
                 let tagBottomOffset = 15;
                 if (containerRef.current) {
                     const tag = containerRef.current.querySelector('.custom-drag-handle');
@@ -141,8 +153,20 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                         tagBottomOffset = tag.offsetTop + tag.offsetHeight;
                     }
                 }
-                const isInside = (n.position.x >= myX - 5) && (n.position.y >= myY + tagBottomOffset) && 
-                                 (coreX < myX + myWidth && coreX + coreW > myX && coreY < myY + myHeight && coreY + coreH > myY - 10);
+                
+                const nX = n.position.x;
+                const nY = n.position.y;
+                const cx = nX + nW / 2;
+                const cy = nY + nH / 2;
+                
+                let isInside = false;
+                if (n.dragging && currentOwned.has(n.id)) {
+                    // Once owned and dragging, it stays owned until its CENTER leaves the container + a small 20px buffer
+                    isInside = cx >= myX - 20 && cx <= myX + myWidth + 20 && cy >= myY + tagBottomOffset - 20 && cy <= myY + myHeight + 20;
+                } else {
+                    // To enter natively, a little more than the center must be inside (to prevent accidental grazing)
+                    isInside = cx >= myX + 10 && cx <= myX + myWidth - 10 && cy >= myY + tagBottomOffset + 10 && cy <= myY + myHeight - 10;
+                }
                 
                 if (isInside) {
                     currentOwned.add(n.id);
@@ -162,8 +186,8 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
             const stationaryNodes = [];
             
             ownedNodes.forEach(n => {
-                const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || (n.type === 'FOR_CONTAINER' ? 350 : 300))) : (n.measured?.width || n.width || 100);
-                const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || (n.type === 'FOR_CONTAINER' ? 200 : 150))) : (n.measured?.height || n.height || 50);
+                const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || 300)) : (n.measured?.width || n.width || 100);
+                const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || 200)) : (n.measured?.height || n.height || 50);
                 const x1 = n.position.x;
                 const y1 = n.position.y;
                 const x2 = x1 + nW;
@@ -272,8 +296,8 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                     } else {
                         let rMaxX = -Infinity, rMaxY = -Infinity;
                         remainingNodes.forEach(n => {
-                            const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || (n.type === 'FOR_CONTAINER' ? 350 : 300))) : (n.measured?.width || n.width || 100);
-                            const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || (n.type === 'FOR_CONTAINER' ? 200 : 150))) : (n.measured?.height || n.height || 50);
+                            const nW = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') ? (n.style?.width ? parseInt(n.style.width) : (n.measured?.width || 300)) : (n.measured?.width || n.width || 100);
+                            const nH = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') ? (n.style?.height ? parseInt(n.style.height) : (n.measured?.height || 200)) : (n.measured?.height || n.height || 50);
                             const x2 = n.position.x + nW;
                             const y2 = n.position.y + nH;
                             if (x2 > rMaxX) rMaxX = x2;

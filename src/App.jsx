@@ -4,6 +4,7 @@ import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parseDrawioToPython } from './parsers/diagramToPython';
 import { parsePythonToPseudocode } from './parsers/pythonToPseudocode';
+import { Tooltip } from './components/Tooltip';
 import { DiagramRunner } from './utils/runner';
 import { drawioToReactFlow } from './utils/diagramConverter';
 import DiagramEditor from './components/diagramEditor';
@@ -250,7 +251,7 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
 
   return (
     <div className={`flex-1 flex overflow-hidden bg-white dark:bg-gray-900 relative transition-all duration-300 group ${hasErrors ? 'shadow-[0_0_20px_rgba(239,68,68,0.3)] border border-red-500 rounded-lg m-2' : ''}`}>
-      <button onClick={handleCopy} className="absolute top-2 right-4 p-2 bg-white/90 dark:bg-gray-800/90 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-md shadow-sm border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 z-20">
+      <button onClick={handleCopy} className="absolute top-2 right-[21px] p-2 bg-white/90 dark:bg-gray-800/90 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-md shadow-sm border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 z-20">
         {copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
       </button>
 
@@ -365,8 +366,9 @@ function AppContent() {
   const [activeDropdown, setActiveDropdown] = useState(null);
   const [settingsDropdown, setSettingsDropdown] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('isDarkMode');
-    return saved !== null ? JSON.parse(saved) : false;
+    const saved = localStorage.getItem('educode_theme_pref');
+    if (saved !== null) return saved === 'dark';
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   const [dialog, setDialog] = useState(null);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -530,8 +532,42 @@ function AppContent() {
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
-    localStorage.setItem('isDarkMode', JSON.stringify(isDarkMode));
+    localStorage.setItem('educode_theme_pref', isDarkMode ? 'dark' : 'light');
   }, [isDarkMode]);
+
+  // Dark Reader Extension detection and defeat
+  useEffect(() => {
+    const disableDarkReader = () => {
+      const darkReaderStyles = document.querySelectorAll('style.darkreader, style[class*="darkreader"]');
+      const htmlHasDarkReader = document.documentElement.hasAttribute('data-darkreader-mode');
+      
+      if (darkReaderStyles.length > 0 || htmlHasDarkReader) {
+        setIsDarkMode(true);
+        darkReaderStyles.forEach(style => style.remove());
+        document.documentElement.removeAttribute('data-darkreader-mode');
+        document.documentElement.removeAttribute('data-darkreader-scheme');
+      }
+    };
+
+    disableDarkReader();
+
+    const observer = new MutationObserver((mutations) => {
+      let found = false;
+      mutations.forEach(mutation => {
+        mutation.addedNodes.forEach(node => {
+          if (node.nodeName === 'STYLE' && node.className && typeof node.className === 'string' && node.className.includes('darkreader')) {
+            found = true;
+          }
+        });
+      });
+      if (found) disableDarkReader();
+    });
+
+    observer.observe(document.head, { childList: true, subtree: true });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-darkreader-mode', 'data-darkreader-scheme'] });
+
+    return () => observer.disconnect();
+  }, []);
 
   const setIsPlaying = useCallback((val) => {
     setIsPlayingState(val);
@@ -1010,16 +1046,24 @@ function AppContent() {
                     
                     <div className="flex gap-2 items-end pointer-events-auto relative">
                         <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2 flex gap-2">
-                            <button onClick={() => doStep(true)} disabled={isPlayingState || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all" aria-label="Krokovat vpřed (ignoruje zarážky)" title="Krokovat vpřed (ignoruje zarážky)"><StepForward size={20} /></button>
-                            <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlayingState ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-800/50' : 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50'}`} aria-label={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"} title={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
-                                {isPlayingState ? <Pause size={20} /> : <Play size={20} />}
-                            </button>
-                            <button onClick={() => stopDebugger(true)} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 dark:text-red-400 disabled:opacity-30 transition-all" aria-label="Ukončit debugger a vymazat data" title="Ukončit debugger a vymazat data"><StopSquare size={20} /></button>
+                            <Tooltip text="Krokovat vpřed (ignoruje zarážky)">
+                                <button onClick={() => doStep(true)} disabled={isPlayingState || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all" aria-label="Krokovat vpřed (ignoruje zarážky)"><StepForward size={20} /></button>
+                            </Tooltip>
+                            <Tooltip text={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
+                                <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlayingState ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-800/50' : 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50'}`} aria-label={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
+                                    {isPlayingState ? <Pause size={20} /> : <Play size={20} />}
+                                </button>
+                            </Tooltip>
+                            <Tooltip text="Ukončit debugger a vymazat data">
+                                <button onClick={() => stopDebugger(true)} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 dark:text-red-400 disabled:opacity-30 transition-all" aria-label="Ukončit debugger a vymazat data"><StopSquare size={20} /></button>
+                            </Tooltip>
                         </div>
                         <div className="relative speed-adjuster-panel" onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
-                            <button onClick={(e) => { e.stopPropagation(); setShowDebugSettings(!showDebugSettings); }} className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" aria-label="Nastavení rychlosti" title="Nastavení rychlosti">
-                                <Settings size={18} />
-                            </button>
+                            <Tooltip text="Nastavení rychlosti">
+                                <button onClick={(e) => { e.stopPropagation(); setShowDebugSettings(!showDebugSettings); }} className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" aria-label="Nastavení rychlosti">
+                                    <Settings size={18} />
+                                </button>
+                            </Tooltip>
                             {showDebugSettings && (
                                 <div className="absolute bottom-full right-0 mb-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-2xl p-4 w-56">
                                     <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
@@ -1034,7 +1078,10 @@ function AppContent() {
                                         onChange={(e) => setDebugSpeedPercent(Number(e.target.value))} 
                                         onPointerDown={(e) => e.stopPropagation()}
                                         onMouseDown={(e) => e.stopPropagation()}
-                                        className="w-full accent-indigo-600 cursor-pointer nodrag touch-action-none" 
+                                        className="speed-slider w-full h-2 rounded-lg cursor-pointer nodrag touch-action-none"
+                                        style={{
+                                            background: `linear-gradient(to right, #4f46e5 ${(debugSpeedPercent / 500) * 100}%, ${isDarkMode ? '#374151' : '#e5e7eb'} ${(debugSpeedPercent / 500) * 100}%)`
+                                        }}
                                     />
                                 </div>
                             )}

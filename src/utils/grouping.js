@@ -1,6 +1,4 @@
-export const calculateGroupNodes = (nodes, edges, groupColoring) => {
-    if (!groupColoring) return [];
-    
+export const getGroupDefs = (nodes, edges) => {
     const groupDefs = [];
     let gId = 0;
     const visited = new Set();
@@ -48,55 +46,34 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
 
         if (conditionNode) {
             let isBackEdge = false;
-            let visitedDFS = new Set();
-            let stack = [conditionNode.id];
+            let current = nodes.find(n => n.id === e.source);
             
-            while(stack.length > 0) {
-                let curr = stack.pop();
-                if (curr === e.source) { isBackEdge = true; break; }
-                if (!visitedDFS.has(curr)) {
-                    visitedDFS.add(curr);
-                    edges.filter(x => x.source === curr).forEach(x => stack.push(x.target));
-                }
+            if (current && conditionNode.position.y < current.position.y) {
+                isBackEdge = true;
             }
 
             if (isBackEdge) {
-                const descendants = new Set();
-                const qDesc = [conditionNode.id];
-                while(qDesc.length > 0) {
-                    const curr = qDesc.shift();
-                    edges.filter(x => x.source === curr).forEach(x => {
-                        if (!descendants.has(x.target)) {
-                            descendants.add(x.target);
-                            qDesc.push(x.target);
-                        }
-                    });
-                }
-
-                const ancestors = new Set();
-                const qAnc = [e.source];
-                while(qAnc.length > 0) {
-                    const curr = qAnc.shift();
-                    edges.filter(x => x.target === curr).forEach(x => {
-                        if (!ancestors.has(x.source)) {
-                            ancestors.add(x.source);
-                            qAnc.push(x.source);
-                        }
-                    });
-                }
-
-                const lGrp = new Set([conditionNode.id, e.source]);
-                if (tgt && tgt.type === 'MERGE') lGrp.add(tgt.id);
+                const lGrp = new Set();
+                const q = [current.id];
+                const v2 = new Set();
                 
-                descendants.forEach(d => {
-                    if (ancestors.has(d)) lGrp.add(d);
-                });
-
-                const src = nodes.find(n => n.id === e.source);
-                const srcW = src?.measured?.width || src?.width || 100;
-                const tgtW = conditionNode.measured?.width || conditionNode.width || 160;
+                while (q.length > 0) {
+                    const c = q.shift();
+                    if (!v2.has(c)) {
+                        v2.add(c);
+                        if (c === conditionNode.id) continue;
+                        lGrp.add(c);
+                        
+                        edges.forEach(ed => {
+                            if (ed.target === c) q.push(ed.source);
+                        });
+                    }
+                }
                 
                 let routeLeft = true;
+                const src = current;
+                const srcW = src?.measured?.width || 120;
+                const tgtW = conditionNode.measured?.width || 140;
                 
                 const entryEdge = edges.find(ed => ed.source === conditionNode.id && lGrp.has(ed.target));
                 
@@ -121,7 +98,10 @@ export const calculateGroupNodes = (nodes, edges, groupColoring) => {
             }
         }
     });
+    return groupDefs;
+};
 
+export const computeGroupBounds = (nodes, groupDefs) => {
     return groupDefs.map(g => {
          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
          g.nodes.forEach(nid => {

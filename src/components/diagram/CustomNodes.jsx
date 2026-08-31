@@ -1,13 +1,13 @@
 import React from 'react';
 import { Handle, Position, useReactFlow, useEdges, NodeResizeControl, useStoreApi } from '@xyflow/react';
-import { RefreshCcw, MousePointer2, Columns, Plus } from 'lucide-react';
+import { RefreshCcw, MousePointer2, Columns, Plus, ArrowDown, ArrowUp } from 'lucide-react';
 import { calculateStretchLimits } from '../../utils/stretchLimits';
 import { useContainerBounds } from './useContainerBounds';
 import { edgeLabels, getHighlightClass } from './constants';
 
 const DragHandle = () => <div className="custom-drag-handle w-8 h-1.5 cursor-grab bg-gray-200 dark:bg-gray-600 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors mx-auto mb-1" title="Chytit a přesunout" />;
 
-const useDoubleClickEdit = (readOnly) => {
+const useDoubleClickEdit = (readOnly, onStartEdit) => {
     const [isEditing, setIsEditing] = React.useState(false);
     const inputRef = React.useRef(null);
     React.useEffect(() => {
@@ -19,9 +19,10 @@ const useDoubleClickEdit = (readOnly) => {
     const onDoubleClick = React.useCallback((e) => {
         if (!readOnly) {
             e.stopPropagation();
+            if (onStartEdit) onStartEdit();
             setIsEditing(true);
         }
-    }, [readOnly]);
+    }, [readOnly, onStartEdit]);
     const onBlur = React.useCallback(() => {
         setIsEditing(false);
     }, []);
@@ -64,7 +65,7 @@ export const StartEndNode = ({ id, data, selected }) => {
   let mode = data.mode || 'unassigned';
   let entityType = data.entityType || 'FUNCTION';
   
-  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
+  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly, data.onStartEdit);
 
   const setMode = (newMode) => {
     let newLabel = data.label;
@@ -84,7 +85,7 @@ export const StartEndNode = ({ id, data, selected }) => {
   return (
     <div className={`${bgClass} border-2 rounded-[2rem] min-w-[140px] min-h-[40px] flex flex-col justify-center items-center p-2 transition-all relative ${highlightClass} ${data.isBreakpoint ? 'ring-2 ring-red-500 border-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={breakpointButtonClass(data.isBreakpoint, "-left-3")} title="Zarážka (Breakpoint)" />
+          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-3")} title="Zarážka (Breakpoint)" />
       )}
 
       {mode !== 'start' && <Handle type="target" position={Position.Top} id="t-top" className={`${handleBaseClass} ${handleClass}`} />}
@@ -130,14 +131,14 @@ export const ActionNode = ({ id, data, selected }) => {
   const baseBorder = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-blue-300 dark:border-blue-700';
   const handleClass = isGray ? '!bg-gray-400' : '!bg-blue-600';
   
-  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
+  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly, data.onStartEdit);
   const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, baseBorder);
   const morphStyle = data.morphOffset ? { transform: `translate(${data.morphOffset.x}px, ${data.morphOffset.y}px)`, transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)', zIndex: 100 } : { transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)' };
 
   return (
     <div style={morphStyle} onDoubleClick={onDoubleClick} className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass} ${data.isBreakpoint ? 'ring-2 ring-red-500 border-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={breakpointButtonClass(data.isBreakpoint, "-left-3.5")} title="Zarážka (Breakpoint)" />
+          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-3.5")} title="Zarážka (Breakpoint)" />
       )}
       
       <Handle type="target" position={Position.Top} id="t-top" className={`${handleBaseClass} ${handleClass}`} />
@@ -153,7 +154,7 @@ export const IONode = ({ id, data, selected }) => {
   const isGray = data.colorMode === false;
   const isInput = (data.ioType || 'input') === 'input';
 
-  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
+  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly, data.onStartEdit);
 
   const fillClass = isGray 
       ? 'fill-gray-50 dark:fill-gray-800' 
@@ -215,7 +216,7 @@ export const IONode = ({ id, data, selected }) => {
   return (
     <div style={morphStyle} onDoubleClick={onDoubleClick} className={`relative min-w-[120px] min-h-[50px] flex flex-col transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={breakpointButtonClass(data.isBreakpoint, "-left-3.5")} title="Zarážka (Breakpoint)" />
+          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-3.5")} title="Zarážka (Breakpoint)" />
       )}
       
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
@@ -243,7 +244,7 @@ export const ConditionNode = ({ id, data, selected }) => {
   const outEdges = edges.filter(e => e.source === id).length;
   const hasWarning = outEdges === 1;
 
-  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
+  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly, data.onStartEdit);
   const isGray = data.colorMode === false;
 
   const fillClass = isGray ? 'fill-gray-50 dark:fill-gray-800' : (hasWarning ? 'fill-red-50 dark:fill-red-900/20' : 'fill-orange-50 dark:fill-orange-900/30');
@@ -325,7 +326,7 @@ export const ConditionNode = ({ id, data, selected }) => {
     // Zvětšeno z min-w-[120px] min-h-[60px] na 160px x 80px, aby se posuvník pohodlně vešel do obou tvarů
     <div style={morphStyle} onDoubleClick={onDoubleClick} className={`relative flex flex-col items-center justify-center min-w-[160px] min-h-[80px] transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       {data.showDebugger && (
-          <button onClick={() => data.onBreakpointToggle && data.onBreakpointToggle(id)} className={breakpointButtonClass(data.isBreakpoint, "-left-4")} title="Zarážka (Breakpoint)" />
+          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-4")} title="Zarážka (Breakpoint)" />
       )}
 
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
@@ -350,7 +351,7 @@ export const CommentNode = ({ data, selected }) => {
   const bgClass = isGray ? 'bg-gray-50 dark:bg-gray-800' : 'bg-yellow-50 dark:bg-yellow-900/30';
   const borderClass = isGray ? 'border-gray-400 dark:border-gray-600' : 'border-yellow-300 dark:border-yellow-700';
   const highlightClass = getHighlightClass(data.isRuntimeActive, data.externalHighlight, selected, borderClass);
-  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly);
+  const { isEditing, inputRef, onDoubleClick, onBlur } = useDoubleClickEdit(data.readOnly, data.onStartEdit);
 
   React.useEffect(() => {
     if (inputRef.current) {
@@ -540,7 +541,7 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
 
   const [cases, setCases] = React.useState([]);
   const [containerHeight, setContainerHeight] = React.useState(250);
-  const [containerWidth, setContainerWidth] = React.useState(290);
+  const [containerWidth, setContainerWidth] = React.useState(350);
   const [hasDefault, setHasDefault] = React.useState(false);
 
   // Layout Engine Effect
@@ -564,83 +565,207 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
 
         if (myCases.length === 0) {
             if (cases.length !== 0) setCases([]);
-            if (containerWidth !== 290) setContainerWidth(290);
+            if (containerWidth !== 350) setContainerWidth(350);
             if (containerHeight !== 230) setContainerHeight(230);
             
-            if (myNode.style?.width !== 290 || myNode.style?.height !== 230) {
-                setNodes(nodes => nodes.map(n => n.id === id ? { ...n, style: { ...n.style, width: 290, height: 230 }, zIndex: -1000 } : n));
+            if (myNode.style?.width !== 350 || myNode.style?.height !== 230) {
+                setNodes(nodes => nodes.map(n => n.id === id ? { ...n, style: { ...n.style, width: 350, height: 230 }, zIndex: -1000 } : n));
             }
             return;
         }
 
-        const PADDING_TOP = 40;
+        const PADDING_TOP = 44;
         const PADDING_BOTTOM = 20;
         const GAP = 15;
         const CASE_MIN_WIDTH = 250;
+        const ADD_BUTTON_WIDTH = 65;
         
         let currentX = GAP;
-        let maxHeight = 0;
+        let maxHeight = 166; // 230 (min container height) - 44 (PADDING_TOP) - 20 (PADDING_BOTTOM)
         let changed = false;
 
         const caseData = [];
 
         myCases.forEach((c) => {
-            const w = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
-            const h = c.style?.height ? parseInt(c.style.height) : 150;
+            const h = c.style?.height ? parseInt(c.style.height) : 166;
             if (h > maxHeight) maxHeight = h;
+        });
 
-            const targetX = Math.round(myNode.position.x + currentX);
-            const targetY = Math.round(myNode.position.y + PADDING_TOP);
+        myCases.forEach((c) => {
+            const w = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
+            const targetX = Math.round(currentX);
+            const targetY = Math.round(PADDING_TOP);
+            const currentH = c.style?.height ? parseInt(c.style.height) : 166;
             
-            if (Math.round(c.position.x) !== targetX || Math.round(c.position.y) !== targetY) {
-                changed = true;
+            if (!c.dragging) {
+                if (Math.round(c.position.x) !== targetX || Math.round(c.position.y) !== targetY || currentH !== maxHeight) {
+                    changed = true;
+                }
             }
             
-            caseData.push({ id: c.id, x: targetX, y: targetY, w, h, isDefault: c.data.isDefault });
+            caseData.push({ id: c.id, x: targetX, y: targetY, w, h: maxHeight, isDefault: c.data.isDefault, dragging: !!c.dragging });
             currentX += w + GAP;
         });
 
-        const targetContainerWidth = Math.max(290, currentX);
+        // currentX already includes the GAP after the last case. We subtract it and add our dedicated button area width.
+        const targetContainerWidth = Math.max(350, currentX - GAP + ADD_BUTTON_WIDTH);
         const targetContainerHeight = Math.round(maxHeight + PADDING_TOP + PADDING_BOTTOM);
 
-        setCases(caseData);
-        setContainerHeight(targetContainerHeight);
-        setContainerWidth(targetContainerWidth);
+        const caseDataStr = JSON.stringify(caseData);
+        setCases(prev => JSON.stringify(prev) === caseDataStr ? prev : caseData);
+        setContainerHeight(prev => prev === targetContainerHeight ? prev : targetContainerHeight);
+        setContainerWidth(prev => prev === targetContainerWidth ? prev : targetContainerWidth);
 
-        const myW = myNode.style?.width ? parseInt(myNode.style.width) : 290;
+        const myW = myNode.style?.width ? parseInt(myNode.style.width) : 350;
         const myH = myNode.style?.height ? parseInt(myNode.style.height) : 230;
 
-        if (changed || myW !== targetContainerWidth || myH !== targetContainerHeight) {
-            setNodes(nodes => nodes.map(n => {
-                if (n.id === id) {
-                    return { ...n, style: { ...n.style, width: targetContainerWidth, height: targetContainerHeight }, zIndex: -10000 };
-                }
-                const caseInfo = caseData.find(cd => cd.id === n.id);
-                if (caseInfo) {
-                    if (n.position.x !== caseInfo.x || n.position.y !== caseInfo.y) {
-                        return { ...n, position: { x: caseInfo.x, y: caseInfo.y } };
+        const deletedCases = cases.filter(pc => !myCases.find(c => c.id === pc.id));
+        
+        if (changed || myW !== targetContainerWidth || myH !== targetContainerHeight || deletedCases.length > 0) {
+            setNodes(nodes => {
+                const switchNode = nodes.find(n => n.id === id);
+                if (!switchNode) return nodes;
+
+                const absSwitchX = switchNode.positionAbsolute?.x || switchNode.position.x;
+                const absSwitchY = switchNode.positionAbsolute?.y || switchNode.position.y;
+                
+                const nodeMoves = new Map();
+                const nodesToDelete = new Set();
+                
+                const emptyCasesAvailable = [];
+                myCases.forEach(c => {
+                    const cW = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
+                    const cH = c.style?.height ? parseInt(c.style.height) : 150;
+                    // c.position is relative to switch, so absSwitchX + c.position.x is correct for cAbsX
+                    const cAbsX = absSwitchX + c.position.x;
+                    const cAbsY = absSwitchY + c.position.y;
+                    
+                    const innerNodes = nodes.filter(n => {
+                        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type) || n.parentId) return false;
+                        const nW = n.measured?.width || 100;
+                        const nH = n.measured?.height || 50;
+                        const cx = (n.positionAbsolute?.x || n.position.x) + nW/2;
+                        const cy = (n.positionAbsolute?.y || n.position.y) + nH/2;
+                        return cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH;
+                    });
+                    
+                    if (innerNodes.length === 0) {
+                        emptyCasesAvailable.push({ id: c.id, x: c.position.x, y: c.position.y });
                     }
+                });
+                
+                deletedCases.forEach(dc => {
+                    const dcAbsX = absSwitchX + dc.x;
+                    const dcAbsY = absSwitchY + dc.y;
+                    
+                    const innerNodes = nodes.filter(n => {
+                        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type) || n.parentId) return false;
+                        const nW = n.measured?.width || 100;
+                        const nH = n.measured?.height || 50;
+                        const cx = (n.positionAbsolute?.x || n.position.x) + nW/2;
+                        const cy = (n.positionAbsolute?.y || n.position.y) + nH/2;
+                        return cx >= dcAbsX && cx <= dcAbsX + dc.w && cy >= dcAbsY && cy <= dcAbsY + dc.h;
+                    });
+                    
+                    if (innerNodes.length > 0) {
+                        const emptyCase = emptyCasesAvailable.shift();
+                        if (emptyCase) {
+                            const targetCaseInfo = caseData.find(cd => cd.id === emptyCase.id);
+                            if (targetCaseInfo) {
+                                const dx = targetCaseInfo.x - dc.x;
+                                const dy = targetCaseInfo.y - dc.y;
+                                innerNodes.forEach(n => nodeMoves.set(n.id, { dx, dy }));
+                            } else {
+                                innerNodes.forEach(n => nodesToDelete.add(n.id));
+                            }
+                        } else {
+                            innerNodes.forEach(n => nodesToDelete.add(n.id));
+                        }
+                    }
+                });
+                
+                myCases.forEach(c => {
+                    const caseInfo = caseData.find(cd => cd.id === c.id);
+                    if (caseInfo && (Math.round(c.position.x) !== caseInfo.x || Math.round(c.position.y) !== caseInfo.y)) {
+                        const dx = caseInfo.x - c.position.x;
+                        const dy = caseInfo.y - c.position.y;
+                        
+                        const cAbsX = absSwitchX + c.position.x;
+                        const cAbsY = absSwitchY + c.position.y;
+                        const cW = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
+                        const cH = c.style?.height ? parseInt(c.style.height) : 150;
+                        
+                        const innerNodes = nodes.filter(n => {
+                            if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type) || n.parentId) return false;
+                            const nW = n.measured?.width || 100;
+                            const nH = n.measured?.height || 50;
+                            const cx = n.position.x + nW/2;
+                            const cy = n.position.y + nH/2;
+                            return cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH;
+                        });
+                        
+                        innerNodes.forEach(n => {
+                            if (!nodeMoves.has(n.id)) {
+                                nodeMoves.set(n.id, { dx, dy });
+                            }
+                        });
+                    }
+                });
+                
+                let nextNodes = nodes;
+                if (nodesToDelete.size > 0) {
+                    nextNodes = nextNodes.filter(n => !nodesToDelete.has(n.id));
                 }
-                return n;
-            }));
+                
+                return nextNodes.map(n => {
+                    if (n.id === id) {
+                        return { ...n, style: { ...n.style, width: targetContainerWidth, height: targetContainerHeight }, zIndex: -10000 };
+                    }
+                    const caseInfo = caseData.find(cd => cd.id === n.id);
+                    if (caseInfo) {
+                        if (!n.dragging) {
+                            return { ...n, position: { x: caseInfo.x, y: caseInfo.y }, style: { ...n.style, height: caseInfo.h } };
+                        }
+                    }
+                    if (nodeMoves.has(n.id)) {
+                        const move = nodeMoves.get(n.id);
+                        return { ...n, position: { x: n.position.x + move.dx, y: n.position.y + move.dy } };
+                    }
+                    return n;
+                });
+            });
         }
     };
-    
-    const interval = setInterval(layoutEngine, 50);
-    return () => clearInterval(interval);
-  }, [id, getNodes, setNodes, cases.length, containerWidth, containerHeight, hasDefault]);
+    let animationFrameId;
+    const loop = () => {
+        layoutEngine();
+        animationFrameId = requestAnimationFrame(loop);
+    };
+    loop();
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [id, getNodes, setNodes, cases, containerWidth, containerHeight, hasDefault]);
 
   const addCase = () => {
       setNodes(nds => {
-          const myNode = nds.find(n => n.id === id);
+          const myCases = nds.filter(n => n.type === 'CASE_CONTAINER' && n.data?.switchId === id && !n.data.isDefault);
+          let maxVal = 0;
+          let maxX = 0;
+          myCases.forEach(c => {
+              const val = parseInt(c.data.caseVal);
+              if (!isNaN(val) && val > maxVal) maxVal = val;
+              if (c.position.x > maxX) maxX = c.position.x;
+          });
+          const nextVal = (maxVal + 1).toString();
+          
           const newCaseId = `case_${Date.now()}`;
           const newCase = {
               id: newCaseId,
               type: 'CASE_CONTAINER',
-              position: { x: myNode ? myNode.position.x + 20 : 20, y: myNode ? myNode.position.y + 60 : 60 },
-              data: { caseVal: '1', isDefault: false, colorMode: data.colorMode, switchId: id },
+              position: { x: maxX + 100, y: 60 },
+              parentId: id,
+              data: { caseVal: nextVal, isDefault: false, colorMode: data.colorMode, switchId: id, onStartEdit: data.onStartEdit },
               style: { width: 250, height: 150 },
-              zIndex: 10,
+              zIndex: -9999,
               draggable: true,
               selectable: true
           };
@@ -660,10 +785,11 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
               const newCase = {
                   id: newCaseId,
                   type: 'CASE_CONTAINER',
-                  position: { x: myNode ? myNode.position.x + 20 : 20, y: myNode ? myNode.position.y + 60 : 60 },
-                  data: { caseVal: 'default', isDefault: true, colorMode: data.colorMode, switchId: id },
+                  position: { x: 20, y: 60 },
+                  parentId: id,
+                  data: { caseVal: 'default', isDefault: true, colorMode: data.colorMode, switchId: id, onStartEdit: data.onStartEdit },
                   style: { width: 250, height: 150 },
-                  zIndex: 10,
+                  zIndex: -9999,
                   draggable: true,
                   selectable: true
               };
@@ -678,12 +804,16 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
   };
 
   const handleClass = `!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${isGray ? '!border-gray-500' : '!border-rose-500'} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair p-0`;
+  const switchHandleClass = `!w-[18px] !h-[18px] !min-w-[18px] !min-h-[18px] !bg-white dark:!bg-gray-800 !border-2 ${isGray ? '!border-gray-500' : '!border-rose-500'} flex items-center justify-center !rounded-full z-20 cursor-crosshair p-0`;
 
   return (
     <div className={`relative w-full h-full rounded-lg border-2 border-dashed ${borderColor} ${bgColor} flex flex-col overflow-visible ${selected ? 'ring-2 ring-rose-500 ring-offset-2 ring-offset-rose-50/50' : ''}`}>
-      <Handle type="target" position={Position.Top} id="t-top" className={handleClass}></Handle>
+      <Handle type="target" position={Position.Top} id="t-top" className={switchHandleClass} style={{ left: '16px', right: 'auto', transform: 'translate(-50%, -50%)' }}>
+          <ArrowDown size={12} className={isGray ? 'text-gray-500' : 'text-rose-500'} />
+      </Handle>
       
-      <div className={`custom-drag-handle absolute -top-4 left-4 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing z-20`}>
+      {/* Moved the tag to left-8 to reduce gap to the top node */}
+      <div className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing z-20`}>
         <Columns size={12} className="text-rose-500" />
         <span className="text-rose-700 dark:text-rose-300">SWITCH</span>
         <input 
@@ -691,7 +821,7 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
             value={data.switchVar || 'x'} 
             onChange={(e) => updateField('switchVar', e.target.value)}
             onMouseDown={e => e.stopPropagation()}
-            className="outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-[10px] font-mono w-16 border border-transparent focus:border-rose-300 cursor-text"
+            className="outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-xs font-mono w-24 border border-transparent focus:border-rose-300 cursor-text"
             placeholder="Var"
             title="Proměnná (např. x)"
         />
@@ -706,20 +836,25 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
                 <div className={`bg-white w-2.5 h-2.5 rounded-full shadow-md transform transition-transform ${hasDefault ? 'translate-x-3.5' : 'translate-x-0'}`}></div>
             </div>
         </div>
-        
-        <div className="border-l border-gray-200 dark:border-gray-600 pl-2 ml-1 pointer-events-auto">
-            <button 
-                onMouseDown={e => e.stopPropagation()} 
-                onClick={(e) => { e.stopPropagation(); addCase(); }} 
-                className="w-5 h-5 rounded bg-rose-100 dark:bg-rose-900/50 hover:bg-rose-200 dark:hover:bg-rose-800 text-rose-700 dark:text-rose-300 transition-colors flex items-center justify-center cursor-pointer"
-                title="Přidat případ (Case)"
-            >
-                <Plus size={12} />
-            </button>
-        </div>
+      </div>
+      
+      <div 
+          className={`absolute flex items-center justify-center z-10 pointer-events-auto ${cases.length === 0 ? 'inset-x-0' : 'right-0'}`}
+          style={{ top: '0', bottom: '0', width: cases.length === 0 ? 'auto' : '65px' }}
+      >
+          <button 
+              onMouseDown={e => e.stopPropagation()} 
+              onClick={(e) => { e.stopPropagation(); addCase(); }} 
+              className={`w-8 h-8 rounded-full bg-white dark:bg-gray-800 border ${borderColor} shadow-sm hover:bg-rose-50 dark:hover:bg-rose-900/30 text-rose-500 flex items-center justify-center cursor-pointer transition-colors`}
+              title="Přidat případ (Case)"
+          >
+              <Plus size={16} />
+          </button>
       </div>
 
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className={handleClass}></Handle>
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className={switchHandleClass}>
+          <ArrowDown size={12} className={isGray ? 'text-gray-500' : 'text-rose-500'} />
+      </Handle>
     </div>
   );
 };
@@ -739,33 +874,39 @@ export const CaseContainerNode = ({ id, data, selected, dragging }) => {
       else setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, [field]: value } } : n));
   };
 
-  const handleClass = `!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${isGray ? '!border-gray-500' : '!border-rose-500'} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair p-0`;
+  const caseHandleClass = `${handleBaseClass} ${isGray ? '!bg-gray-400' : '!bg-rose-500'} !border-0`;
 
   return (
     <div 
       ref={containerRef} 
       className={`nodrag relative w-full h-full rounded border border-solid ${borderColor} ${bgColor} flex flex-col z-10 shadow-sm ${selected ? 'ring-2 ring-rose-400' : ''}`}
     >
-      <div className={`w-full h-8 border-b ${borderColor} flex items-center justify-center px-2 bg-white/50 dark:bg-gray-900/50 rounded-t cursor-pointer`}>
-        <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-100 dark:bg-rose-900/40 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-800">
-                {data.isDefault ? 'DEFAULT' : 'CASE'}
-            </span>
-            {!data.isDefault && (
-                <input 
-                    type="text" 
-                    value={data.caseVal || '1'} 
-                    onChange={(e) => updateField('caseVal', e.target.value)}
-                    onMouseDown={e => e.stopPropagation()}
-                    onPointerDown={e => e.stopPropagation()}
-                    className="outline-none bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 px-2 py-0.5 rounded text-xs font-mono w-16 font-bold border border-rose-200 dark:border-rose-700 focus:border-rose-400 cursor-text shadow-inner"
-                    placeholder="Hodnota"
-                />
-            )}
-        </div>
+      <Handle type="source" position={Position.Bottom} id="s-top" className={caseHandleClass} style={{ left: '8px', right: 'auto', top: '0', transform: 'translate(0, -50%)' }} />
+      
+      {/* Floating tag just like LoopContainer and SwitchContainer */}
+      <div className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-1.5 pointer-events-auto cursor-pointer z-20`}>
+          {/* Hollow Colon Icon */}
+          <div className="flex flex-col gap-[2.5px] text-rose-500">
+              <div className="w-[4px] h-[4px] rounded-full border-[1.5px] border-current"></div>
+              <div className="w-[4px] h-[4px] rounded-full border-[1.5px] border-current"></div>
+          </div>
+          <span className="text-rose-700 dark:text-rose-300 ml-0.5">
+              {data.isDefault ? 'DEFAULT' : 'CASE'}
+          </span>
+          {!data.isDefault && (
+              <input 
+                  type="text" 
+                  value={data.caseVal || '1'} 
+                  onChange={(e) => updateField('caseVal', e.target.value)}
+                  onMouseDown={e => e.stopPropagation()}
+                  onPointerDown={e => e.stopPropagation()}
+                  className="outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-xs font-mono w-16 border border-transparent focus:border-rose-300 cursor-text"
+                  placeholder="Hodnota"
+              />
+          )}
       </div>
-      <Handle type="target" position={Position.Top} id="t-top" className="opacity-0 !w-0 !h-0 border-0"></Handle>
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className="opacity-0 !w-0 !h-0 border-0"></Handle>
+      
+      <Handle type="target" position={Position.Bottom} id="t-bottom" className={caseHandleClass} />
     </div>
   );
 };

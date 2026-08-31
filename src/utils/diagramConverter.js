@@ -72,7 +72,6 @@ export const drawioToReactFlow = (xml) => {
       
       if (parentId && parentId !== '0' && parentId !== '1') {
           nodeObj.parentId = parentId;
-          nodeObj.extent = 'parent';
       }
 
       if (type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER' || type === 'GROUP_BG' || type === 'SWITCH_CONTAINER') {

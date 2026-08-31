@@ -1,12 +1,12 @@
 import React from 'react';
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useReactFlow, useNodes, useEdges, Position, MarkerType } from '@xyflow/react';
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useReactFlow, Position, MarkerType } from '@xyflow/react';
 import { RefreshCcw, ChevronRight } from 'lucide-react';
 import { edgeLabels } from './constants';
 
 export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data, selected }) => {
-  const { setEdges } = useReactFlow();
-  const nodes = useNodes();
-  const edges = useEdges();
+  const { setEdges, getNodes, getEdges } = useReactFlow();
+  const nodes = getNodes();
+  const edges = getEdges();
   const isCondition = nodes.find(n => n.id === source)?.type === 'CONDITION';
   const isTargetMerge = nodes.find(n => n.id === target)?.type === 'MERGE';
 

@@ -15,110 +15,44 @@
 export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, containerY, baseWidth = 300, baseHeight = 150) {
     const PADDING_SIDES = 20;
     const PADDING_BOTTOM = 50;
+    const EXTRA_W = 120; // max expected width of dragged blocks
+    const EXTRA_H = 100; // max expected height of dragged blocks
 
-    let numConditions = 0;
-    ownedNodes.forEach(n => {
-        if (n.type === 'CONDITION' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') numConditions++;
-    });
+    let maxStatX = containerX + baseWidth - PADDING_SIDES;
+    let maxStatY = containerY + baseHeight - PADDING_BOTTOM;
 
-    // 1. SSL: Simple Stretch Limit
-    let SSL_Width = baseWidth;
-    let SSL_Height = baseHeight;
-    
-    let hasNestedLoop = false;
-    ownedNodes.forEach(n => {
-        if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') hasNestedLoop = true;
-    });
-
-    if (ownedNodes.length > 1 || hasNestedLoop) {
-        let totalChildHeight = 0;
-        ownedNodes.forEach(n => {
-            if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') {
-                const defH = n.type === 'FOR_CONTAINER' ? 200 : 150;
-                totalChildHeight += n.style?.height ? parseInt(n.style.height) : (n.measured?.height || defH);
-            } else {
-                totalChildHeight += 50;
-            }
-        });
-        
-        // Base padding (empty space) is 100px (since baseHeight is 150 and the first block takes 50, leaving 100 padding. 
-        // We add 100 padding + total heights + 100 gap per block after the first).
-        SSL_Height = (baseHeight - 50) + totalChildHeight + (ownedNodes.length - 1) * 100;
-        
-        // IF blocks expand horizontally. We treat loops like an IF block (+320).
-        SSL_Width = baseWidth + (numConditions * 320);
-        
-        // Fallback: If a nested container is massively stretched horizontally, SSL_Width must mathematically allow for it!
-        // We only look at its pure width, NOT its position. If we included position, dragging the block 
-        // would push the boundary infinitely to the right!
-        ownedNodes.forEach(n => {
-            if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') {
-                const defW = n.type === 'FOR_CONTAINER' ? 350 : 300;
-                const w = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || defW);
-                if (w + 100 > SSL_Width) {
-                    SSL_Width = w + 100;
-                }
-            }
-        });
-    }
-
-    let maxStatY = containerY;
-    let maxIfX = containerX;
-    
     stationaryNodes.forEach(n => {
         let w = n.measured?.width || 120;
         let h = n.measured?.height || 50;
+        if (n.type === 'COMMENT') {
+            w = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || 250);
+            h = n.style?.height ? parseInt(n.style.height) : (n.measured?.height || 100);
+        }
         
-        if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') {
-            const defW = n.type === 'FOR_CONTAINER' ? 350 : 300;
-            const defH = n.type === 'FOR_CONTAINER' ? 200 : 150;
+        if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') {
+            const defW = n.type === 'FOR_CONTAINER' ? 350 : (n.type === 'SWITCH_CONTAINER' ? 350 : 300);
+            const defH = n.type === 'FOR_CONTAINER' ? 200 : (n.type === 'SWITCH_CONTAINER' ? 230 : 150);
             w = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || defW);
             h = n.style?.height ? parseInt(n.style.height) : (n.measured?.height || defH);
         }
         
-        if (n.position.y + h > maxStatY) maxStatY = n.position.y + h;
+        const nx = n.positionAbsolute?.x || n.position.x;
+        const ny = n.positionAbsolute?.y || n.position.y;
         
-        if (n.type === 'CONDITION' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') {
-            if (n.position.x + w > maxIfX) maxIfX = n.position.x + w;
-        }
+        if (nx + w > maxStatX) maxStatX = nx + w;
+        if (ny + h > maxStatY) maxStatY = ny + h;
     });
 
+    const requiredWidth = (maxStatX - containerX) + PADDING_SIDES;
     const requiredHeight = (maxStatY - containerY) + PADDING_BOTTOM;
-    const requiredIfWidth = (maxIfX - containerX) + PADDING_SIDES;
 
-    let maxDraggedWidth = 0;
-    let maxDraggedHeight = 0;
-    
-    ownedNodes.forEach(n => {
-        if (!stationaryNodes.some(sn => sn.id === n.id)) {
-            let w = n.measured?.width || 120;
-            let h = n.measured?.height || 50;
-            if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') {
-                const defW = 350;
-                const defH = 200;
-                w = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || defW);
-                h = n.style?.height ? parseInt(n.style.height) : (n.measured?.height || defH);
-            }
-            if (w > maxDraggedWidth) maxDraggedWidth = w;
-            if (h > maxDraggedHeight) maxDraggedHeight = h;
-        }
-    });
+    // SSL (Simple Stretch Limit) is now exactly the required bounding box + a generous drag margin
+    const SSL_Width = Math.max(baseWidth, requiredWidth + EXTRA_W);
+    const SSL_Height = Math.max(baseHeight, requiredHeight + EXTRA_H);
 
-    const dynamicStretchMarginHeight = Math.max(300, maxDraggedHeight + 150);
-
-    const dynamicStretchMarginWidth = Math.max(320, maxDraggedWidth + 100);
-
-    // If there are conditions, allow stretching horizontally past the right-most condition to fit exactly 1 block + gap (320px).
-    // If there are no conditions, strictly clamp to SSL_Width (which is baseWidth, preventing ANY horizontal drag).
-    let ASL_Width = Math.min(SSL_Width, numConditions > 0 ? (requiredIfWidth + dynamicStretchMarginWidth) : SSL_Width);
-    
-    // Y-coordinate stretch: We want to allow generous stretching downwards for nested groups and large gaps.
-    // However, if the user tries to drag infinitely, SSL_Height (now with 100px gaps per block) will eventually stop them.
-    let ASL_Height = Math.min(SSL_Height, requiredHeight + dynamicStretchMarginHeight);
-    
-    // Ensure ASL doesn't shrink below the base size
-    ASL_Width = Math.max(baseWidth, ASL_Width);
-    ASL_Height = Math.max(baseHeight, ASL_Height);
+    // ASL is equivalent to SSL since SSL is now dynamically tight to the actual contents
+    const ASL_Width = SSL_Width;
+    const ASL_Height = SSL_Height;
 
     return { SSL_Width, SSL_Height, ASL_Width, ASL_Height };
 }

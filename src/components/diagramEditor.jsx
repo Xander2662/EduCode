@@ -3,7 +3,7 @@ import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Co
 import '@xyflow/react/dist/style.css';
 import { Download, Upload, Square, Circle, Diamond, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box, Hexagon, Columns, Link2 } from 'lucide-react';
 import { drawioToReactFlow, reactFlowToDrawio } from '../utils/diagramConverter';
-import { calculateGroupNodes } from '../utils/grouping';
+import { getGroupDefs, computeGroupBounds } from '../utils/grouping';
 import { calculateRestructuredLayout } from '../utils/visualLayoutEngine';
 import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
@@ -46,6 +46,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const lastXmlRef = useRef(''); 
 
   const lastMousePosRef = useRef({ x: 0, y: 0 });
+  const lastDragTimeRef = useRef(0);
+  const reactFlowWrapper = useRef(null);
   useEffect(() => {
     const handleMouseMove = (e) => { lastMousePosRef.current = { x: e.clientX, y: e.clientY }; };
     window.addEventListener('mousemove', handleMouseMove);
@@ -167,13 +169,13 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     historyRef.current.future = [];
   }, [nodes, edges, readOnly]);
 
-  const updateNodeData = useCallback((nodeId, newData) => {
-      takeSnapshot();
+  const updateNodeData = useCallback((nodeId, newData, skipSnapshot = false) => {
+      if (!skipSnapshot) takeSnapshot();
       handleInteract();
       setNodes((nds) => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, ...newData } } : n));
   }, [setNodes, handleInteract, takeSnapshot]);
 
-  const updateNodeLabel = useCallback((nodeId, newLabel) => updateNodeData(nodeId, { label: newLabel }), [updateNodeData]);
+  const updateNodeLabel = useCallback((nodeId, newLabel, skipSnapshot = false) => updateNodeData(nodeId, { label: newLabel }, skipSnapshot), [updateNodeData]);
 
   const toggleIOType = useCallback((nodeId, currentType) => {
       takeSnapshot();
@@ -307,7 +309,18 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         }
   })), [nodes, colorMode, showDebugger, readOnly, conditionShape, externalSelectedIds, activeRuntimeNodeId, breakpoints, onBreakpointToggle, toggleIOType, toggleEntityType]);
 
-  const bgNodes = useMemo(() => calculateGroupNodes(nodes, edges, groupColoring), [nodes, edges, groupColoring]);
+  const [nodeCount, setNodeCount] = useState(0);
+  useEffect(() => { setNodeCount(nodes.length); }, [nodes.length]);
+  
+  const groupDefs = useMemo(() => {
+        if (!groupColoring) return [];
+        return getGroupDefs(nodes, edges);
+  }, [nodeCount, edges, groupColoring]);
+
+  const bgNodes = useMemo(() => {
+        if (!groupColoring || groupDefs.length === 0) return [];
+        return computeGroupBounds(nodes, groupDefs);
+  }, [nodes, groupDefs, groupColoring]);
   const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
 
   useEffect(() => {
@@ -366,7 +379,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
         return modified ? formattedEds : eds;
     });
-  }, [edgeStyle, nodes.length, nodes, setEdges]); 
+  }, [edgeStyle, nodeCount, setEdges]); 
 
   const executeDelete = useCallback(() => {
     takeSnapshot();
@@ -396,10 +409,25 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const handleCopy = useCallback(() => { 
     if (selectedNodes.length > 0) {
       const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
-      setClipboard({ nodes: selectedNodes, edges: edges.filter(e => selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target)) });
-      if(onLogAction) onLogAction('NODES_COPIED', { count: selectedNodes.length });
+      
+      // Cascade copy to all descendants (Cases of Switches)
+      let added = true;
+      while (added) {
+          added = false;
+          nodes.forEach(n => {
+              if ((n.parentId && selectedNodeIds.has(n.parentId) && !selectedNodeIds.has(n.id)) ||
+                  (n.data?.switchId && selectedNodeIds.has(n.data.switchId) && !selectedNodeIds.has(n.id))) {
+                  selectedNodeIds.add(n.id);
+                  added = true;
+              }
+          });
+      }
+      
+      const nodesToCopy = nodes.filter(n => selectedNodeIds.has(n.id));
+      setClipboard({ nodes: nodesToCopy, edges: edges.filter(e => selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target)) });
+      if(onLogAction) onLogAction('NODES_COPIED', { count: nodesToCopy.length });
     }
-  }, [selectedNodes, edges, onLogAction, setClipboard]);
+  }, [selectedNodes, edges, onLogAction, setClipboard, nodes]);
 
   const handlePaste = useCallback(() => {
     if (clipboard.nodes.length === 0) return;
@@ -424,6 +452,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     let minX = Infinity, minY = Infinity;
     let maxX = -Infinity, maxY = -Infinity;
     clipboard.nodes.forEach(n => {
+        if (n.parentId) return; // Only calculate bounds for top-level nodes
         const w = parseInt(n.style?.width) || n.width || 150;
         const h = parseInt(n.style?.height) || n.height || 50;
         if (n.position.x < minX) minX = n.position.x;
@@ -442,21 +471,32 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     const newNodes = clipboard.nodes.map(n => {
       const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
       idMap[n.id] = newId;
+      // Cases are relative to Switch, so they don't get the mouse offset if they have a parent!
+      const newPos = n.parentId ? { ...n.position } : { 
+          x: pastePos ? Math.round((n.position.x + offsetX) / 10) * 10 : n.position.x + 30, 
+          y: pastePos ? Math.round((n.position.y + offsetY) / 10) * 10 : n.position.y + 30 
+      };
+      
       return { 
           ...n, 
           id: newId, 
-          position: { 
-              x: pastePos ? Math.round((n.position.x + offsetX) / 10) * 10 : n.position.x + 30, 
-              y: pastePos ? Math.round((n.position.y + offsetY) / 10) * 10 : n.position.y + 30 
-          }, 
+          position: newPos, 
           selected: true, 
           data: { 
               ...n.data, 
-              onChange: (e) => updateNodeLabel(newId, e.target.value), 
+              onStartEdit: takeSnapshot,
+              onChange: (e) => updateNodeLabel(newId, e.target.value, true), 
               onUpdateData: (newData) => updateNodeData(newId, newData) 
           } 
       };
     });
+    
+    // Pass 2: Remap parent/switch IDs
+    newNodes.forEach(n => {
+        if (n.parentId && idMap[n.parentId]) n.parentId = idMap[n.parentId];
+        if (n.data?.switchId && idMap[n.data.switchId]) n.data.switchId = idMap[n.data.switchId];
+    });
+    
     const newEdges = clipboard.edges.map(e => ({ ...e, id: Date.now().toString() + Math.random().toString(36).substr(2, 5), source: idMap[e.source], target: idMap[e.target], selected: true }));
     setNodes(nds => nds.map(n => ({ ...n, selected: false })).concat(newNodes));
     setEdges(eds => eds.map(e => ({ ...e, selected: false })).concat(newEdges));
@@ -499,7 +539,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       }
       if (e.key === 'c' && (e.ctrlKey || e.metaKey) && !isInput) { e.preventDefault(); handleCopy(); }
       if (e.key === 'v' && (e.ctrlKey || e.metaKey) && !isInput) { e.preventDefault(); handlePaste(); }
-      if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey || e.altKey) && !isInput) {
+      if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey || e.altKey)) {
+        if (isInput && !e.altKey) return;
         e.preventDefault();
         if (e.shiftKey) {
           handleRedo();
@@ -555,8 +596,13 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     if (readOnly) return;
     setContextMenu(null); setShowExportMenu(false);
 
+    const now = Date.now();
+    if (now - (lastDragTimeRef.current || 0) < 50) return;
+    lastDragTimeRef.current = now;
+
     let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
     if (draggedNodes.length === 0) draggedNodes = [node];
+    
     if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER')) return;
 
     const draggedIds = new Set(draggedNodes.map(n => n.id));
@@ -622,9 +668,133 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
     let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
     if (draggedNodes.length === 0) draggedNodes = [node];
-    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER')) return;
 
     const draggedIds = new Set(draggedNodes.map(n => n.id));
+    
+    if (screenToFlowPosition) {
+        const mousePos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        const intersectingContainers = nodes.filter(n => {
+            if (!['LOOP_CONTAINER', 'FOR_CONTAINER', 'SWITCH_CONTAINER', 'CASE_CONTAINER'].includes(n.type)) return false;
+            if (draggedIds.has(n.id)) return false;
+            
+            let tcW = n.measured?.width || parseInt(n.style?.width || 0);
+            let tcH = n.measured?.height || parseInt(n.style?.height || 0);
+            if (!tcW && n.type === 'CASE_CONTAINER') tcW = 250;
+            if (!tcH && n.type === 'CASE_CONTAINER') tcH = 150;
+            if (!tcW && n.type === 'SWITCH_CONTAINER') tcW = 350;
+            if (!tcH && n.type === 'SWITCH_CONTAINER') tcH = 230;
+
+            return mousePos.x >= n.position.x && mousePos.x <= n.position.x + tcW &&
+                   mousePos.y >= n.position.y && mousePos.y <= n.position.y + tcH;
+        });
+
+        const targetContainer = intersectingContainers.length > 0 ? intersectingContainers.sort((a, b) => {
+            const areaA = (a.measured?.width || parseInt(a.style?.width || 250)) * (a.measured?.height || parseInt(a.style?.height || 150));
+            const areaB = (b.measured?.width || parseInt(b.style?.width || 250)) * (b.measured?.height || parseInt(b.style?.height || 150));
+            return areaA - areaB;
+        })[0] : null;
+
+        // Auto-disconnect if dragged out of a connected Case Container
+        draggedNodes.forEach(dn => {
+            const connectedCaseEdges = edges.filter(e => 
+                (e.source === dn.id && e.targetHandle === 't-bottom') || 
+                (e.target === dn.id && e.sourceHandle === 's-top')
+            );
+            
+            connectedCaseEdges.forEach(e => {
+                const caseId = e.source === dn.id ? e.target : e.source;
+                const caseNode = nodes.find(n => n.id === caseId && n.type === 'CASE_CONTAINER');
+                if (caseNode && (!targetContainer || targetContainer.id !== caseNode.id)) {
+                    setEdges(eds => eds.filter(ed => ed.id !== e.id));
+                    
+                    const innerNodes = nodes.filter(n => {
+                        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type) || n.parentId || draggedIds.has(n.id)) return false;
+                        let nX = n.position.x; let nY = n.position.y;
+                        if (n.parentId) { const p = nodes.find(x => x.id === n.parentId); if (p) { nX += p.position.x; nY += p.position.y; } }
+                        const cx = nX + (n.measured?.width || 100)/2;
+                        const cy = nY + (n.measured?.height || 50)/2;
+                        
+                        let cX = caseNode.position.x; let cY = caseNode.position.y;
+                        if (caseNode.parentId) { const p = nodes.find(x => x.id === caseNode.parentId); if (p) { cX += p.position.x; cY += p.position.y; } }
+                        const cW = caseNode.measured?.width || parseInt(caseNode.style?.width || 250);
+                        const cH = caseNode.measured?.height || parseInt(caseNode.style?.height || 150);
+                        
+                        return cx >= cX && cx <= cX + cW && cy >= cY && cy <= cY + cH;
+                    });
+                    
+                    if (innerNodes.length > 0) {
+                        innerNodes.sort((a, b) => a.position.y - b.position.y);
+                        setEdges(eds => {
+                            if (eds.find(ed => ed.id === e.id)) return eds; // already handled
+                            const newEd = { ...e, id: `e_${Date.now()}_rewire` };
+                            if (e.source === dn.id) newEd.source = innerNodes[innerNodes.length - 1].id;
+                            else newEd.target = innerNodes[0].id;
+                            return [...eds, newEd];
+                        });
+                    }
+                }
+            });
+        });
+
+        if (targetContainer) {
+            let needsSnap = false;
+            const newPositions = new Map();
+
+            draggedNodes.forEach(dn => {
+                const dnW = dn.measured?.width || parseInt(dn.style?.width || 100);
+                const dnH = dn.measured?.height || parseInt(dn.style?.height || 50);
+                const cx = dn.position.x + dnW/2;
+                const cy = dn.position.y + dnH/2;
+                
+                const tcW = targetContainer.measured?.width || parseInt(targetContainer.style?.width || 250);
+                const tcH = targetContainer.measured?.height || parseInt(targetContainer.style?.height || 150);
+
+                if (cx < targetContainer.position.x || cx > targetContainer.position.x + tcW ||
+                    cy < targetContainer.position.y || cy > targetContainer.position.y + tcH) {
+                    newPositions.set(dn.id, { x: mousePos.x - dnW/2, y: mousePos.y - dnH/2 });
+                    needsSnap = true;
+                }
+            });
+
+            if (needsSnap) {
+                setNodes(nds => nds.map(n => newPositions.has(n.id) ? { ...n, position: newPositions.get(n.id) } : n));
+            }
+
+            if (targetContainer.type === 'CASE_CONTAINER' && draggedNodes.length === 1) {
+                const dn = draggedNodes[0];
+                if (['PROCESS', 'IO', 'CONDITION'].includes(dn.type)) {
+                    // Check if it's the ONLY node in the case
+                    const innerNodes = nodes.filter(n => {
+                        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type) || n.parentId || n.id === dn.id) return false;
+                        let nX = n.position.x; let nY = n.position.y;
+                        if (n.parentId) { const p = nodes.find(x => x.id === n.parentId); if (p) { nX += p.position.x; nY += p.position.y; } }
+                        const cx = nX + (n.measured?.width || 100)/2;
+                        const cy = nY + (n.measured?.height || 50)/2;
+                        
+                        let tcX = targetContainer.position.x; let tcY = targetContainer.position.y;
+                        if (targetContainer.parentId) { const p = nodes.find(x => x.id === targetContainer.parentId); if (p) { tcX += p.position.x; tcY += p.position.y; } }
+                        const cW = targetContainer.measured?.width || parseInt(targetContainer.style?.width || 250);
+                        const cH = targetContainer.measured?.height || parseInt(targetContainer.style?.height || 150);
+                        
+                        return cx >= tcX && cx <= tcX + cW && cy >= tcY && cy <= tcY + cH;
+                    });
+                    
+                    if (innerNodes.length === 0) {
+                        setEdges(eds => {
+                            // First remove any existing connections from the container
+                            const filteredEds = eds.filter(e => !(e.source === targetContainer.id && e.sourceHandle === 's-top') && !(e.target === targetContainer.id && e.targetHandle === 't-bottom'));
+                            const newEd1 = { id: `e_${Date.now()}_1`, source: targetContainer.id, target: dn.id, sourceHandle: 's-top', targetHandle: 't-top', type: 'customEdge', data: { edgeStyle: 'straight' }, markerEnd: { type: MarkerType.ArrowClosed } };
+                            const newEd2 = { id: `e_${Date.now()}_2`, source: dn.id, target: targetContainer.id, sourceHandle: 's-bottom', targetHandle: 't-bottom', type: 'customEdge', data: { edgeStyle: 'straight' }, markerEnd: { type: MarkerType.ArrowClosed } };
+                            return [...filteredEds, newEd1, newEd2];
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER')) return;
+
     if (edges.some(e => (draggedIds.has(e.source) && !draggedIds.has(e.target)) || (draggedIds.has(e.target) && !draggedIds.has(e.source)))) return;
 
     if (draggedNodes.length > 1) {
@@ -693,7 +863,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       setNodes(prev => parsedNodes.map(n => ({ 
           ...n, 
           selected: prev.find(p => p.id === n.id)?.selected || false, 
-          data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(n.id, e.target.value), onUpdateData: (newData) => updateNodeData(n.id, newData) } 
+          data: { ...n.data, readOnly, edgeStyle, onStartEdit: takeSnapshot, onChange: (e) => updateNodeLabel(n.id, e.target.value, true), onUpdateData: (newData) => updateNodeData(n.id, newData) } 
       })));
       
       setEdges(prev => parsedEdges.map(e => ({ 
@@ -736,6 +906,24 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     if (sourceNode.type === 'START_END' && sourceNode.data?.mode === 'end') return false;
     if (targetNode.type === 'START_END' && targetNode.data?.mode === 'end' && connection.targetHandle !== 't-top') return false;
     if (connection.source === connection.target && sourceNode.type !== 'CONDITION') return false;
+
+    // Validate Case Container: MUST connect to something INSIDE it
+    const isInside = (innerNode, containerNode) => {
+        const cx = (innerNode.positionAbsolute?.x || innerNode.position.x) + (innerNode.measured?.width || 100) / 2;
+        const cy = (innerNode.positionAbsolute?.y || innerNode.position.y) + (innerNode.measured?.height || 50) / 2;
+        const cX = containerNode.positionAbsolute?.x || containerNode.position.x;
+        const cY = containerNode.positionAbsolute?.y || containerNode.position.y;
+        const cW = containerNode.measured?.width || parseInt(containerNode.style?.width || 250);
+        const cH = containerNode.measured?.height || parseInt(containerNode.style?.height || 150);
+        return cx >= cX && cx <= cX + cW && cy >= cY && cy <= cY + cH;
+    };
+
+    if (sourceNode.type === 'CASE_CONTAINER' && !isInside(targetNode, sourceNode)) return false;
+    if (targetNode.type === 'CASE_CONTAINER' && !isInside(sourceNode, targetNode)) return false;
+
+    // Validate Switch Container: MUST NOT connect to something INSIDE it
+    if (sourceNode.type === 'SWITCH_CONTAINER' && isInside(targetNode, sourceNode)) return false;
+    if (targetNode.type === 'SWITCH_CONTAINER' && isInside(sourceNode, targetNode)) return false;
 
     return true;
   }, [getNode]);
@@ -808,7 +996,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             ...(type === 'START_END' ? { mode: 'unassigned', entityType: 'FUNCTION' } : {}), 
             ...((type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER') ? { isNew: true, doWhile: false } : {}),
             ...(type === 'IO' ? { ioType: 'input' } : {}),
-            onChange: (e) => updateNodeLabel(newId, e.target.value),
+            onStartEdit: takeSnapshot,
+            onChange: (e) => updateNodeLabel(newId, e.target.value, true),
             onUpdateData: (newData) => updateNodeData(newId, newData)
         },
         ...(type === 'LOOP_CONTAINER' ? { style: { width: 350, height: 200 } } : {}),
@@ -935,7 +1124,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
                 id: newId, 
                 position: { x: n.position.x + offsetX, y: n.position.y + offsetY }, 
                 selected: true, 
-                data: { ...n.data, readOnly, edgeStyle, onChange: (e) => updateNodeLabel(newId, e.target.value), onUpdateData: (newData) => updateNodeData(newId, newData) } 
+                data: { ...n.data, readOnly, edgeStyle, onStartEdit: takeSnapshot, onChange: (e) => updateNodeLabel(newId, e.target.value, true), onUpdateData: (newData) => updateNodeData(newId, newData) } 
             };
         });
         
@@ -1133,7 +1322,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
                 }).map(item => (
                   <button key={item.type} onClick={() => { 
                     let t = item.type;
-                    let txt = item.type === 'COMMENT'?'#':(item.type==='CONDITION'?'x>0':(item.type==='IO'?'x':(item.type==='LOOP_CONTAINER'?'':'')));
+                    let txt = item.type === 'COMMENT'?'Komentář':(item.type==='CONDITION'?'x>0':(item.type==='IO'?'x':(item.type==='LOOP_CONTAINER'?'':'')));
                     if (t === 'FOR_CONTAINER' || t === 'SWITCH_CONTAINER') { txt = ''; }
                     
                     if (contextMenu.connectSource && (t === 'LOOP_CONTAINER' || t === 'FOR_CONTAINER')) {
@@ -1172,7 +1361,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             <button data-testid="Switch" onClick={() => { clearHover(); addNodeAt('SWITCH_CONTAINER', 'x'); }} onMouseEnter={(e) => handlePointerDown('SWITCH_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('SWITCH_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Columns size={18} className={colorMode ? "text-rose-600" : ""} /></button>
           </>
         )}
-        <button data-testid="Komentář" onClick={() => { clearHover(); addNodeAt('COMMENT', '# Komentář'); }} onMouseEnter={(e) => handlePointerDown('COMMENT', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('COMMENT', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
+        <button data-testid="Komentář" onClick={() => { clearHover(); addNodeAt('COMMENT', 'Komentář'); }} onMouseEnter={(e) => handlePointerDown('COMMENT', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('COMMENT', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
       </div>
 
       {(selectedNodes.length > 0 || selectedEdges.length > 0) && !readOnly && (
