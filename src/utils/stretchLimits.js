@@ -12,47 +12,118 @@
  * @param {number} baseHeight - The default height of the container
  * @returns {Object} { SSL_Width, SSL_Height, ASL_Width, ASL_Height }
  */
-export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, containerY, baseWidth = 300, baseHeight = 150) {
-    const PADDING_SIDES = 20;
-    const PADDING_BOTTOM = 50;
-    const EXTRA_W = 120; // max expected width of dragged blocks
-    const EXTRA_H = 100; // max expected height of dragged blocks
+const PADDING_SIDES = 35;
+const PADDING_BOTTOM = 35;
 
-    let maxStatX = containerX + baseWidth - PADDING_SIDES;
-    let maxStatY = containerY + baseHeight - PADDING_BOTTOM;
+function getNodeDimensions(n) {
+    let w = n.measured?.width || 120;
+    let h = n.measured?.height || 50;
+    
+    const isContainer = ['LOOP_CONTAINER', 'FOR_CONTAINER', 'SWITCH_CONTAINER', 'CASE_CONTAINER'].includes(n.type);
+    
+    if (n.type === 'COMMENT') {
+        w = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || 250);
+        h = n.style?.height ? parseInt(n.style.height) : (n.measured?.height || 100);
+    } else if (isContainer) {
+        const defW = (n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER') ? 350 : 300;
+        const defH = n.type === 'FOR_CONTAINER' ? 200 : (n.type === 'SWITCH_CONTAINER' ? 230 : 150);
+        w = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || defW);
+        h = n.style?.height ? parseInt(n.style.height) : (n.measured?.height || defH);
+    }
+    
+    return { w, h, isContainer };
+}
 
-    stationaryNodes.forEach(n => {
-        let w = n.measured?.width || 120;
-        let h = n.measured?.height || 50;
-        if (n.type === 'COMMENT') {
-            w = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || 250);
-            h = n.style?.height ? parseInt(n.style.height) : (n.measured?.height || 100);
-        }
-        
-        if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') {
-            const defW = n.type === 'FOR_CONTAINER' ? 350 : (n.type === 'SWITCH_CONTAINER' ? 350 : 300);
-            const defH = n.type === 'FOR_CONTAINER' ? 200 : (n.type === 'SWITCH_CONTAINER' ? 230 : 150);
-            w = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || defW);
-            h = n.style?.height ? parseInt(n.style.height) : (n.measured?.height || defH);
-        }
-        
+export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, containerY, baseWidth = 300, baseHeight = 150, currentContainerWidth = 300, currentContainerHeight = 150) {
+    // 1. Track structural properties and limits
+    let maxStatX = containerX, maxStatY = containerY;
+    let maxOwnedX = containerX, maxOwnedY = containerY;
+    
+    let rightmostIsContainer = false;
+    let bottommostIsContainer = false;
+    let hasIf = false;
+    
+    let totalNestedW = 0, totalNestedH = 0;
+    let actionBlockCount = 0;
+    let maxBlockW = 0, maxBlockH = 0;
+
+    ownedNodes.forEach(n => {
+        let { w, h, isContainer } = getNodeDimensions(n);
         const nx = n.positionAbsolute?.x || n.position.x;
         const ny = n.positionAbsolute?.y || n.position.y;
         
-        if (nx + w > maxStatX) maxStatX = nx + w;
-        if (ny + h > maxStatY) maxStatY = ny + h;
+        if (n.type === 'CONDITION' || n.type === 'IF') {
+            hasIf = true;
+            w += 320; // The IF block statically demands +320px of layout space to its right
+            h += 50;  // Extra vertical space
+        }
+
+        // Track maxOwned bounds (includes dragging nodes) for anti-collapse logic
+        maxOwnedX = Math.max(maxOwnedX, nx + w);
+        maxOwnedY = Math.max(maxOwnedY, ny + h);
+
+        if (!n.dragging) {
+            if (nx + w > maxStatX) {
+                maxStatX = nx + w;
+                rightmostIsContainer = isContainer;
+            }
+            if (ny + h > maxStatY) {
+                maxStatY = ny + h;
+                bottommostIsContainer = isContainer;
+            }
+            
+            if (isContainer) {
+                totalNestedW += w;
+                totalNestedH += h;
+            } else if (n.type === 'ACTION' || n.type === 'IO') {
+                actionBlockCount++;
+            }
+            
+            maxBlockW = Math.max(maxBlockW, w);
+            maxBlockH = Math.max(maxBlockH, h);
+        }
     });
 
-    const requiredWidth = (maxStatX - containerX) + PADDING_SIDES;
-    const requiredHeight = (maxStatY - containerY) + PADDING_BOTTOM;
+    // 2. Calculate Required Bounding Boxes
+    const requiredWidth = stationaryNodes.length ? (maxStatX - containerX) + PADDING_SIDES : 0;
+    const requiredHeight = stationaryNodes.length ? (maxStatY - containerY) + PADDING_BOTTOM : 0;
+    const requiredOwnedWidth = ownedNodes.length ? (maxOwnedX - containerX) + PADDING_SIDES : 0;
+    const requiredOwnedHeight = ownedNodes.length ? (maxOwnedY - containerY) + PADDING_BOTTOM : 0;
 
-    // SSL (Simple Stretch Limit) is now exactly the required bounding box + a generous drag margin
-    const SSL_Width = Math.max(baseWidth, requiredWidth + EXTRA_W);
-    const SSL_Height = Math.max(baseHeight, requiredHeight + EXTRA_H);
+    // 3. Apply Contextual Rules
+    let EXTRA_W = 0; // Default: no base stretch on X for normal blocks
+    let EXTRA_H = 0; // Default: no base stretch on Y
 
-    // ASL is equivalent to SSL since SSL is now dynamically tight to the actual contents
-    const ASL_Width = SSL_Width;
-    const ASL_Height = SSL_Height;
+    if (rightmostIsContainer) EXTRA_W = 0;
+    if (bottommostIsContainer) EXTRA_H = 0;
+    if (ownedNodes.length <= 1) {
+        EXTRA_W = 0;
+        EXTRA_H = 0;
+    }
 
-    return { SSL_Width, SSL_Height, ASL_Width, ASL_Height };
+    // 4. RESTORED BACK CATCH & ANTI-COLLAPSE LOGIC
+    const baseInchwormW = ownedNodes.length <= 1 ? 0 : EXTRA_W;
+    
+    // The inchworm "brick wall" MUST be anchored to the actual size of the contents (requiredWidth),
+    // otherwise it acts as a fixed wall at `baseWidth` and crushes the EXTRA_W gap to 0!
+    const hardMaxW = Math.max(baseWidth, requiredWidth + baseInchwormW + totalNestedW);
+    
+    // Y-axis stretching should allow just enough room to stack the next block vertically.
+    // A standard vertical drag margin of 120px below the currently stationary blocks is perfect.
+    const baseInchwormH = ownedNodes.length <= 1 ? 0 : 120;
+    const hardMaxH = Math.max(baseHeight, requiredHeight + baseInchwormH);
+
+    // Temporary max stretch allows a wrapped block to be moved freely INWARD,
+    // but prevents stretching the container ANY FURTHER OUTWARD if it's beyond hard limits.
+    const maxAllowedW = Math.max(hardMaxW, currentContainerWidth);
+    const maxAllowedH = Math.max(hardMaxH, currentContainerHeight);
+
+    // Runway uses requiredOwnedWidth so it DOES NOT automatically collapse when dragging starts
+    const runwayW = Math.max(baseWidth, requiredOwnedWidth + EXTRA_W);
+    const runwayH = Math.max(baseHeight, requiredOwnedHeight + EXTRA_H);
+
+    const SSL_Width = Math.min(maxAllowedW, runwayW);
+    const SSL_Height = Math.min(maxAllowedH, runwayH);
+
+    return { SSL_Width, SSL_Height, ASL_Width: SSL_Width, ASL_Height: SSL_Height };
 }

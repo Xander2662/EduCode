@@ -15,18 +15,10 @@ describe('calculateStretchLimits', () => {
         
         const result = calculateStretchLimits(ownedNodes, stationaryNodes, containerX, containerY);
         
-        // Max Stat X = 200 + 100 = 300
-        // Max Stat Y = 50 + 50 = 100
-        // Required Width = (300 - 0) + 20 (PADDING) = 320
-        // Required Height = (100 - 0) + 50 (PADDING) = 150
-        
-        // SSL Width = max(300, 320 + 120) = 440
-        // SSL Height = max(150, 150 + 100) = 250
-        
-        expect(result.SSL_Width).toBe(440);
-        expect(result.SSL_Height).toBe(250);
-        expect(result.ASL_Width).toBe(440);
-        expect(result.ASL_Height).toBe(250);
+        expect(result.SSL_Width).toBe(335);
+        expect(result.SSL_Height).toBe(150);
+        expect(result.ASL_Width).toBe(335);
+        expect(result.ASL_Height).toBe(150);
     });
 
     it('should dynamically expand limits based on actual physical overlap (simpler mathematical bounding)', () => {
@@ -37,14 +29,7 @@ describe('calculateStretchLimits', () => {
         
         const result = calculateStretchLimits(ownedNodes, stationaryNodes, 0, 0);
         
-        // Max X = 600
-        // Max Y = 350
-        // Req Width = 620
-        // Req Height = 400
-        // SSL W = 620 + 120 = 740
-        // SSL H = 400 + 100 = 500
-        
-        expect(result.SSL_Width).toBe(740);
-        expect(result.SSL_Height).toBe(500);
+        expect(result.SSL_Width).toBe(635);
+        expect(result.SSL_Height).toBe(385);
     });
 });

@@ -85,7 +85,7 @@ export const StartEndNode = ({ id, data, selected }) => {
   return (
     <div className={`${bgClass} border-2 rounded-[2rem] min-w-[140px] min-h-[40px] flex flex-col justify-center items-center p-2 transition-all relative ${highlightClass} ${data.isBreakpoint ? 'ring-2 ring-red-500 border-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : ''}`}>
       {data.showDebugger && (
-          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-3")} title="Zarážka (Breakpoint)" />
+          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-3")} />
       )}
 
       {mode !== 'start' && <Handle type="target" position={Position.Top} id="t-top" className={`${handleBaseClass} ${handleClass}`} />}
@@ -138,7 +138,7 @@ export const ActionNode = ({ id, data, selected }) => {
   return (
     <div style={morphStyle} onDoubleClick={onDoubleClick} className={`${bgClass} border-2 p-2 min-w-[100px] min-h-[50px] flex flex-col rounded-md relative transition-all ${highlightClass} ${data.isBreakpoint ? 'ring-2 ring-red-500 border-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : ''}`}>
       {data.showDebugger && (
-          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-3.5")} title="Zarážka (Breakpoint)" />
+          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-3.5")} />
       )}
       
       <Handle type="target" position={Position.Top} id="t-top" className={`${handleBaseClass} ${handleClass}`} />
@@ -216,7 +216,7 @@ export const IONode = ({ id, data, selected }) => {
   return (
     <div style={morphStyle} onDoubleClick={onDoubleClick} className={`relative min-w-[120px] min-h-[50px] flex flex-col transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       {data.showDebugger && (
-          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-3.5")} title="Zarážka (Breakpoint)" />
+          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-3.5")} />
       )}
       
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">
@@ -326,7 +326,7 @@ export const ConditionNode = ({ id, data, selected }) => {
     // Zvětšeno z min-w-[120px] min-h-[60px] na 160px x 80px, aby se posuvník pohodlně vešel do obou tvarů
     <div style={morphStyle} onDoubleClick={onDoubleClick} className={`relative flex flex-col items-center justify-center min-w-[160px] min-h-[80px] transition-all ${data.isRuntimeActive ? 'z-50' : ''}`}>
       {data.showDebugger && (
-          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-4")} title="Zarážka (Breakpoint)" />
+          <button onDoubleClick={e => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} className={breakpointButtonClass(data.isBreakpoint, "-left-4")} />
       )}
 
       <svg className={`absolute inset-0 w-full h-full pointer-events-none -z-10 ${strokeClass} ${shadowClass}`} preserveAspectRatio="none" viewBox="0 0 100 100">

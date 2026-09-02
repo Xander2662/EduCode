@@ -31,7 +31,7 @@ const DebuggerConsole = ({ events }) => {
 
     if (!expanded) {
         return (
-            <Tooltip text="Zobrazit konzoli">
+            <Tooltip text="Zobrazit konzoli" position="left">
                 <button 
                     onClick={() => setExpanded(true)} 
                     className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 h-10 w-10 rounded shadow hover:bg-gray-100 dark:hover:bg-gray-700 transition-all pointer-events-auto flex items-center justify-center"
@@ -48,20 +48,31 @@ const DebuggerConsole = ({ events }) => {
                 <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2 relative">
                     <Terminal size={12} />
                     Konzole
-                    <div className="relative">
-                        <Tooltip text="Nápověda pro Debugger Konzoli"><button onClick={(e) => { e.stopPropagation(); setShowInfo(!showInfo); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-0.5 ml-1">
-                            <HelpCircle size={10} />
-                        </button></Tooltip>
+                    <div className="relative flex items-center">
+                        <Tooltip text="Nápověda pro Debugger Konzoli">
+                            <button onClick={(e) => { e.stopPropagation(); setShowInfo(!showInfo); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-0.5 ml-1 flex items-center justify-center">
+                                <HelpCircle size={10} />
+                            </button>
+                        </Tooltip>
+                        
+                        {showInfo && (
+                            <div className="absolute bottom-[calc(100%+10px)] left-1/2 -translate-x-1/2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-4 w-72 z-[9999] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case text-left cursor-default" onClick={e => e.stopPropagation()}>
+                                <p className="mb-2 text-sm text-gray-800 dark:text-gray-100 font-semibold border-b border-gray-100 dark:border-gray-700 pb-2">Debugger Konzole</p>
+                                <p className="mb-3 text-gray-600 dark:text-gray-400">Tento panel zachycuje veškerý výstup běžícího programu.</p>
+                                <ul className="space-y-2 text-gray-600 dark:text-gray-400">
+                                    <li className="flex items-start gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-green-500 mt-1 shrink-0"></span> 
+                                        <div><strong className="text-gray-800 dark:text-gray-200">Standardní výstup:</strong> (např. PRINT "Ahoj")</div>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-indigo-500 mt-1 shrink-0"></span> 
+                                        <div><strong className="text-gray-800 dark:text-gray-200">Zprávy debuggeru:</strong> (např. přeskočené cykly)</div>
+                                    </li>
+                                </ul>
+                                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-white dark:bg-gray-800 border-b border-r border-gray-200 dark:border-gray-700 transform rotate-45"></div>
+                            </div>
+                        )}
                     </div>
-                    {showInfo && (
-                        <div className="absolute bottom-[calc(100%+12px)] left-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-4 w-72 z-[1000] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case text-left" onClick={e => e.stopPropagation()}>
-                            <p className="mb-2"><strong>Debugger Konzole</strong> zachycuje veškerý výstup programu.</p>
-                            <ul className="space-y-1 text-[10px] text-gray-500">
-                                <li><span className="text-green-600 font-bold">Zeleně:</span> Standardní výstup (např. PRINT "Ahoj")</li>
-                                <li><span className="text-indigo-500 italic font-semibold">Modře:</span> Zprávy debuggeru (např. přeskočené cykly)</li>
-                            </ul>
-                        </div>
-                    )}
                 </div>
                 <button onClick={() => setExpanded(false)} className="text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors">
                     <Minimize2 size={14} />
@@ -996,17 +1007,21 @@ function AppContent() {
                        <div className="flex justify-between items-center px-1 pb-2 mb-2 border-b border-gray-100 dark:border-gray-700">
                           <div className="flex items-center gap-2 relative">
                               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Paměť (Variables)</span>
-                              <Tooltip text="Nápověda pro Paměť (Variables)">
-                                  <button onClick={(e) => { e.stopPropagation(); setShowWatcherInfo(!showWatcherInfo); }} className="text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-full p-1 transition-colors">
-                                      <HelpCircle size={12} />
-                                  </button>
-                              </Tooltip>
-                              {showWatcherInfo && (
-                                  <div className="absolute top-[calc(100%+8px)] left-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-4 w-64 z-[1000] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case" onClick={e => e.stopPropagation()}>
-                                      <p className="mb-2"><strong>Paměť (Variables)</strong> zobrazuje aktuální stav proměnných během krokování.</p>
-                                      <p className="text-[10px] text-gray-500">Změny uvidíte okamžitě, jakmile proběhne operace jako <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded text-gray-800 dark:text-gray-200 font-mono">x = 1</code>.</p>
-                                  </div>
-                              )}
+                              <div className="relative flex items-center">
+                                  <Tooltip text="Nápověda pro Paměť (Variables)">
+                                      <button onClick={(e) => { e.stopPropagation(); setShowWatcherInfo(!showWatcherInfo); }} className="text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-full p-1 transition-colors flex items-center justify-center">
+                                          <HelpCircle size={12} />
+                                      </button>
+                                  </Tooltip>
+                                  {showWatcherInfo && (
+                                      <div className="absolute top-[calc(100%+10px)] left-1/2 -translate-x-1/2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-4 w-64 z-[9999] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case cursor-default" onClick={e => e.stopPropagation()}>
+                                          <p className="mb-2 text-sm text-gray-800 dark:text-gray-100 font-semibold border-b border-gray-100 dark:border-gray-700 pb-2">Paměť (Variables)</p>
+                                          <p className="mb-3 text-gray-600 dark:text-gray-400">Zobrazuje aktuální stav proměnných během krokování kódu.</p>
+                                          <p className="text-[10px] text-gray-500">Změny uvidíte okamžitě, jakmile proběhne operace jako <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded text-gray-800 dark:text-gray-200 font-mono">x = 1</code>.</p>
+                                          <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-white dark:bg-gray-800 border-t border-l border-gray-200 dark:border-gray-700 transform rotate-45"></div>
+                                      </div>
+                                  )}
+                              </div>
                           </div>
                           <span className={`w-2 h-2 rounded-full ${runner && !runner.isFinished ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
                        </div>
@@ -1308,7 +1323,7 @@ function AppContent() {
                   )}
 
                   <div className="relative ml-1 dropdown-container">
-                    <Tooltip text="Změnit okno"><button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === index ? null : index); setSettingsDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors">
+                    <Tooltip text="Změnit okno" position="bottom"><button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === index ? null : index); setSettingsDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors">
                       <ChevronDown size={16} />
                     </button></Tooltip>
                     {activeDropdown === index && (
@@ -1317,55 +1332,57 @@ function AppContent() {
                           const isCurrent = panels[index] === t.id;
                           const isUsed = panels.includes(t.id) && !isCurrent;
                           return (
-                            <button key={t.id} onClick={(e) => { 
-                                e.stopPropagation(); 
-                                if (isCurrent) {
-                                    setActiveDropdown(null);
-                                    return;
-                                }
-                                const newPanels = [...panels]; 
-                                if (isUsed) {
-                                    const oldIndex = panels.indexOf(t.id);
-                                    newPanels[oldIndex] = panels[index];
-                                    newPanels[index] = t.id;
-                                } else {
-                                    newPanels[index] = t.id; 
-                                }
-                                setPanels(newPanels); 
-                                setActiveDropdown(null); 
-                                
-                                if (t.id === 'python' && (!pythonCode || pythonCode.trim() === '')) {
-                                    const result = parseDrawioToPython(diagramXml);
-                                    setPythonCode(result?.code || '');
-                                    setPythonNodeLineMap(result?.nodeLineMap || {});
-                                } else if (t.id === 'pseudocode' && (!pseudocode || pseudocode.trim() === '')) {
-                                    const result = parseDrawioToPseudocode(diagramXml);
-                                    setPseudocode(result?.code || '');
-                                    setPseudoNodeLineMap(result?.nodeLineMap || {});
-                                }
+                            <Tooltip key={t.id} text={isUsed ? 'Prohodit okna' : ''} position="left" fullWidth>
+                              <button onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  if (isCurrent) {
+                                      setActiveDropdown(null);
+                                      return;
+                                  }
+                                  const newPanels = [...panels]; 
+                                  if (isUsed) {
+                                      const oldIndex = panels.indexOf(t.id);
+                                      newPanels[oldIndex] = panels[index];
+                                      newPanels[index] = t.id;
+                                  } else {
+                                      newPanels[index] = t.id; 
+                                  }
+                                  setPanels(newPanels); 
+                                  setActiveDropdown(null); 
+                                  
+                                  if (t.id === 'python' && (!pythonCode || pythonCode.trim() === '')) {
+                                      const result = parseDrawioToPython(diagramXml);
+                                      setPythonCode(result?.code || '');
+                                      setPythonNodeLineMap(result?.nodeLineMap || {});
+                                  } else if (t.id === 'pseudocode' && (!pseudocode || pseudocode.trim() === '')) {
+                                      const result = parseDrawioToPseudocode(diagramXml);
+                                      setPseudocode(result?.code || '');
+                                      setPseudoNodeLineMap(result?.nodeLineMap || {});
+                                  }
 
-                                if (t.id === 'python' || t.id === 'pseudocode') {
-                                    lastEdited.current = t.id;
-                                    activeWindow.current = t.id;
-                                } else if (t.id === 'drawio') {
-                                    const otherPanel = newPanels.find(p => p !== 'drawio');
-                                    if (otherPanel) {
-                                        lastEdited.current = otherPanel;
-                                        activeWindow.current = otherPanel;
-                                    } else {
-                                        lastEdited.current = 'drawio';
-                                        activeWindow.current = 'drawio';
-                                    }
-                                }
-                                setSyncTrigger(s => s + 1);
-                                setSelectedNodeIds([]);
-                                setExternalSelectedIds([]);
-                                logAction('PANEL_CHANGED', { to: t.id, swapped: isUsed }); 
-                            }} className={`w-full px-4 py-2 text-sm flex justify-between items-center transition-colors ${isCurrent ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 font-bold' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`} title={isUsed ? 'Prohodit okna' : ''}>
-                              <span>{t.label}</span>
-                              {isCurrent && <span className="w-2 h-2 rounded-full bg-indigo-600 dark:bg-indigo-400"></span>}
-                              {isUsed && <RefreshCcw size={14} className="opacity-70" />}
-                            </button>
+                                  if (t.id === 'python' || t.id === 'pseudocode') {
+                                      lastEdited.current = t.id;
+                                      activeWindow.current = t.id;
+                                  } else if (t.id === 'drawio') {
+                                      const otherPanel = newPanels.find(p => p !== 'drawio');
+                                      if (otherPanel) {
+                                          lastEdited.current = otherPanel;
+                                          activeWindow.current = otherPanel;
+                                      } else {
+                                          lastEdited.current = 'drawio';
+                                          activeWindow.current = 'drawio';
+                                      }
+                                  }
+                                  setSyncTrigger(s => s + 1);
+                                  setSelectedNodeIds([]);
+                                  setExternalSelectedIds([]);
+                                  logAction('PANEL_CHANGED', { to: t.id, swapped: isUsed }); 
+                              }} className={`w-full px-4 py-2 text-sm flex justify-between items-center transition-colors ${isCurrent ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 font-bold' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+                                <span>{t.label}</span>
+                                {isCurrent && <span className="w-2 h-2 rounded-full bg-indigo-600 dark:bg-indigo-400"></span>}
+                                {isUsed && <RefreshCcw size={14} className="opacity-70" />}
+                              </button>
+                            </Tooltip>
                           );
                         })}
                       </div>
@@ -1396,9 +1413,11 @@ function AppContent() {
 
             {index === 0 && panels.length === 2 && (
               <div className="w-full lg:w-12 flex justify-center lg:flex-col items-center shrink-0 py-2 lg:py-0">
-                <button onClick={requestFlowChange} className="p-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-full hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm text-gray-600 dark:text-gray-300 transition-colors mx-auto">
-                  {flow === 'bidirectional' ? <ArrowRightLeft size={18} className="text-indigo-600 dark:text-indigo-400 lg:rotate-0 rotate-90" /> : flow === 'diagram-to-code' ? <ArrowRight size={20} className="text-blue-500 lg:rotate-0 rotate-90" /> : <ArrowLeft size={20} className="text-blue-500 lg:rotate-0 rotate-90" />}
-                </button>
+                <Tooltip text="Změnit směr synchronizace" position="bottom">
+                  <button onClick={requestFlowChange} className="p-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-full hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm text-gray-600 dark:text-gray-300 transition-colors mx-auto">
+                    {flow === 'bidirectional' ? <ArrowRightLeft size={18} className="text-indigo-600 dark:text-indigo-400 lg:rotate-0 rotate-90" /> : flow === 'diagram-to-code' ? <ArrowRight size={20} className="text-blue-500 lg:rotate-0 rotate-90" /> : <ArrowLeft size={20} className="text-blue-500 lg:rotate-0 rotate-90" />}
+                  </button>
+                </Tooltip>
               </div>
             )}
           </React.Fragment>

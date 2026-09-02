@@ -156,16 +156,29 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                 
                 const nX = n.position.x;
                 const nY = n.position.y;
-                const cx = nX + nW / 2;
-                const cy = nY + nH / 2;
-                
+                const isContainer = (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER');
                 let isInside = false;
-                if (n.dragging && currentOwned.has(n.id)) {
-                    // Once owned and dragging, it stays owned until its CENTER leaves the container + a small 20px buffer
-                    isInside = cx >= myX - 20 && cx <= myX + myWidth + 20 && cy >= myY + tagBottomOffset - 20 && cy <= myY + myHeight + 20;
+                if (isContainer) {
+                    // A container can only own another container if it is strictly placed inside it.
+                    // By enforcing that the child's top-left (nX, nY) is STRICTLY greater than the parent's (myX, myY),
+                    // we make it geometrically impossible for two containers to mutually own each other.
+                    const strictX = nX > myX;
+                    const strictY = nY > myY;
+                    
+                    if (n.dragging && currentOwned.has(n.id)) {
+                        isInside = strictX && strictY && nX <= myX + myWidth + 20 && nY <= myY + myHeight + 20;
+                    } else {
+                        isInside = strictX && strictY && nX <= myX + myWidth - 10 && nY <= myY + myHeight - 10;
+                    }
                 } else {
-                    // To enter natively, a little more than the center must be inside (to prevent accidental grazing)
-                    isInside = cx >= myX + 10 && cx <= myX + myWidth - 10 && cy >= myY + tagBottomOffset + 10 && cy <= myY + myHeight - 10;
+                    let checkX = nX + nW / 2;
+                    let checkY = nY + nH / 2;
+                    
+                    if (n.dragging && currentOwned.has(n.id)) {
+                        isInside = checkX >= myX - 20 && checkX <= myX + myWidth + 20 && checkY >= myY + tagBottomOffset - 20 && checkY <= myY + myHeight + 20;
+                    } else {
+                        isInside = checkX >= myX + 10 && checkX <= myX + myWidth - 10 && checkY >= myY + tagBottomOffset + 10 && checkY <= myY + myHeight - 10;
+                    }
                 }
                 
                 if (isInside) {
@@ -213,13 +226,13 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
             let atStretchLimitBottom = false;
             
             if (ownedNodes.length > 0) {
-                const paddingSides = 20;
-                const paddingBottom = 50;
+                const paddingSides = 35;
+                const paddingBottom = 35;
                 
                 let desiredWidth = (maxX - myX) + paddingSides;
                 let desiredHeight = (maxY - myY) + paddingBottom;
                 
-                const { SSL_Width, SSL_Height, ASL_Width, ASL_Height } = calculateStretchLimits(ownedNodes, stationaryNodes, myX, myY, minWidth, minHeight);
+                const { SSL_Width, SSL_Height, ASL_Width, ASL_Height } = calculateStretchLimits(ownedNodes, stationaryNodes, myX, myY, minWidth, minHeight, myWidth, myHeight);
                 
                 let popped = false;
                 newWidth = desiredWidth;
@@ -253,8 +266,7 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                     desiredWidth = Math.max(desiredWidth, reqW);
                     desiredHeight = Math.max(desiredHeight, reqH);
 
-                    const nodeStretchDistRight = reqW - ASL_Width;
-                    const nodeStretchDistBottom = reqH - ASL_Height;
+
                     const stretchDistLeft = myX - minXNode;
                     let tagBottomOffset = 15;
                     if (containerRef.current) {
@@ -271,17 +283,24 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                         dragState.joinedThisDrag = true;
                     }
 
-                    const POP_TOLERANCE_RIGHT = paddingSides;
-                    const POP_TOLERANCE_BOTTOM = paddingBottom;
+                    const physicalRightEdge = maxXNode - myX;
+                    const physicalBottomEdge = maxYNode - myY;
+                    
+                    const physicalStretchDistRight = physicalRightEdge - ASL_Width;
+                    const physicalStretchDistBottom = physicalBottomEdge - ASL_Height;
+
+                    const POP_TOLERANCE_RIGHT = 15; // 15px physical jitter tolerance past the border
+                    const POP_TOLERANCE_BOTTOM = 15;
                     const POP_TOLERANCE_LEFT = 0;
                     const POP_TOLERANCE_TOP = 0;
+                    const GLOW_DIST = 20; // Trigger visual glow 20px before physically hitting the border
                     
-                    if (nodeStretchDistRight > POP_TOLERANCE_RIGHT || nodeStretchDistBottom > POP_TOLERANCE_BOTTOM || stretchDistLeft > POP_TOLERANCE_LEFT || stretchDistTop > POP_TOLERANCE_TOP) {
+                    if (physicalStretchDistRight > POP_TOLERANCE_RIGHT || physicalStretchDistBottom > POP_TOLERANCE_BOTTOM || stretchDistLeft > POP_TOLERANCE_LEFT || stretchDistTop > POP_TOLERANCE_TOP) {
                         currentOwned.delete(draggingNode.id);
                         popped = true;
                     } else {
-                        if (nodeStretchDistRight > 0) anyAtLimitRight = true;
-                        if (nodeStretchDistBottom > 0) anyAtLimitBottom = true;
+                        if (physicalStretchDistRight > -GLOW_DIST) anyAtLimitRight = true;
+                        if (physicalStretchDistBottom > -GLOW_DIST) anyAtLimitBottom = true;
                     }
                 });
 
