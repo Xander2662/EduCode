@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare, Bug, RefreshCcw, Download, Terminal, Maximize2, Minimize2 } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowRightLeft, X, ChevronDown, Plus, Repeat, Moon, Sun, AlertCircle, Copy, Check, Info, HelpCircle, Settings, Play, Pause, StepForward, Square as StopSquare, Bug, RefreshCcw, Download, Terminal, Maximize2, Minimize2 } from 'lucide-react';
 import { parseDrawioToPseudocode } from './parsers/diagramToPseudocode';
 import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parseDrawioToPython } from './parsers/diagramToPython';
@@ -31,26 +31,27 @@ const DebuggerConsole = ({ events }) => {
 
     if (!expanded) {
         return (
-            <button 
-                onClick={() => setExpanded(true)} 
-                className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 text-gray-700 dark:text-gray-300 h-10 w-10 rounded-full shadow-2xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all pointer-events-auto flex items-center justify-center"
-                title="Zobrazit konzoli"
-            >
-                <Terminal size={20} />
-            </button>
+            <Tooltip text="Zobrazit konzoli">
+                <button 
+                    onClick={() => setExpanded(true)} 
+                    className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 h-10 w-10 rounded shadow hover:bg-gray-100 dark:hover:bg-gray-700 transition-all pointer-events-auto flex items-center justify-center"
+                >
+                    <Terminal size={18} />
+                </button>
+            </Tooltip>
         );
     }
 
     return (
-        <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-2xl w-full pointer-events-auto flex flex-col transition-all duration-300 relative" style={{ maxHeight: '200px' }}>
-            <div className="flex justify-between items-center px-4 py-2.5 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/50 rounded-t-2xl">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow w-full pointer-events-auto flex flex-col transition-all duration-300 relative" style={{ maxHeight: '200px' }}>
+            <div className="flex justify-between items-center px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 rounded-t">
                 <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2 relative">
                     <Terminal size={12} />
                     Konzole
                     <div className="relative">
-                        <button onClick={(e) => { e.stopPropagation(); setShowInfo(!showInfo); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-0.5 ml-1" title="Nápověda pro Debugger Konzoli">
+                        <Tooltip text="Nápověda pro Debugger Konzoli"><button onClick={(e) => { e.stopPropagation(); setShowInfo(!showInfo); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-0.5 ml-1">
                             <HelpCircle size={10} />
-                        </button>
+                        </button></Tooltip>
                     </div>
                     {showInfo && (
                         <div className="absolute bottom-[calc(100%+12px)] left-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-4 w-72 z-[1000] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case text-left" onClick={e => e.stopPropagation()}>
@@ -181,9 +182,11 @@ const ErrorItem = ({ error }) => {
         <li className="flex flex-col gap-1 mb-1">
             <div className="flex justify-between items-start gap-2">
                 <span className="flex-1">{errorPrefix}{errorText}</span>
-                <button onClick={() => setExpanded(!expanded)} className="text-red-500 hover:text-red-700 bg-red-100/50 dark:bg-red-800/30 p-1 rounded transition-colors shrink-0" title="Vysvětlení chyby">
-                    <HelpCircle size={14} />
-                </button>
+                <Tooltip text="Vysvětlení chyby">
+                    <button onClick={() => setExpanded(!expanded)} className="text-red-500 hover:text-red-700 bg-red-100/50 dark:bg-red-800/30 p-1 rounded transition-colors shrink-0">
+                        <HelpCircle size={14} />
+                    </button>
+                </Tooltip>
             </div>
             {expanded && (
                 <div className="text-[11px] bg-red-100/80 dark:bg-red-900/50 p-2 rounded text-red-800 dark:text-red-200 mt-1 leading-relaxed">
@@ -399,7 +402,6 @@ function AppContent() {
   const [runtimeEvents, setRuntimeEvents] = useState([]);
   
   const [debugSpeedPercent, setDebugSpeedPercent] = useState(100);
-  const [showDebugSettings, setShowDebugSettings] = useState(false);
   const [showWatcherInfo, setShowWatcherInfo] = useState(false);
   const [inputRequest, setInputRequest] = useState(null);
   
@@ -510,7 +512,6 @@ function AppContent() {
               e.target.closest('.settings-panel')) {
               return;
           }
-          setShowDebugSettings(false);
           setShowWatcherInfo(false);
           setActiveDropdown(null);
           setSettingsDropdown(null);
@@ -944,12 +945,10 @@ function AppContent() {
                 lastEdited.current = 'drawio'; 
                 setActiveDropdown(null);
                 setSettingsDropdown(null);
-                setShowDebugSettings(false);
             }}
             onPaneClick={() => { 
                 setActiveDropdown(null);
                 setSettingsDropdown(null);
-                setShowDebugSettings(false);
             }}
             onLogAction={logAction}
             onXmlChange={(xml, isUserInteraction) => { 
@@ -997,9 +996,11 @@ function AppContent() {
                        <div className="flex justify-between items-center px-1 pb-2 mb-2 border-b border-gray-100 dark:border-gray-700">
                           <div className="flex items-center gap-2 relative">
                               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Paměť (Variables)</span>
-                              <button onClick={(e) => { e.stopPropagation(); setShowWatcherInfo(!showWatcherInfo); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-1" title="Nápověda pro Paměť (Variables)">
-                                  <HelpCircle size={12} />
-                              </button>
+                              <Tooltip text="Nápověda pro Paměť (Variables)">
+                                  <button onClick={(e) => { e.stopPropagation(); setShowWatcherInfo(!showWatcherInfo); }} className="text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-full p-1 transition-colors">
+                                      <HelpCircle size={12} />
+                                  </button>
+                              </Tooltip>
                               {showWatcherInfo && (
                                   <div className="absolute top-[calc(100%+8px)] left-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-4 w-64 z-[1000] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case" onClick={e => e.stopPropagation()}>
                                       <p className="mb-2"><strong>Paměť (Variables)</strong> zobrazuje aktuální stav proměnných během krokování.</p>
@@ -1041,57 +1042,34 @@ function AppContent() {
                     </div>
                 </div>
 
-                <div className="absolute bottom-4 left-4 right-4 flex justify-between items-end pointer-events-none">
-                    <div className="w-72" />
+                <div className="absolute bottom-4 left-4 right-4 flex items-end pointer-events-none gap-4">
+                    <div className="flex-1 hidden md:block" />
                     
                     <div className="flex gap-2 items-end pointer-events-auto relative">
-                        <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2 flex gap-2">
+                       <div className="flex gap-2 items-center pointer-events-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow p-1.5 mx-auto">
+                        <div className="flex gap-1">
+
                             <Tooltip text="Krokovat vpřed (ignoruje zarážky)">
-                                <button onClick={() => doStep(true)} disabled={isPlayingState || (runner && runner.isFinished)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all" aria-label="Krokovat vpřed (ignoruje zarážky)"><StepForward size={20} /></button>
+                                <button onClick={() => doStep(true)} disabled={isPlayingState || (runner && runner.isFinished)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-700 dark:text-gray-300 disabled:opacity-30 transition-all" aria-label="Krokovat vpřed (ignoruje zarážky)"><StepForward size={18} /></button>
                             </Tooltip>
                             <Tooltip text={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
-                                <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-3 rounded-full transition-all ${isPlayingState ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-800/50' : 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50'}`} aria-label={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
-                                    {isPlayingState ? <Pause size={20} /> : <Play size={20} />}
+                                <button onClick={togglePlay} disabled={runner && runner.isFinished} className={`p-2 rounded transition-all ${isPlayingState ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-800/50' : 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50'}`} aria-label={isPlayingState ? "Pozastavit běh" : "Spustit automaticky (zastaví na zarážkách)"}>
+                                    {isPlayingState ? <Pause size={18} /> : <Play size={18} />}
                                 </button>
                             </Tooltip>
                             <Tooltip text="Ukončit debugger a vymazat data">
-                                <button onClick={() => stopDebugger(true)} disabled={!runner} className="p-3 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full text-red-500 dark:text-red-400 disabled:opacity-30 transition-all" aria-label="Ukončit debugger a vymazat data"><StopSquare size={20} /></button>
+                                <button onClick={() => stopDebugger(true)} disabled={!runner} className="p-2 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-red-500 dark:text-red-400 disabled:opacity-30 transition-all" aria-label="Ukončit debugger a vymazat data"><StopSquare size={18} /></button>
                             </Tooltip>
                         </div>
-                        <div className="relative speed-adjuster-panel" onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
-                            <Tooltip text="Nastavení rychlosti">
-                                <button onClick={(e) => { e.stopPropagation(); setShowDebugSettings(!showDebugSettings); }} className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-full shadow-2xl p-2.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" aria-label="Nastavení rychlosti">
-                                    <Settings size={18} />
-                                </button>
-                            </Tooltip>
-                            {showDebugSettings && (
-                                <div className="absolute bottom-full right-0 mb-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-2xl p-4 w-56">
-                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
-                                        Rychlost <span>{debugSpeedPercent}%</span>
-                                    </label>
-                                    <input 
-                                        type="range" 
-                                        min="0" 
-                                        max="500" 
-                                        step="10" 
-                                        value={debugSpeedPercent} 
-                                        onChange={(e) => setDebugSpeedPercent(Number(e.target.value))} 
-                                        onPointerDown={(e) => e.stopPropagation()}
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        className="speed-slider w-full h-2 rounded-lg cursor-pointer nodrag touch-action-none"
-                                        style={{
-                                            background: `linear-gradient(to right, #4f46e5 ${(debugSpeedPercent / 500) * 100}%, ${isDarkMode ? '#374151' : '#e5e7eb'} ${(debugSpeedPercent / 500) * 100}%)`
-                                        }}
-                                    />
-                                </div>
-                            )}
-                        </div>
+                       </div>
                     </div>
 
-                    <div className="w-72 pointer-events-auto flex justify-end">
-                        <DebuggerConsole 
-                             events={runtimeEvents}
-                        />
+                    <div className="flex-1 pointer-events-none flex justify-end">
+                        <div className="w-64 pointer-events-auto flex justify-end">
+                            <DebuggerConsole 
+                                 events={runtimeEvents}
+                            />
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1241,17 +1219,21 @@ function AppContent() {
               <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-semibold text-gray-700 dark:text-gray-300 flex justify-between items-center relative z-50">
                 <div className="flex items-center gap-2">
                   <span>{PANEL_TYPES[type].title}</span>
-                  <button onClick={(e) => { e.stopPropagation(); setTutorialType(type); setShowTutorial(true); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-1 ml-1" title={`Nápověda pro ${PANEL_TYPES[type].title}`}>
-                    <HelpCircle size={16} />
-                  </button>
+                  <Tooltip text={`Nápověda pro ${PANEL_TYPES[type].title}`} position="bottom">
+                    <button onClick={(e) => { e.stopPropagation(); setTutorialType(type); setShowTutorial(true); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-1 ml-1">
+                      <HelpCircle size={16} />
+                    </button>
+                  </Tooltip>
                 </div>
                 <div className="flex items-center gap-2">
                   
                   {type === 'drawio' && (
                     <div className="relative mr-1 settings-panel">
-                      <button onClick={(e) => { e.stopPropagation(); setSettingsDropdown(settingsDropdown === index ? null : index); setActiveDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors" title="Nastavení diagramu">
-                        <Settings size={16} />
-                      </button>
+                      <Tooltip text="Nastavení diagramu" position="bottom">
+                        <button onClick={(e) => { e.stopPropagation(); setSettingsDropdown(settingsDropdown === index ? null : index); setActiveDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors">
+                          <Settings size={16} />
+                        </button>
+                      </Tooltip>
                       {settingsDropdown === index && (
                         <div className="absolute right-0 top-full mt-3 w-64 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-xl z-50 p-4" onClick={e => e.stopPropagation()}>
                           
@@ -1293,6 +1275,32 @@ function AppContent() {
                                 logAction('SETTINGS_CHANGED', { showDebugger: checked });
                                 if(!checked) stopDebugger(); 
                             }} label="Debugger (Watch list)" />
+
+                            {showDebugger && (
+                                <>
+                                    <hr className="my-3 border-gray-200 dark:border-gray-700" />
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3 block">Možnosti Debuggeru</label>
+                                    <div className="flex flex-col">
+                                        <label className="text-xs font-bold text-gray-700 dark:text-gray-100 uppercase tracking-wider mb-2 flex justify-between">
+                                            Rychlost <span>{debugSpeedPercent}%</span>
+                                        </label>
+                                        <input 
+                                            type="range" 
+                                            min="0" 
+                                            max="500" 
+                                            step="10" 
+                                            value={debugSpeedPercent} 
+                                            onChange={(e) => setDebugSpeedPercent(Number(e.target.value))} 
+                                            onPointerDown={(e) => e.stopPropagation()}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                            className="speed-slider w-full h-2 rounded-lg cursor-pointer nodrag touch-action-none mb-1"
+                                            style={{
+                                                background: `linear-gradient(to right, #4f46e5 ${(debugSpeedPercent / 500) * 100}%, ${isDarkMode ? '#374151' : '#e5e7eb'} ${(debugSpeedPercent / 500) * 100}%)`
+                                            }}
+                                        />
+                                    </div>
+                                </>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1300,9 +1308,9 @@ function AppContent() {
                   )}
 
                   <div className="relative ml-1 dropdown-container">
-                    <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === index ? null : index); setSettingsDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors" title="Změnit okno">
+                    <Tooltip text="Změnit okno"><button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === index ? null : index); setSettingsDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors">
                       <ChevronDown size={16} />
-                    </button>
+                    </button></Tooltip>
                     {activeDropdown === index && (
                       <div className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 py-1 overflow-visible">
                         {Object.values(PANEL_TYPES).map(t => {

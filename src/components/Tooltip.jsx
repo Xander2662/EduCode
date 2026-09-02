@@ -18,9 +18,9 @@ export const Tooltip = ({ text, children, position = 'top' }) => {
     };
 
     return (
-        <div className="group relative flex items-center justify-center">
+        <div className="group relative w-fit h-fit flex items-center justify-center">
             {children}
-            <div className={`absolute z-[9999] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 group-hover:delay-1000 scale-95 group-hover:scale-100 whitespace-nowrap px-2.5 py-1.5 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-100 border border-gray-200 dark:border-gray-700 text-[11px] font-bold tracking-wide rounded shadow-md pointer-events-none ${positionClasses[position]}`}>
+            <div className={`absolute z-[9999] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 group-hover:delay-500 scale-95 group-hover:scale-100 whitespace-nowrap px-2.5 py-1.5 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-100 border border-gray-200 dark:border-gray-700 text-[11px] font-bold tracking-wide rounded shadow-md pointer-events-none ${positionClasses[position]}`}>
                 {text}
                 <div className={`absolute w-2 h-2 bg-white dark:bg-gray-700 transform rotate-45 ${arrowClasses[position]}`}></div>
             </div>

@@ -1,20 +1,20 @@
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, Background, MarkerType, useReactFlow, ConnectionLineType } from '@xyflow/react';
+import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, ControlButton, Background, MarkerType, useReactFlow, ConnectionLineType } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Download, Upload, Square, Circle, Diamond, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box, Hexagon, Columns, Link2 } from 'lucide-react';
+import { Download, Upload, Square, Circle, Diamond, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box, Hexagon, Columns, Link2, Plus, Minus, Maximize, Lock, Unlock } from 'lucide-react';
 import { drawioToReactFlow, reactFlowToDrawio } from '../utils/diagramConverter';
 import { getGroupDefs, computeGroupBounds } from '../utils/grouping';
 import { calculateRestructuredLayout } from '../utils/visualLayoutEngine';
 import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
 import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode, LoopContainerNode, ForContainerNode, SwitchContainerNode, CaseContainerNode } from './diagram/CustomNodes';
+import { Tooltip } from './Tooltip';
 
 const IoIcon = ({ size = 24, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <polygon points="8,3 22,3 16,21 2,21" />
   </svg>
 );
-
 const nodeTypes = { 
   ACTION: ActionNode, 
   IO: IONode, 
@@ -113,6 +113,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const selectedNodes = nodes.filter(n => n.selected);
   const selectedEdges = edges.filter(e => e.selected);
+  const [isInteractive, setIsInteractive] = useState(true);
 
   // =========================================================================================
   // CRITICAL WARNING: FOCUS STEALING PREVENTION
@@ -1373,12 +1374,16 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       )}
 
       <div className="absolute top-4 right-4 z-10 flex gap-2 bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700">
-        <label className={`p-2 rounded cursor-pointer text-gray-700 dark:text-gray-300 ${readOnly ? 'opacity-25 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}`} title="Import">
-          <Upload size={18}/>
-          <input type="file" accept=".xml,.drawio,.json" className="hidden" onChange={handleImport} disabled={readOnly} />
-        </label>
+        <Tooltip text="Import diagramu" position="bottom">
+          <label className={`p-2 rounded cursor-pointer text-gray-700 dark:text-gray-300 ${readOnly ? 'opacity-25 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+            <Upload size={18}/>
+            <input type="file" accept=".xml,.drawio,.json" className="hidden" onChange={handleImport} disabled={readOnly} />
+          </label>
+        </Tooltip>
         <div className="relative">
-            <button onClick={(e) => { e.stopPropagation(); setShowExportMenu(!showExportMenu); }} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-700 dark:text-gray-300 transition-colors" title="Export"><Download size={18}/></button>
+            <Tooltip text="Export diagramu" position="bottom">
+              <button onClick={(e) => { e.stopPropagation(); setShowExportMenu(!showExportMenu); }} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-700 dark:text-gray-300 transition-colors"><Download size={18}/></button>
+            </Tooltip>
             {showExportMenu && (
                 <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 flex flex-col py-1">
                     <button onClick={handleExportEduCode} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2"><FileJson size={14} className="text-indigo-500"/> EduCode (.xml)</button>
@@ -1391,6 +1396,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       <div className="w-full h-full" onContextMenu={handlePaneContextMenu}>
         <ReactFlow 
           nodes={allNodes} edges={edges} 
+          attributionPosition="bottom-left"
           multiSelectionKeyCode={['Control', 'Meta', 'Shift']}
           onNodesChange={(changes) => { 
               const isUserChange = changes.some(c => c.type !== 'dimensions' && c.type !== 'replace');
@@ -1420,12 +1426,17 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           maxZoom={3.0}
           connectionLineType={ConnectionLineType.SmoothStep}
           deleteKeyCode={null} selectionOnDrag={true} panOnDrag={[1, 2]} panOnScroll={true} selectionMode="full"
-          elementsSelectable={!readOnly}
-          nodesDraggable={!readOnly}
+          elementsSelectable={isInteractive && !readOnly}
+          nodesDraggable={isInteractive && !readOnly}
+          nodesConnectable={isInteractive && !readOnly}
           elevateNodesOnSelect={false}
         >
           <Background color={isDarkMode ? "#334155" : "#cbd5e1"} gap={16} />
-          <Controls />
+          <Controls showZoom={false} showFitView={false} showInteractive={false} className="mb-8">
+            <Tooltip text="Přiblížit" position="right"><ControlButton onClick={() => reactFlowInstance.zoomIn()}><Plus size={16}/></ControlButton></Tooltip>
+            <Tooltip text="Oddálit" position="right"><ControlButton onClick={() => reactFlowInstance.zoomOut()}><Minus size={16}/></ControlButton></Tooltip>
+            <Tooltip text="Přizpůsobit" position="right"><ControlButton onClick={() => reactFlowInstance.fitView({ padding: 0.2 })}><Maximize size={16}/></ControlButton></Tooltip>
+          </Controls>
         </ReactFlow>
       </div>
     </div>

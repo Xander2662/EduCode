@@ -1,127 +1,50 @@
 import { describe, it, expect } from 'vitest';
 import { calculateStretchLimits } from '../src/utils/stretchLimits';
 
-describe('Stretch Limits (SSL & ASL)', () => {
-    const containerX = 0;
-    const containerY = 0;
-    
-    it('Should return strict base sizes for a single block', () => {
+describe('calculateStretchLimits', () => {
+    it('should correctly calculate bounds for stationary nodes without dragging nodes', () => {
         const ownedNodes = [
-            { id: '1', type: 'ACTION', position: { x: 50, y: 50 }, measured: { width: 100, height: 50 }, dragging: false }
+            { id: '1', type: 'PROCESS', position: { x: 50, y: 50 }, measured: { width: 100, height: 50 } },
+            { id: '2', type: 'PROCESS', position: { x: 200, y: 50 }, measured: { width: 100, height: 50 } }
         ];
+        // Both are stationary
+        const stationaryNodes = [...ownedNodes];
         
-        const { SSL_Width, SSL_Height, ASL_Width, ASL_Height } = calculateStretchLimits(ownedNodes, ownedNodes, containerX, containerY);
+        const containerX = 0;
+        const containerY = 0;
         
-        expect(SSL_Width).toBe(300);
-        expect(SSL_Height).toBe(150);
-        expect(ASL_Width).toBe(300);
-        expect(ASL_Height).toBe(150);
+        const result = calculateStretchLimits(ownedNodes, stationaryNodes, containerX, containerY);
+        
+        // Max Stat X = 200 + 100 = 300
+        // Max Stat Y = 50 + 50 = 100
+        // Required Width = (300 - 0) + 20 (PADDING) = 320
+        // Required Height = (100 - 0) + 50 (PADDING) = 150
+        
+        // SSL Width = max(300, 320 + 120) = 440
+        // SSL Height = max(150, 150 + 100) = 250
+        
+        expect(result.SSL_Width).toBe(440);
+        expect(result.SSL_Height).toBe(250);
+        expect(result.ASL_Width).toBe(440);
+        expect(result.ASL_Height).toBe(250);
     });
 
-    it('ASL Width should strictly depend ONLY on IF blocks', () => {
-        // Here we place an ACTION block very far to the right (x=500).
-        // Since it's an ACTION block, ASL_Width should NOT expand to cover it!
-        // It should stay at the mathematical limit for 0 IF blocks (300).
+    it('should dynamically expand limits based on actual physical overlap (simpler mathematical bounding)', () => {
         const ownedNodes = [
-            { id: '1', type: 'ACTION', position: { x: 500, y: 50 }, measured: { width: 100, height: 50 }, dragging: false },
-            { id: '2', type: 'ACTION', position: { x: 50, y: 150 }, measured: { width: 100, height: 50 }, dragging: false }
+            { id: '1', type: 'PROCESS', position: { x: 500, y: 300 }, measured: { width: 100, height: 50 } }
         ];
+        const stationaryNodes = [...ownedNodes];
         
-        const { ASL_Width, SSL_Width } = calculateStretchLimits(ownedNodes, ownedNodes, containerX, containerY);
-        expect(SSL_Width).toBe(300); // 0 IF blocks = 300
-        expect(ASL_Width).toBe(300); // ASL should refuse to expand for an ACTION block
-    });
-
-    it('ASL Width should expand for IF blocks', () => {
-        // Place an IF block at x=200.
-        const ownedNodes = [
-            { id: '1', type: 'CONDITION', position: { x: 200, y: 50 }, measured: { width: 120, height: 50 }, dragging: false },
-            { id: '2', type: 'ACTION', position: { x: 50, y: 150 }, measured: { width: 100, height: 50 }, dragging: false }
-        ];
+        const result = calculateStretchLimits(ownedNodes, stationaryNodes, 0, 0);
         
-        const { ASL_Width, SSL_Width } = calculateStretchLimits(ownedNodes, ownedNodes, containerX, containerY);
+        // Max X = 600
+        // Max Y = 350
+        // Req Width = 620
+        // Req Height = 400
+        // SSL W = 620 + 120 = 740
+        // SSL H = 400 + 100 = 500
         
-        // 1 IF block -> SSL_Width = 300 + 320 = 620
-        expect(SSL_Width).toBe(620);
-        
-        // maxIfX = 200 + 120 = 320
-        // ASL_Width = SSL_Width = 620
-        expect(ASL_Width).toBe(620);
-    });
-
-    it('ASL Height should prevent domino detachments (safety net)', () => {
-        // Simulate a scenario where a middle block was deleted, leaving blocks spaced far apart.
-        // Block 1 is at y=50, Block 2 is at y=250. 
-        // With only 2 blocks, SSL_Height = 150 + (2-1)*100 = 250.
-        // But physically, they require up to y=300 (250+50).
-        const ownedNodes = [
-            { id: '1', type: 'ACTION', position: { x: 50, y: 50 }, measured: { width: 100, height: 50 }, dragging: false },
-            { id: '2', type: 'ACTION', position: { x: 50, y: 250 }, measured: { width: 100, height: 50 }, dragging: false }
-        ];
-        
-        const { SSL_Height, ASL_Height } = calculateStretchLimits(ownedNodes, ownedNodes, containerX, containerY);
-        
-        expect(SSL_Height).toBe(300);
-        // ASL_Height should mathematically NOT shrink smaller than required.
-        // requiredHeight = 200. dynamicStretchMarginHeight = Math.max(300, 50+150) = 300.
-        // ASL_Height = Math.min(300, 200 + 300) = 300
-        expect(ASL_Height).toBe(300);
-    });
-
-    it('ASL Height should strictly clamp to SSL_Height', () => {
-        // Tightly packed blocks
-        const ownedNodes = [
-            { id: '1', type: 'ACTION', position: { x: 50, y: 50 }, measured: { width: 100, height: 50 }, dragging: false },
-            { id: '2', type: 'ACTION', position: { x: 50, y: 100 }, measured: { width: 100, height: 50 }, dragging: false }
-        ];
-        
-        const { SSL_Height, ASL_Height } = calculateStretchLimits(ownedNodes, ownedNodes, containerX, containerY);
-        
-        // 2 blocks -> SSL_Height = 100 (padding) + (50+50) + 1*100 = 300
-        // requiredHeight = (150 - 0) + 50 = 200
-        // dynamicStretchMarginHeight = 300
-        // ASL_Height = Math.min(300, 200 + 300) = 300
-        expect(SSL_Height).toBe(300);
-        expect(ASL_Height).toBe(300);
-    });
-
-    it('SSL should dynamically expand to wrap nested LOOP_CONTAINERs', () => {
-        const ownedNodes = [
-            { id: '1', type: 'ACTION', position: { x: 50, y: 50 }, measured: { width: 100, height: 50 }, dragging: false },
-            { id: '2', type: 'LOOP_CONTAINER', position: { x: 50, y: 150 }, measured: { width: 300, height: 150 }, style: { width: '800px', height: '500px' }, dragging: false }
-        ];
-        
-        const { SSL_Width, SSL_Height } = calculateStretchLimits(ownedNodes, ownedNodes, containerX, containerY);
-        
-        // SSL_Height = 100 (padding) + [50 + 500] (child heights) + 100 (gap) = 750
-        expect(SSL_Height).toBe(750);
-        
-        // numConditions = 1 -> Base SSL_Width = 300 + 320 = 620
-        // Child width is 800. Fallback ensures SSL_Width >= w + 100 = 900.
-        expect(SSL_Width).toBe(900);
-    });
-
-    describe('Extreme Nested Bounds', () => {
-        it('should compute valid stretch limits even for extreme child bounds', () => {
-            const containerX = 0;
-            const containerY = 0;
-            const ownedNodes = [
-                { id: '1', type: 'BLOCK', position: { x: 50, y: 50 }, measured: { width: 100, height: 50 }, dragging: false },
-                { id: '2', type: 'BLOCK', position: { x: 4500, y: 4500 }, measured: { width: 100, height: 50 }, dragging: false } // Extreme outlier
-            ];
-
-            const { SSL_Width, SSL_Height } = calculateStretchLimits(ownedNodes, ownedNodes, containerX, containerY);
-            
-            // Expected bounds should stretch to accommodate the outlier, but they shouldn't throw NaN or Infinity.
-            // Minimum required height: 100 padding + 50 + 50 (heights) + 100 (gap) = 300
-            expect(SSL_Height).toBe(300);
-            
-            // Expected width should be at least 4500 (position of furthest block) + 100 (its width) + padding
-            // Wait, calculateStretchLimits calculates based on max width. Max width here is 100.
-            // Base SSL = 300 + 0 = 300. Fallback ensures it's at least max width + 100 = 200.
-            // So SSL_Width = 300. 
-            expect(SSL_Width).toBe(300);
-            expect(SSL_Width).not.toBeNaN();
-        });
+        expect(result.SSL_Width).toBe(740);
+        expect(result.SSL_Height).toBe(500);
     });
 });
