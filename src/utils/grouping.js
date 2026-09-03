@@ -1,4 +1,5 @@
 export const getGroupDefs = (nodes, edges) => {
+    if (!Array.isArray(nodes) || !Array.isArray(edges)) return [];
     const groupDefs = [];
     let gId = 0;
     const visited = new Set();
@@ -94,6 +95,12 @@ export const getGroupDefs = (nodes, edges) => {
                     }
                 }
 
+                // Include conditionNode (the block which starts the cycle) so the loop container covers the whole cycle
+                lGrp.add(conditionNode.id);
+                if (tgt && tgt.type === 'MERGE') {
+                    lGrp.add(tgt.id);
+                }
+
                 groupDefs.push({ id: `bg-loop-${gId++}`, type: 'LOOP', nodes: Array.from(lGrp), routeLeft });
             }
         }
@@ -102,6 +109,7 @@ export const getGroupDefs = (nodes, edges) => {
 };
 
 export const computeGroupBounds = (nodes, groupDefs) => {
+    if (!Array.isArray(nodes) || !Array.isArray(groupDefs)) return [];
     return groupDefs.map(g => {
          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
          g.nodes.forEach(nid => {
@@ -121,14 +129,14 @@ export const computeGroupBounds = (nodes, groupDefs) => {
          let padTop = 35, padBottom = 35, padLeft = 35, padRight = 35;
          
          if (g.type === 'LOOP') {
-             padTop = 50;     
-             padBottom = 50;  
+             padTop = 45;     
+             padBottom = 45;  
              if (g.routeLeft) {
-                 padLeft = 135; 
-                 padRight = 45;
+                 padLeft = 85; 
+                 padRight = 40;
              } else {
-                 padLeft = 45;
-                 padRight = 135; 
+                 padLeft = 40;
+                 padRight = 85; 
              }
          }
 
@@ -148,7 +156,7 @@ export const computeGroupBounds = (nodes, groupDefs) => {
              height: groupH, 
              data: { bgColor, borderColor, width: groupW, height: groupH },
              style: { width: groupW, height: groupH, pointerEvents: 'none', opacity: 1 },
-             zIndex: -15000,
+             zIndex: g.type === 'LOOP' ? -16000 : -15000,
              selectable: false,
              draggable: false,
              focusable: false,

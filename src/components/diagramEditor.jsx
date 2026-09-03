@@ -9,6 +9,7 @@ import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
 import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode, LoopContainerNode, ForContainerNode, SwitchContainerNode, CaseContainerNode } from './diagram/CustomNodes';
 import { Tooltip } from './Tooltip';
+import { checkHotkey } from '../utils/hotkeys';
 
 const IoIcon = ({ size = 24, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -30,7 +31,8 @@ const nodeTypes = {
 };
 const edgeTypes = { customEdge: CustomEdge };
 
-function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, isDarkMode, groupColoring, showDebugger, conditionShape, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction, onRequestTutorial, editorMode }) {
+function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, isDarkMode, groupColoring, showDebugger, conditionShape, selectionMode, hotkeys, activeWindowRef, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction, onRequestTutorial, editorMode }) {
+  const safeHotkeys = hotkeys || {};
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
@@ -525,38 +527,95 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         return;
       }
       
-      if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput && (selectedNodes.length > 0 || selectedEdges.length > 0)) {
+      const safeHotkeys = hotkeys || {};
+
+      // Configurable F2 / rename hotkey (works automatically for the hovered block without selecting, or fallback to selected)
+      if (checkHotkey(e, safeHotkeys.rename || ['F2']) && !isInput) {
+        let targetNodeEl = null;
+
+        // 1. Try to find the block under current mouse cursor
+        if (lastMousePosRef.current && (lastMousePosRef.current.x || lastMousePosRef.current.y)) {
+          const elUnderCursor = document.elementFromPoint(lastMousePosRef.current.x, lastMousePosRef.current.y);
+          targetNodeEl = elUnderCursor?.closest('.react-flow__node');
+        }
+
+        // 2. If not hovering over a node, fallback to the single selected node (if any)
+        if (!targetNodeEl && selectedNodes.length === 1) {
+          targetNodeEl = document.querySelector(`.react-flow__node[data-id="${selectedNodes[0].id}"]`);
+        }
+
+        if (targetNodeEl) {
+          e.preventDefault();
+
+          // For container blocks with tags (WHILE, FOR, SWITCH, CASE): start typing directly into the tag input!
+          const tagInput = targetNodeEl.querySelector('.custom-drag-handle input, .custom-drag-handle textarea');
+          if (tagInput) {
+            tagInput.focus();
+            if (tagInput.select) tagInput.select();
+            return;
+          }
+
+          // For standard blocks (ACTION, CONDITION, IO, START, COMMENT): activate double-click edit without selecting
+          targetNodeEl.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+          const innerEditable = targetNodeEl.querySelector('.react-flow__node-default, [onDoubleClick], textarea, input');
+          if (innerEditable) {
+            innerEditable.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+          }
+
+          setTimeout(() => {
+            const inputEl = targetNodeEl.querySelector('textarea, input:not([type="checkbox"]):not([type="radio"])');
+            if (inputEl) {
+              inputEl.focus();
+              if (inputEl.select) inputEl.select();
+            }
+          }, 15);
+          return;
+        }
+      }
+
+      // If user is typing in an input/textarea (pseudocode, python, inputs, etc.):
+      // Do NOT hijack native editing shortcuts (Ctrl+Z, Ctrl+Y, Ctrl+C, Ctrl+V, etc.)
+      // Only allow Alt-based shortcuts for diagram actions while in an input.
+      if (isInput && !e.altKey) return;
+
+      // When focus is on none (e.g. body, header, outside), only react if Diagram was the last active window!
+      if (!isInput && activeWindowRef && activeWindowRef.current !== 'drawio') {
+        return;
+      }
+
+      if (checkHotkey(e, safeHotkeys.delete) && !isInput && (selectedNodes.length > 0 || selectedEdges.length > 0)) {
         e.preventDefault(); setDeleteConfirm(true);
-      }
-      if (e.key === 'F2' && selectedNodes.length === 1) {
-        e.preventDefault();
-        const inputEl = document.getElementById(`input-${selectedNodes[0].id}`) || document.querySelector(`.react-flow__node[data-id="${selectedNodes[0].id}"] textarea`);
-        if (inputEl) { setTimeout(() => { inputEl.focus(); inputEl.select(); }, 10); setNodes(nds => nds.map(n => ({ ...n, selected: false }))); }
-      }
-      if (e.key === 'a' && (e.ctrlKey || e.metaKey) && !isInput) {
+      } else if (checkHotkey(e, safeHotkeys.selectAll) && !isInput) {
         e.preventDefault();
         setNodes(nds => nds.map(n => ({ ...n, selected: true })));
         setEdges(eds => eds.map(edge => ({ ...edge, selected: true })));
-      }
-      if (e.key === 'c' && (e.ctrlKey || e.metaKey) && !isInput) { e.preventDefault(); handleCopy(); }
-      if (e.key === 'v' && (e.ctrlKey || e.metaKey) && !isInput) { e.preventDefault(); handlePaste(); }
-      if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey || e.altKey)) {
-        if (isInput && !e.altKey) return;
+      } else if (checkHotkey(e, safeHotkeys.copy) && !isInput) { 
+        e.preventDefault(); handleCopy(); 
+      } else if (checkHotkey(e, safeHotkeys.paste) && !isInput) { 
+        e.preventDefault(); handlePaste(); 
+      } else if (checkHotkey(e, safeHotkeys.undo)) {
+        e.preventDefault(); handleUndo();
+      } else if (checkHotkey(e, safeHotkeys.redo)) {
+        e.preventDefault(); handleRedo();
+      } else if (checkHotkey(e, safeHotkeys.zoomIn || ['Ctrl++', 'Ctrl+=']) && !isInput) {
+        e.preventDefault(); reactFlowInstance?.zoomIn();
+      } else if (checkHotkey(e, safeHotkeys.zoomOut || ['Ctrl+-']) && !isInput) {
+        e.preventDefault(); reactFlowInstance?.zoomOut();
+      } else if (checkHotkey(e, safeHotkeys.contextMenu) && !isInput) {
         e.preventDefault();
-        if (e.shiftKey) {
-          handleRedo();
-        } else {
-          handleUndo();
-        }
-      }
-      if ((e.key === 'y' || e.key === 'Y') && (e.ctrlKey || e.metaKey || e.altKey) && !isInput) {
-        e.preventDefault();
-        handleRedo();
+        setContextMenu(prev => {
+          if (prev) return null;
+          const flowEl = document.querySelector('.react-flow');
+          const bounds = flowEl ? flowEl.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+          const mouseX = lastMousePosRef.current ? lastMousePosRef.current.x : (bounds.left + bounds.width / 2);
+          const mouseY = lastMousePosRef.current ? lastMousePosRef.current.y : (bounds.top + bounds.height / 2);
+          return { mouseX, mouseY, connectSource: null };
+        });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete, handleCopy, handlePaste, handleUndo, handleRedo, setNodes, setEdges]);
+  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete, handleCopy, handlePaste, handleUndo, handleRedo, setNodes, setEdges, hotkeys, reactFlowInstance]);
 
   const getHitEdge = (event, draggedNodes, currentEdges) => {
     const clientX = event.clientX || (event.touches && event.touches[0].clientX);
@@ -1169,6 +1228,36 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const btnClass = `p-2 rounded transition-opacity disabled:opacity-25 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 ${colorMode ? "text-gray-700 dark:text-gray-300" : "text-gray-500 dark:text-gray-400"}`;
 
+  const panActivationKeyCode = useMemo(() => {
+    const slots = Array.isArray(safeHotkeys.pan) ? safeHotkeys.pan : (safeHotkeys.pan ? [safeHotkeys.pan] : []);
+    const keySlot = slots.find(s => !s.toLowerCase().includes('mouse'));
+    return keySlot || 'Space';
+  }, [safeHotkeys.pan]);
+
+  const multiSelectionKeyCode = useMemo(() => {
+    const slots = Array.isArray(safeHotkeys.multiSelect) ? safeHotkeys.multiSelect : (safeHotkeys.multiSelect ? [safeHotkeys.multiSelect] : []);
+    const keys = [];
+    slots.forEach(s => {
+      const lower = s.toLowerCase();
+      if (lower.includes('ctrl')) keys.push('Control', 'Meta');
+      if (lower.includes('shift')) keys.push('Shift');
+      if (lower.includes('alt')) keys.push('Alt');
+    });
+    return keys.length > 0 ? keys : ['Control', 'Meta'];
+  }, [safeHotkeys.multiSelect]);
+
+  const selectionKeyCode = useMemo(() => {
+    const slots = Array.isArray(safeHotkeys.lassoSelect) ? safeHotkeys.lassoSelect : (safeHotkeys.lassoSelect ? [safeHotkeys.lassoSelect] : []);
+    const keys = [];
+    slots.forEach(s => {
+      const lower = s.toLowerCase();
+      if (lower.includes('shift')) keys.push('Shift');
+      if (lower.includes('ctrl')) keys.push('Control', 'Meta');
+      if (lower.includes('alt')) keys.push('Alt');
+    });
+    return keys.length > 0 ? keys : ['Shift'];
+  }, [safeHotkeys.lassoSelect]);
+
   return (
     <div className="w-full h-full relative outline-none" tabIndex={0} onClick={() => { setContextMenu(null); setShowExportMenu(false); }} onPointerMove={handlePointerMove} onPointerUp={clearHover} onPointerLeave={clearHover}>
       <style>{`.react-flow__edge.drop-target .react-flow__edge-path { stroke: #4f46e5 !important; stroke-width: 4px !important; filter: drop-shadow(0 0 6px rgba(79,70,229,0.5)); transition: all 0.2s ease; }`}</style>
@@ -1425,11 +1514,15 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           minZoom={0.2}
           maxZoom={3.0}
           connectionLineType={ConnectionLineType.SmoothStep}
-          deleteKeyCode={null} selectionOnDrag={true} panOnDrag={[1, 2]} panOnScroll={true} selectionMode="full"
+          deleteKeyCode={null} selectionOnDrag={true} panOnDrag={[1, 2]} panOnScroll={true} selectionMode={selectionMode === 'full' ? 'full' : 'partial'}
+          multiSelectionKeyCode={multiSelectionKeyCode}
+          selectionKeyCode={selectionKeyCode}
+          panActivationKeyCode={panActivationKeyCode}
           elementsSelectable={isInteractive && !readOnly}
           nodesDraggable={isInteractive && !readOnly}
           nodesConnectable={isInteractive && !readOnly}
           elevateNodesOnSelect={false}
+          zoomOnDoubleClick={false}
         >
           <Background color={isDarkMode ? "#334155" : "#cbd5e1"} gap={16} />
           <Controls showZoom={false} showFitView={false} showInteractive={false} className="mb-8">

@@ -5,6 +5,7 @@ import { parsePseudocodeToDrawio } from './parsers/pseudocodeToDiagram';
 import { parseDrawioToPython } from './parsers/diagramToPython';
 import { parsePythonToPseudocode } from './parsers/pythonToPseudocode';
 import { Tooltip } from './components/Tooltip';
+import { SettingsDialog } from './components/SettingsDialog';
 import { DiagramRunner } from './utils/runner';
 import { drawioToReactFlow } from './utils/diagramConverter';
 import DiagramEditor from './components/diagramEditor';
@@ -193,7 +194,7 @@ const ErrorItem = ({ error }) => {
         <li className="flex flex-col gap-1 mb-1">
             <div className="flex justify-between items-start gap-2">
                 <span className="flex-1">{errorPrefix}{errorText}</span>
-                <Tooltip text="Vysvětlení chyby">
+                <Tooltip text="Vysvětlení chyby" position="left">
                     <button onClick={() => setExpanded(!expanded)} className="text-red-500 hover:text-red-700 bg-red-100/50 dark:bg-red-800/30 p-1 rounded transition-colors shrink-0">
                         <HelpCircle size={14} />
                     </button>
@@ -208,13 +209,73 @@ const ErrorItem = ({ error }) => {
     );
 };
 
-const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], runtimeActiveLine = null, onCursorChange, onInteract, onBlur, breakpoints = [], nodeLineMap = {}, onBreakpointToggle, showDebugger }) => {
+const LineNumberedTextarea = React.forwardRef(({ value, onChange, readOnly, placeholder, hasErrors, blocks = [], highlightLines = [], runtimeActiveLine = null, onCursorChange, onInteract, onBlur, breakpoints = [], nodeLineMap = {}, onBreakpointToggle, showDebugger }, ref) => {
   const lineCount = value?.split('\n').length || 1;
   const textareaRef = useRef(null);
   const lineNumbersRef = useRef(null);
   const overlayRef = useRef(null);
   const highlightRef = useRef(null);
   const [copied, setCopied] = useState(false);
+
+  // VS Code-style word-batched Undo/Redo history
+  const historyRef = useRef([{ value: value || '', selectionStart: 0, selectionEnd: 0 }]);
+  const historyIndexRef = useRef(0);
+  const lastTypeRef = useRef(null);
+  const typingTimerRef = useRef(null);
+  const isInternalRef = useRef(false);
+
+  const getCharType = (char) => {
+    if (!char) return 'none';
+    if (char === '\n') return 'newline';
+    if (/\s/.test(char)) return 'space';
+    if (/[\w\u00C0-\u024F]/.test(char)) return 'word'; // Alphanumeric including Czech accents
+    return 'punct';
+  };
+
+  const pushSnapshot = (newValue, cursorStart, cursorEnd) => {
+    historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+    historyRef.current.push({
+      value: newValue,
+      selectionStart: cursorStart,
+      selectionEnd: cursorEnd
+    });
+    if (historyRef.current.length > 200) historyRef.current.shift();
+    historyIndexRef.current = historyRef.current.length - 1;
+  };
+
+  const updateCurrentSnapshot = (newValue, cursorStart, cursorEnd) => {
+    if (historyRef.current[historyIndexRef.current]) {
+      historyRef.current[historyIndexRef.current] = {
+        value: newValue,
+        selectionStart: cursorStart,
+        selectionEnd: cursorEnd
+      };
+    }
+  };
+
+  // Sync external changes (e.g. from diagram or other panels) into history
+  useEffect(() => {
+    if (isInternalRef.current) return;
+    const currentSnapshot = historyRef.current[historyIndexRef.current];
+    if (currentSnapshot && currentSnapshot.value === value) return;
+
+    const newSnapshot = {
+      value: value || '',
+      selectionStart: textareaRef.current?.selectionStart || 0,
+      selectionEnd: textareaRef.current?.selectionEnd || 0
+    };
+    historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+    historyRef.current.push(newSnapshot);
+    if (historyRef.current.length > 200) historyRef.current.shift();
+    historyIndexRef.current = historyRef.current.length - 1;
+    lastTypeRef.current = null;
+  }, [value]);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    };
+  }, []);
 
   const handleScroll = (e) => {
     const top = e.target.scrollTop;
@@ -229,20 +290,151 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleInteraction = (e) => {
-    if (e.type === 'keydown' && e.key === 'Tab') {
-      e.preventDefault();
-      const start = e.target.selectionStart;
-      const end = e.target.selectionEnd;
-      const spaces = '    ';
-      const newValue = value.substring(0, start) + spaces + value.substring(end);
-      if (onChange) onChange({ target: { value: newValue } });
+  const handleTextChange = (e) => {
+    const newValue = e.target.value;
+    const cursorStart = e.target.selectionStart;
+    const cursorEnd = e.target.selectionEnd;
+    const prevValue = historyRef.current[historyIndexRef.current]?.value ?? '';
+
+    isInternalRef.current = true;
+    if (onInteract) onInteract();
+    onChange(e);
+
+    const diff = newValue.length - prevValue.length;
+
+    if (diff > 0) {
+      if (diff > 1) {
+        // Multi-char insert (paste / autocompletion) -> distinct undo step
+        pushSnapshot(newValue, cursorStart, cursorEnd);
+        lastTypeRef.current = null;
+      } else {
+        // Single character typed
+        const insertedChar = newValue[cursorStart - 1] || '';
+        const charType = getCharType(insertedChar);
+        const prevType = lastTypeRef.current;
+
+        if (prevType === null || charType !== prevType || charType === 'newline') {
+          // Token boundary (word -> space, space -> word, punctuation, newline) -> new undo step
+          pushSnapshot(newValue, cursorStart, cursorEnd);
+        } else {
+          // Same token type (typing consecutive letters of a word) -> batch into current step
+          updateCurrentSnapshot(newValue, cursorStart, cursorEnd);
+        }
+        lastTypeRef.current = charType;
+
+        if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = setTimeout(() => {
+          lastTypeRef.current = null;
+        }, 600);
+      }
+    } else if (diff < 0) {
+      // Deletion (backspace or delete)
+      if (lastTypeRef.current !== 'delete') {
+        pushSnapshot(newValue, cursorStart, cursorEnd);
+      } else {
+        updateCurrentSnapshot(newValue, cursorStart, cursorEnd);
+      }
+      lastTypeRef.current = 'delete';
+
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(() => {
+        lastTypeRef.current = null;
+      }, 600);
+    } else {
+      pushSnapshot(newValue, cursorStart, cursorEnd);
+      lastTypeRef.current = null;
+    }
+
+    setTimeout(() => {
+      isInternalRef.current = false;
+    }, 0);
+  };
+
+  const triggerUndo = () => {
+    if (historyIndexRef.current > 0) {
+      historyIndexRef.current--;
+      const snapshot = historyRef.current[historyIndexRef.current];
+      isInternalRef.current = true;
+      if (onChange) onChange({ target: { value: snapshot.value } });
       setTimeout(() => {
         if (textareaRef.current) {
-          textareaRef.current.selectionStart = textareaRef.current.selectionEnd = start + spaces.length;
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
         }
+        isInternalRef.current = false;
       }, 0);
-      return;
+      lastTypeRef.current = null;
+      return true;
+    }
+    return false;
+  };
+
+  const triggerRedo = () => {
+    if (historyIndexRef.current < historyRef.current.length - 1) {
+      historyIndexRef.current++;
+      const snapshot = historyRef.current[historyIndexRef.current];
+      isInternalRef.current = true;
+      if (onChange) onChange({ target: { value: snapshot.value } });
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+        }
+        isInternalRef.current = false;
+      }, 0);
+      lastTypeRef.current = null;
+      return true;
+    }
+    return false;
+  };
+
+  React.useImperativeHandle(ref, () => ({
+    undo: triggerUndo,
+    redo: triggerRedo,
+    focus: () => textareaRef.current?.focus()
+  }));
+
+  const handleInteraction = (e) => {
+    if (e.type === 'keydown') {
+      const isUndo = (e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey && !e.altKey;
+      const isRedo = ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) ||
+                     ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'z' || e.key === 'Z'));
+
+      if (isUndo) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerUndo();
+        return;
+      }
+
+      if (isRedo) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerRedo();
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = e.target.selectionStart;
+        const end = e.target.selectionEnd;
+        const spaces = '    ';
+        const newValue = value.substring(0, start) + spaces + value.substring(end);
+        const newCursor = start + spaces.length;
+
+        isInternalRef.current = true;
+        if (onChange) onChange({ target: { value: newValue } });
+        pushSnapshot(newValue, newCursor, newCursor);
+        lastTypeRef.current = null;
+
+        setTimeout(() => {
+          if (textareaRef.current) {
+            textareaRef.current.selectionStart = textareaRef.current.selectionEnd = newCursor;
+          }
+          isInternalRef.current = false;
+        }, 0);
+        return;
+      }
     }
 
     if (onInteract) onInteract();
@@ -310,7 +502,7 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
         ref={textareaRef}
         className={`flex-1 w-full p-4 resize-none focus:outline-none font-mono text-sm bg-transparent leading-6 whitespace-pre relative z-10 ${hasErrors ? 'text-red-700 dark:text-red-300' : 'text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/50'}`}
         value={value}
-        onChange={(e) => { if (onInteract) onInteract(); onChange(e); }}
+        onChange={handleTextChange}
         onScroll={handleScroll}
         onClick={handleInteraction}
         onKeyDown={handleInteraction}
@@ -320,7 +512,7 @@ const LineNumberedTextarea = ({ value, onChange, readOnly, placeholder, hasError
       />
     </div>
   );
-};
+});
 
 const ToggleSwitch = ({ checked, onChange, label }) => (
   <label className="flex items-center justify-between cursor-pointer w-full group py-1.5">
@@ -392,9 +584,52 @@ function AppContent() {
 
   const [edgeStyle, setEdgeStyle] = useState(localStorage.getItem('edgeStyle') || 'true-false');
   const [colorMode, setColorMode] = useState(localStorage.getItem('colorMode') !== 'false');
+  const [conditionShape, setConditionShape] = useState(localStorage.getItem('conditionShape') || 'hexagon');
+  
+  const defaultHotkeys = {
+    undo: ['Ctrl+Z', 'Alt+Z'],
+    redo: ['Ctrl+Y', 'Ctrl+Shift+Z'],
+    delete: ['Delete', 'Backspace'],
+    copy: ['Ctrl+C'],
+    paste: ['Ctrl+V'],
+    selectAll: ['Ctrl+A'],
+    rename: ['F2'],
+    zoomIn: ['Ctrl++', 'Ctrl+='],
+    zoomOut: ['Ctrl+-'],
+    pan: ['Mouse 3'],
+    contextMenu: ['Mouse 2'],
+    multiSelect: ['Ctrl+Klik'],
+    lassoSelect: ['Shift+Tažení']
+  };
+
+  const normalizeHotkeys = (stored) => {
+    if (!stored || typeof stored !== 'object') return defaultHotkeys;
+    const res = { ...defaultHotkeys };
+    for (const key of Object.keys(defaultHotkeys)) {
+      if (stored[key]) {
+        if (Array.isArray(stored[key])) {
+          res[key] = stored[key].length > 0 ? stored[key] : defaultHotkeys[key];
+        } else if (typeof stored[key] === 'string') {
+          res[key] = [stored[key]];
+          if (key === 'undo' && !res[key].includes('Alt+Z')) res[key].push('Alt+Z');
+          if (key === 'redo' && !res[key].includes('Ctrl+Shift+Z')) res[key].push('Ctrl+Shift+Z');
+          if (key === 'delete' && !res[key].includes('Backspace')) res[key].push('Backspace');
+        }
+      }
+    }
+    return res;
+  };
+
+  const [hotkeys, setHotkeys] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('hotkeys'));
+      return normalizeHotkeys(parsed);
+    } catch { return defaultHotkeys; }
+  });
+  const [selectionMode, setSelectionMode] = useState(localStorage.getItem('selectionMode') || 'partial');
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [groupColoring, setGroupColoring] = useState(localStorage.getItem('groupColoring') === 'true');
   const [showDebugger, setShowDebugger] = useState(localStorage.getItem('showDebugger') === 'true');
-  const [conditionShape, setConditionShape] = useState(localStorage.getItem('conditionShape') || 'hexagon');
   const [editorMode, setEditorMode] = useState(localStorage.getItem('editorMode') || 'simple');
 
   const [selectedNodeIds, setSelectedNodeIds] = useState([]);
@@ -424,6 +659,41 @@ function AppContent() {
 
   const activeWindow = useRef('drawio'); 
   const lastEdited = useRef('drawio'); 
+  const pseudocodeRef = useRef(null);
+  const pythonRef = useRef(null);
+
+  // When focus is on NONE (e.g. clicked outside in margin, header, or body),
+  // route Undo (Ctrl+Z) and Redo (Ctrl+Y / Ctrl+Shift+Z) to the last focused window!
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      const isUndo = (e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey && !e.altKey;
+      const isRedo = ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) ||
+                     ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'z' || e.key === 'Z'));
+
+      if (!isUndo && !isRedo) return;
+
+      const activeEl = document.activeElement;
+      const isInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
+      // If already focused inside an input/textarea, that element's own listener handles it
+      if (isInput) return;
+
+      // Focus is on NONE: route undo/redo to the last focused window
+      if (activeWindow.current === 'pseudocode' && pseudocodeRef.current) {
+        e.preventDefault();
+        if (isUndo) pseudocodeRef.current.undo();
+        else if (isRedo) pseudocodeRef.current.redo();
+      } else if (activeWindow.current === 'python' && pythonRef.current) {
+        e.preventDefault();
+        if (isUndo) pythonRef.current.undo();
+        else if (isRedo) pythonRef.current.redo();
+      }
+      // If activeWindow.current === 'drawio', DiagramEditor's listener will handle it
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []); 
 
   // --- Záznamník akcí (Testing) ---
   const [actionLogs, setActionLogs] = useState([]);
@@ -946,6 +1216,9 @@ function AppContent() {
             groupColoring={groupColoring}
             showDebugger={showDebugger}
             conditionShape={conditionShape}
+            selectionMode={selectionMode}
+            hotkeys={hotkeys}
+            activeWindowRef={activeWindow}
             onSelectionChange={handleSelectionChange}
             externalSelectedIds={isDebuggerActive && runtimeActiveNodeId ? [runtimeActiveNodeId] : externalSelectedIds}
             activeRuntimeNodeId={runtimeActiveNodeId}
@@ -1112,6 +1385,7 @@ function AppContent() {
       return (
         <div className="flex-1 flex flex-col overflow-hidden relative bg-white dark:bg-gray-900">
           <LineNumberedTextarea 
+            ref={pythonRef}
             value={pythonCode} 
             onChange={(e) => { lastEdited.current = 'python'; activeWindow.current = 'python'; setPythonCode(e.target.value); }}
             onInteract={() => { activeWindow.current = 'python'; lastEdited.current = 'python'; }}
@@ -1147,6 +1421,7 @@ function AppContent() {
           )}
 
           <LineNumberedTextarea
+            ref={pseudocodeRef}
             value={pseudocode}
             onChange={(e) => { lastEdited.current = 'pseudocode'; activeWindow.current = 'pseudocode'; setPseudocode(e.target.value); }}
             onInteract={() => { activeWindow.current = 'pseudocode'; lastEdited.current = 'pseudocode'; }}
@@ -1228,8 +1503,8 @@ function AppContent() {
           <React.Fragment key={type}>
             <div 
               className={`flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 relative transition-all ${activeDropdown === index || settingsDropdown === index ? 'z-50 overflow-visible' : 'z-10 overflow-hidden'}`}
-              onPointerDownCapture={() => { if (type === 'drawio' || type === 'pseudocode') lastEdited.current = type; }}
-              onKeyDownCapture={() => { if (type === 'drawio' || type === 'pseudocode') lastEdited.current = type; }}
+              onPointerDownCapture={() => { activeWindow.current = type; lastEdited.current = type; }}
+              onKeyDownCapture={() => { activeWindow.current = type; lastEdited.current = type; }}
             >
               <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-semibold text-gray-700 dark:text-gray-300 flex justify-between items-center relative z-50">
                 <div className="flex items-center gap-2">
@@ -1245,80 +1520,10 @@ function AppContent() {
                   {type === 'drawio' && (
                     <div className="relative mr-1 settings-panel">
                       <Tooltip text="Nastavení diagramu" position="bottom">
-                        <button onClick={(e) => { e.stopPropagation(); setSettingsDropdown(settingsDropdown === index ? null : index); setActiveDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors">
+                        <button onClick={(e) => { e.stopPropagation(); setShowSettingsDialog(true); setActiveDropdown(null); }} className="flex items-center justify-center w-6 h-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-400 transition-colors">
                           <Settings size={16} />
                         </button>
                       </Tooltip>
-                      {settingsDropdown === index && (
-                        <div className="absolute right-0 top-full mt-3 w-64 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-xl z-50 p-4" onClick={e => e.stopPropagation()}>
-                          
-                          <CustomSelect 
-                            label="Pravda / Nepravda alias"
-                            value={edgeStyle}
-                            onChange={(val) => { setEdgeStyle(val); localStorage.setItem('edgeStyle', val); logAction('SETTINGS_CHANGED', { edgeStyle: val }); }}
-                            options={[
-                              {value: 'true-false', label: 'True / False'},
-                              {value: 'ano-ne', label: 'Ano / Ne'},
-                              {value: 'yes-no', label: 'Yes / No'},
-                              {value: '+-', label: '+ / -'}
-                            ]}
-                          />
-
-                          <CustomSelect 
-                            label="Tvar podmínky"
-                            value={conditionShape}
-                            onChange={(val) => { setConditionShape(val); localStorage.setItem('conditionShape', val); logAction('SETTINGS_CHANGED', { conditionShape: val }); }}
-                            options={[
-                              {value: 'hexagon', label: 'Šestiúhelník'},
-                              {value: 'diamond', label: 'Kosočtverec'}
-                            ]}
-                          />
-
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">Režim editoru</label>
-                            <div className="flex bg-gray-100/80 dark:bg-gray-900/80 rounded-lg p-1 mb-4">
-                                <button onClick={() => { setEditorMode('simple'); localStorage.setItem('editorMode', 'simple'); logAction('SETTINGS_CHANGED', { editorMode: 'simple' }); }} className={`flex-1 text-xs py-1.5 px-2 rounded-md font-medium transition-colors ${editorMode === 'simple' ? 'bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Začátečník</button>
-                                <button onClick={() => { setEditorMode('advanced'); localStorage.setItem('editorMode', 'advanced'); logAction('SETTINGS_CHANGED', { editorMode: 'advanced' }); }} className={`flex-1 text-xs py-1.5 px-2 rounded-md font-medium transition-colors ${editorMode === 'advanced' ? 'bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Pokročilý</button>
-                            </div>
-                            
-                            <ToggleSwitch checked={colorMode} onChange={e => { setColorMode(e.target.checked); localStorage.setItem('colorMode', e.target.checked); logAction('SETTINGS_CHANGED', { colorMode: e.target.checked }); }} label="Barevné bloky" />
-                            <ToggleSwitch checked={groupColoring} onChange={e => { setGroupColoring(e.target.checked); localStorage.setItem('groupColoring', e.target.checked); logAction('SETTINGS_CHANGED', { groupColoring: e.target.checked }); }} label="Zbarvení skupin" />
-                            <ToggleSwitch checked={showDebugger} onChange={e => { 
-                                const checked = e.target.checked;
-                                setShowDebugger(checked); 
-                                localStorage.setItem('showDebugger', checked); 
-                                logAction('SETTINGS_CHANGED', { showDebugger: checked });
-                                if(!checked) stopDebugger(); 
-                            }} label="Debugger (Watch list)" />
-
-                            {showDebugger && (
-                                <>
-                                    <hr className="my-3 border-gray-200 dark:border-gray-700" />
-                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3 block">Možnosti Debuggeru</label>
-                                    <div className="flex flex-col">
-                                        <label className="text-xs font-bold text-gray-700 dark:text-gray-100 uppercase tracking-wider mb-2 flex justify-between">
-                                            Rychlost <span>{debugSpeedPercent}%</span>
-                                        </label>
-                                        <input 
-                                            type="range" 
-                                            min="0" 
-                                            max="500" 
-                                            step="10" 
-                                            value={debugSpeedPercent} 
-                                            onChange={(e) => setDebugSpeedPercent(Number(e.target.value))} 
-                                            onPointerDown={(e) => e.stopPropagation()}
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            className="speed-slider w-full h-2 rounded-lg cursor-pointer nodrag touch-action-none mb-1"
-                                            style={{
-                                                background: `linear-gradient(to right, #4f46e5 ${(debugSpeedPercent / 500) * 100}%, ${isDarkMode ? '#374151' : '#e5e7eb'} ${(debugSpeedPercent / 500) * 100}%)`
-                                            }}
-                                        />
-                                    </div>
-                                </>
-                            )}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
 
@@ -1444,6 +1649,27 @@ function AppContent() {
             </button>
           </div>
         )}
+        <SettingsDialog 
+          isOpen={showSettingsDialog}
+          onClose={() => setShowSettingsDialog(false)}
+          settings={{ edgeStyle, conditionShape, selectionMode, hotkeys, editorMode, colorMode, groupColoring, showDebugger, debugSpeedPercent, isDarkMode }}
+          onUpdate={(key, value) => {
+            if (key === 'edgeStyle') { setEdgeStyle(value); localStorage.setItem('edgeStyle', value); logAction('SETTINGS_CHANGED', { edgeStyle: value }); }
+            if (key === 'conditionShape') { setConditionShape(value); localStorage.setItem('conditionShape', value); logAction('SETTINGS_CHANGED', { conditionShape: value }); }
+            if (key === 'selectionMode') { setSelectionMode(value); localStorage.setItem('selectionMode', value); logAction('SETTINGS_CHANGED', { selectionMode: value }); }
+            if (key === 'hotkeys') { setHotkeys(value); localStorage.setItem('hotkeys', JSON.stringify(value)); logAction('SETTINGS_CHANGED', { hotkeys: value }); }
+            if (key === 'resetHotkeys') {
+              setHotkeys(defaultHotkeys);
+              localStorage.setItem('hotkeys', JSON.stringify(defaultHotkeys));
+              logAction('SETTINGS_CHANGED', { hotkeys: defaultHotkeys });
+            }
+            if (key === 'editorMode') { setEditorMode(value); localStorage.setItem('editorMode', value); logAction('SETTINGS_CHANGED', { editorMode: value }); }
+            if (key === 'colorMode') { setColorMode(value); localStorage.setItem('colorMode', value); logAction('SETTINGS_CHANGED', { colorMode: value }); }
+            if (key === 'groupColoring') { setGroupColoring(value); localStorage.setItem('groupColoring', value); logAction('SETTINGS_CHANGED', { groupColoring: value }); }
+            if (key === 'showDebugger') { setShowDebugger(value); localStorage.setItem('showDebugger', value); logAction('SETTINGS_CHANGED', { showDebugger: value }); if(!value) stopDebugger(); }
+            if (key === 'debugSpeedPercent') { setDebugSpeedPercent(value); }
+          }}
+        />
       </main>
       </div>
     </div>

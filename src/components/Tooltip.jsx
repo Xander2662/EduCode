@@ -27,3 +27,5 @@ export const Tooltip = ({ text, children, position = 'top', fullWidth = false })
         </div>
     );
 };
+
+export default Tooltip;
