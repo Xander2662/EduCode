@@ -47,12 +47,19 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const hoveredEdgeRef = useRef(null);
   const lastXmlRef = useRef(''); 
 
-  const lastMousePosRef = useRef({ x: 0, y: 0 });
+  const lastMousePosRef = useRef({ 
+    x: typeof window !== 'undefined' ? window.innerWidth / 2 : 0, 
+    y: typeof window !== 'undefined' ? window.innerHeight / 2 : 0 
+  });
   const lastDragTimeRef = useRef(0);
   const reactFlowWrapper = useRef(null);
   useEffect(() => {
-    const handleMouseMove = (e) => { lastMousePosRef.current = { x: e.clientX, y: e.clientY }; };
-    window.addEventListener('mousemove', handleMouseMove);
+    const handleMouseMove = (e) => { 
+      if (e.clientX !== undefined && e.clientY !== undefined) {
+        lastMousePosRef.current = { x: e.clientX, y: e.clientY }; 
+      }
+    };
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
@@ -479,7 +486,6 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           x: pastePos ? Math.round((n.position.x + offsetX) / 10) * 10 : n.position.x + 30, 
           y: pastePos ? Math.round((n.position.y + offsetY) / 10) * 10 : n.position.y + 30 
       };
-      
       return { 
           ...n, 
           id: newId, 
@@ -505,7 +511,73 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     setEdges(eds => eds.map(e => ({ ...e, selected: false })).concat(newEdges));
   }, [clipboard, onLogAction, updateNodeLabel, updateNodeData, setNodes, setEdges, handleInteract, screenToFlowPosition, takeSnapshot]);
 
-  const handleDuplicate = useCallback(() => { handleCopy(); setTimeout(handlePaste, 10); }, [handleCopy, handlePaste]);
+  const handleDuplicate = useCallback(() => {
+    if (selectedNodes.length === 0) return;
+    takeSnapshot();
+    handleInteract();
+    
+    // Find all selected nodes and any dependent child nodes (e.g. switch cases)
+    const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
+    let added = true;
+    while (added) {
+      added = false;
+      nodes.forEach(n => {
+        if ((n.parentId && selectedNodeIds.has(n.parentId) && !selectedNodeIds.has(n.id)) ||
+            (n.data?.switchId && selectedNodeIds.has(n.data.switchId) && !selectedNodeIds.has(n.id))) {
+          selectedNodeIds.add(n.id);
+          added = true;
+        }
+      });
+    }
+
+    const nodesToDuplicate = nodes.filter(n => selectedNodeIds.has(n.id));
+    const edgesToDuplicate = edges.filter(e => selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target));
+
+    const idMap = {};
+    const newNodes = nodesToDuplicate.map(n => {
+      const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+      idMap[n.id] = newId;
+
+      const isParentDuplicated = n.parentId && idMap[n.parentId];
+      const newPos = isParentDuplicated ? { ...n.position } : {
+        x: Math.round((n.position.x + 30) / 10) * 10,
+        y: Math.round((n.position.y + 30) / 10) * 10
+      };
+      return {
+        ...n,
+        id: newId,
+        position: newPos,
+        selected: true,
+        data: {
+          ...n.data,
+          onStartEdit: takeSnapshot,
+          onChange: (e) => updateNodeLabel(newId, e.target.value, true),
+          onUpdateData: (newData) => updateNodeData(newId, newData)
+        }
+      };
+    });
+
+    newNodes.forEach(n => {
+      if (n.parentId && idMap[n.parentId]) n.parentId = idMap[n.parentId];
+      if (n.data?.switchId && idMap[n.data.switchId]) n.data.switchId = idMap[n.data.switchId];
+    });
+
+    const newEdges = edgesToDuplicate.map(e => ({
+      ...e,
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      source: idMap[e.source],
+      target: idMap[e.target],
+      selected: true
+    }));
+
+    setNodes(nds => nds.map(n => ({ ...n, selected: false })).concat(newNodes));
+    setEdges(eds => eds.map(e => ({ ...e, selected: false })).concat(newEdges));
+
+    if (onLogAction) onLogAction('NODES_DUPLICATED', { count: newNodes.length });
+  }, [selectedNodes, nodes, edges, takeSnapshot, handleInteract, updateNodeLabel, updateNodeData, setNodes, setEdges, onLogAction]);
+
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -583,14 +655,87 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         return;
       }
 
-      if (checkHotkey(e, safeHotkeys.delete) && !isInput && (selectedNodes.length > 0 || selectedEdges.length > 0)) {
-        e.preventDefault(); setDeleteConfirm(true);
+      if (checkHotkey(e, safeHotkeys.delete) && !isInput) {
+        let hoveredNodeId = null;
+        let hoveredEdgeId = null;
+        if (lastMousePosRef.current && (lastMousePosRef.current.x || lastMousePosRef.current.y)) {
+          const elUnderCursor = document.elementFromPoint(lastMousePosRef.current.x, lastMousePosRef.current.y);
+          const nodeEl = elUnderCursor?.closest('.react-flow__node');
+          if (nodeEl) {
+            hoveredNodeId = nodeEl.dataset.id || nodeEl.getAttribute('data-id');
+          } else {
+            const edgeEl = elUnderCursor?.closest('.react-flow__edge');
+            if (edgeEl) {
+              hoveredEdgeId = edgeEl.dataset.id || edgeEl.getAttribute('data-id');
+            }
+          }
+        }
+
+        if (hoveredNodeId) {
+          e.preventDefault();
+          const isAlreadySelected = selectedNodes.some(n => n.id === hoveredNodeId);
+          if (!isAlreadySelected) {
+            setNodes(nds => nds.map(n => ({ ...n, selected: n.id === hoveredNodeId })));
+            setEdges(eds => eds.map(e => ({ ...e, selected: false })));
+          }
+          setDeleteConfirm(true);
+          return;
+        } else if (hoveredEdgeId) {
+          e.preventDefault();
+          const isAlreadySelected = selectedEdges.some(e => e.id === hoveredEdgeId);
+          if (!isAlreadySelected) {
+            setEdges(eds => eds.map(e => ({ ...e, selected: e.id === hoveredEdgeId })));
+            setNodes(nds => nds.map(n => ({ ...n, selected: false })));
+          }
+          setDeleteConfirm(true);
+          return;
+        } else if (selectedNodes.length > 0 || selectedEdges.length > 0) {
+          e.preventDefault();
+          setDeleteConfirm(true);
+          return;
+        }
+      } else if (checkHotkey(e, safeHotkeys.multiSelect) && !isInput) {
+        e.preventDefault();
+        if (lastMousePosRef.current && (lastMousePosRef.current.x || lastMousePosRef.current.y)) {
+          const elUnderCursor = document.elementFromPoint(lastMousePosRef.current.x, lastMousePosRef.current.y);
+          const nodeEl = elUnderCursor?.closest('.react-flow__node');
+          if (nodeEl) {
+            const targetId = nodeEl.dataset.id || nodeEl.getAttribute('data-id');
+            if (targetId) {
+              setNodes(nds => nds.map(n => n.id === targetId ? { ...n, selected: !n.selected } : n));
+              handleInteract();
+            }
+          } else {
+            const edgeEl = elUnderCursor?.closest('.react-flow__edge');
+            if (edgeEl) {
+              const targetId = edgeEl.dataset.id || edgeEl.getAttribute('data-id');
+              if (targetId) {
+                setEdges(eds => eds.map(edge => edge.id === targetId ? { ...edge, selected: !edge.selected } : edge));
+                handleInteract();
+              }
+            }
+          }
+        }
       } else if (checkHotkey(e, safeHotkeys.selectAll) && !isInput) {
         e.preventDefault();
         setNodes(nds => nds.map(n => ({ ...n, selected: true })));
         setEdges(eds => eds.map(edge => ({ ...edge, selected: true })));
       } else if (checkHotkey(e, safeHotkeys.copy) && !isInput) { 
-        e.preventDefault(); handleCopy(); 
+        e.preventDefault();
+        if (selectedNodes.length === 0 && selectedEdges.length === 0 && lastMousePosRef.current) {
+          const elUnderCursor = document.elementFromPoint(lastMousePosRef.current.x, lastMousePosRef.current.y);
+          const nodeEl = elUnderCursor?.closest('.react-flow__node');
+          if (nodeEl) {
+            const hoveredId = nodeEl.dataset.id || nodeEl.getAttribute('data-id');
+            const nodeToCopy = nodesRef.current.find(n => n.id === hoveredId);
+            if (nodeToCopy) {
+              setClipboard({ nodes: [nodeToCopy], edges: [] });
+              if (onLogAction) onLogAction('NODES_COPIED', { count: 1 });
+              return;
+            }
+          }
+        }
+        handleCopy(); 
       } else if (checkHotkey(e, safeHotkeys.paste) && !isInput) { 
         e.preventDefault(); handlePaste(); 
       } else if (checkHotkey(e, safeHotkeys.undo)) {
@@ -598,24 +743,59 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       } else if (checkHotkey(e, safeHotkeys.redo)) {
         e.preventDefault(); handleRedo();
       } else if (checkHotkey(e, safeHotkeys.zoomIn || ['Ctrl++', 'Ctrl+=']) && !isInput) {
-        e.preventDefault(); reactFlowInstance?.zoomIn();
+        e.preventDefault();
+        const reactFlowEl = document.querySelector('.react-flow');
+        if (reactFlowEl && lastMousePosRef.current && (lastMousePosRef.current.x || lastMousePosRef.current.y)) {
+          const bounds = reactFlowEl.getBoundingClientRect();
+          const { x: mouseX, y: mouseY } = lastMousePosRef.current;
+          if (mouseX >= bounds.left && mouseX <= bounds.right && mouseY >= bounds.top && mouseY <= bounds.bottom) {
+            const currentZoom = reactFlowInstance.getZoom();
+            const newZoom = Math.min(3.0, currentZoom * 1.2);
+            const flowPos = screenToFlowPosition({ x: mouseX, y: mouseY });
+            const newX = mouseX - flowPos.x * newZoom;
+            const newY = mouseY - flowPos.y * newZoom;
+            reactFlowInstance.setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 150 });
+            return;
+          }
+        }
+        reactFlowInstance?.zoomIn();
       } else if (checkHotkey(e, safeHotkeys.zoomOut || ['Ctrl+-']) && !isInput) {
-        e.preventDefault(); reactFlowInstance?.zoomOut();
+        e.preventDefault();
+        const reactFlowEl = document.querySelector('.react-flow');
+        if (reactFlowEl && lastMousePosRef.current && (lastMousePosRef.current.x || lastMousePosRef.current.y)) {
+          const bounds = reactFlowEl.getBoundingClientRect();
+          const { x: mouseX, y: mouseY } = lastMousePosRef.current;
+          if (mouseX >= bounds.left && mouseX <= bounds.right && mouseY >= bounds.top && mouseY <= bounds.bottom) {
+            const currentZoom = reactFlowInstance.getZoom();
+            const newZoom = Math.max(0.2, currentZoom / 1.2);
+            const flowPos = screenToFlowPosition({ x: mouseX, y: mouseY });
+            const newX = mouseX - flowPos.x * newZoom;
+            const newY = mouseY - flowPos.y * newZoom;
+            reactFlowInstance.setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 150 });
+            return;
+          }
+        }
+        reactFlowInstance?.zoomOut();
       } else if (checkHotkey(e, safeHotkeys.contextMenu) && !isInput) {
         e.preventDefault();
         setContextMenu(prev => {
-          if (prev) return null;
           const flowEl = document.querySelector('.react-flow');
           const bounds = flowEl ? flowEl.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
           const mouseX = lastMousePosRef.current ? lastMousePosRef.current.x : (bounds.left + bounds.width / 2);
           const mouseY = lastMousePosRef.current ? lastMousePosRef.current.y : (bounds.top + bounds.height / 2);
+          if (prev && Math.hypot(prev.mouseX - mouseX, prev.mouseY - mouseY) < 15) {
+            return null;
+          }
           return { mouseX, mouseY, connectSource: null };
         });
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D') && !e.shiftKey && !e.altKey && !isInput && selectedNodes.length > 0) {
+        e.preventDefault();
+        handleDuplicate();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete, handleCopy, handlePaste, handleUndo, handleRedo, setNodes, setEdges, hotkeys, reactFlowInstance]);
+  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete, handleCopy, handlePaste, handleUndo, handleRedo, handleDuplicate, setNodes, setEdges, hotkeys, reactFlowInstance, screenToFlowPosition, handleInteract]);
 
   const getHitEdge = (event, draggedNodes, currentEdges) => {
     const clientX = event.clientX || (event.touches && event.touches[0].clientX);
@@ -631,22 +811,23 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     let foundEdge = null;
     const draggedIds = new Set(draggedNodes.map(n => n.id));
     
-    for (let dx = -40; dx <= 40; dx += 20) {
-        for (let dy = -40; dy <= 40; dy += 20) {
-            const elemBelow = document.elementFromPoint(clientX + dx, clientY + dy);
-            const closestEdge = elemBelow?.closest('.react-flow__edge');
-            if (closestEdge) { 
-                const edgeId = closestEdge.getAttribute('data-id');
-                const targetEdge = currentEdges.find(e => e.id === edgeId);
-                // Ignore edges that are internal to the dragged cluster
-                if (targetEdge && draggedIds.has(targetEdge.source) && draggedIds.has(targetEdge.target)) {
-                    continue;
-                }
-                foundEdge = closestEdge; 
-                break; 
+    const offsets = [
+        [0, 0], [0, -20], [0, 20], [-20, 0], [20, 0],
+        [-20, -20], [20, -20], [-20, 20], [20, 20]
+    ];
+    for (const [dx, dy] of offsets) {
+        const elemBelow = document.elementFromPoint(clientX + dx, clientY + dy);
+        const closestEdge = elemBelow?.closest('.react-flow__edge');
+        if (closestEdge) { 
+            const edgeId = closestEdge.getAttribute('data-id');
+            const targetEdge = currentEdges.find(e => e.id === edgeId);
+            // Ignore edges that are internal to the dragged cluster
+            if (targetEdge && draggedIds.has(targetEdge.source) && draggedIds.has(targetEdge.target)) {
+                continue;
             }
+            foundEdge = closestEdge; 
+            break; 
         }
-        if (foundEdge) break;
     }
     originalStyles.forEach(({ el, val }) => { el.style.visibility = val; });
     return foundEdge;
@@ -684,28 +865,30 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
         if (hoveredContainer) {
             const targets = calculateRestructuredLayout(draggedNodes, hoveredContainer);
-            setNodes(nds => nds.map(n => {
-                if (targets.has(n.id)) {
-                    const target = targets.get(n.id);
-                    const dx = target.x - n.position.x;
-                    const dy = target.y - n.position.y;
-                    if (!n.data.morphOffset || Math.abs(n.data.morphOffset.x - dx) > 2 || Math.abs(n.data.morphOffset.y - dy) > 2) {
-                        return { ...n, data: { ...n.data, morphOffset: { x: dx, y: dy } } };
+            setNodes(nds => {
+                let changed = false;
+                const nextNodes = nds.map(n => {
+                    if (targets.has(n.id)) {
+                        const target = targets.get(n.id);
+                        const dx = target.x - n.position.x;
+                        const dy = target.y - n.position.y;
+                        if (!n.data.morphOffset || Math.abs(n.data.morphOffset.x - dx) > 2 || Math.abs(n.data.morphOffset.y - dy) > 2) {
+                            changed = true;
+                            return { ...n, data: { ...n.data, morphOffset: { x: dx, y: dy } } };
+                        }
+                    } else if (n.data.morphOffset) {
+                        changed = true;
+                        return { ...n, data: { ...n.data, morphOffset: null } };
                     }
-                } else if (n.data.morphOffset) {
-                    return { ...n, data: { ...n.data, morphOffset: null } };
-                }
-                return n;
-            }));
+                    return n;
+                });
+                return changed ? nextNodes : nds;
+            });
         } else {
-            let clearedAny = false;
-            setNodes(nds => nds.map(n => {
-                if (n.data.morphOffset) {
-                    clearedAny = true;
-                    return { ...n, data: { ...n.data, morphOffset: null } };
-                }
-                return n;
-            }));
+            setNodes(nds => {
+                if (!nds.some(n => n.data?.morphOffset)) return nds;
+                return nds.map(n => n.data?.morphOffset ? { ...n, data: { ...n.data, morphOffset: null } } : n);
+            });
         }
     }
 
@@ -1242,6 +1425,11 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       if (lower.includes('ctrl')) keys.push('Control', 'Meta');
       if (lower.includes('shift')) keys.push('Shift');
       if (lower.includes('alt')) keys.push('Alt');
+      const parts = s.split('+');
+      const lastKey = parts[parts.length - 1].trim();
+      if (lastKey && !lastKey.toLowerCase().includes('klik') && !lastKey.toLowerCase().includes('mouse')) {
+        keys.push(lastKey);
+      }
     });
     return keys.length > 0 ? keys : ['Control', 'Meta'];
   }, [safeHotkeys.multiSelect]);
@@ -1254,6 +1442,11 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       if (lower.includes('shift')) keys.push('Shift');
       if (lower.includes('ctrl')) keys.push('Control', 'Meta');
       if (lower.includes('alt')) keys.push('Alt');
+      const parts = s.split('+');
+      const lastKey = parts[parts.length - 1].trim();
+      if (lastKey && !lastKey.toLowerCase().includes('tažení') && !lastKey.toLowerCase().includes('drag') && !lastKey.toLowerCase().includes('mouse')) {
+        keys.push(lastKey);
+      }
     });
     return keys.length > 0 ? keys : ['Shift'];
   }, [safeHotkeys.lassoSelect]);
