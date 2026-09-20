@@ -443,60 +443,60 @@ export default function TutorialDialog({ type = 'drawio', focusedBlock = null, o
           
           {type === 'drawio' && tab === 'zaklady' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div onClick={() => setActiveDeepDive('START_END')} className="border border-fuchsia-200 bg-fuchsia-50 dark:bg-fuchsia-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
-                <Circle size={24} className="text-fuchsia-600 mt-1 shrink-0" />
+              <div onClick={() => setActiveDeepDive('START_END')} className="border border-fuchsia-200 dark:border-fuchsia-800/60 bg-fuchsia-50 dark:bg-fuchsia-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md dark:hover:border-fuchsia-700/80 transition-all">
+                <Circle size={24} className="text-fuchsia-600 dark:text-fuchsia-400 mt-1 shrink-0" />
                 <div>
-                  <h4 className="font-bold text-fuchsia-800 dark:text-fuchsia-400">Start / Konec</h4>
-                  <p className="text-xs mt-1">Povinné bloky. Označují začátek a konec vaší funkce.</p>
+                  <h4 className="font-bold text-fuchsia-800 dark:text-fuchsia-300">Start / Konec</h4>
+                  <p className="text-xs mt-1 text-gray-600 dark:text-gray-300">Povinné bloky. Označují začátek a konec vaší funkce.</p>
                 </div>
               </div>
-              <div onClick={() => setActiveDeepDive('ACTION')} className="border border-blue-200 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
-                <Square size={24} className="text-blue-600 mt-1 shrink-0" />
+              <div onClick={() => setActiveDeepDive('ACTION')} className="border border-blue-200 dark:border-blue-800/60 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md dark:hover:border-blue-700/80 transition-all">
+                <Square size={24} className="text-blue-600 dark:text-blue-400 mt-1 shrink-0" />
                 <div>
-                  <h4 className="font-bold text-blue-800 dark:text-blue-400">Akce (Operace)</h4>
-                  <p className="text-xs mt-1">Matematické operace (<code>x = x + 1</code>), přiřazení nebo volání funkcí. V pokročilém režimu lze pro rychlý výpis napsat přímo <code>"Text"</code> (vygeneruje se PRINT).</p>
+                  <h4 className="font-bold text-blue-800 dark:text-blue-300">Akce (Operace)</h4>
+                  <p className="text-xs mt-1 text-gray-600 dark:text-gray-300">Matematické operace (<code>x = x + 1</code>), přiřazení nebo volání funkcí. V pokročilém režimu lze pro rychlý výpis napsat přímo <code>"Text"</code> (vygeneruje se PRINT).</p>
                 </div>
               </div>
-              <div onClick={() => setActiveDeepDive('IO')} className="border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
-                <IoIcon size={24} className="text-emerald-600 mt-1 shrink-0" />
+              <div onClick={() => setActiveDeepDive('IO')} className="border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md dark:hover:border-emerald-700/80 transition-all">
+                <IoIcon size={24} className="text-emerald-600 dark:text-emerald-400 mt-1 shrink-0" />
                 <div>
-                  <h4 className="font-bold text-emerald-800 dark:text-emerald-400">Vstup / Výstup (IO)</h4>
-                  <p className="text-xs mt-1">Pro získání hodnoty od uživatele. Blok má vodoznak, takže dovnitř stačí napsat jen proměnnou (např. <code>x</code>) nebo dosazení (<code>x = 1</code>).</p>
+                  <h4 className="font-bold text-emerald-800 dark:text-emerald-300">Vstup / Výstup (IO)</h4>
+                  <p className="text-xs mt-1 text-gray-600 dark:text-gray-300">Pro získání hodnoty od uživatele. Blok má vodoznak, takže dovnitř stačí napsat jen proměnnou (např. <code>x</code>) nebo dosazení (<code>x = 1</code>).</p>
                 </div>
               </div>
-              <div onClick={() => setActiveDeepDive('CONDITION')} className="border border-rose-200 bg-rose-50 dark:bg-rose-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
-                <Diamond size={24} className="text-orange-600 mt-1 shrink-0" />
+              <div onClick={() => setActiveDeepDive('CONDITION')} className="border border-orange-200 dark:border-orange-800/60 bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md dark:hover:border-orange-700/80 transition-all">
+                <Diamond size={24} className="text-orange-600 dark:text-orange-400 mt-1 shrink-0" />
                 <div>
-                  <h4 className="font-bold text-orange-800 dark:text-orange-400">Podmínka (IF / WHILE)</h4>
-                  <p className="text-xs mt-1">Obsahuje logický test (např. <code>x &gt; 0</code>). Vychází z ní vždy dvě cesty (Pravda / Nepravda).</p>
+                  <h4 className="font-bold text-orange-800 dark:text-orange-300">Podmínka (IF / WHILE)</h4>
+                  <p className="text-xs mt-1 text-gray-600 dark:text-gray-300">Obsahuje logický test (např. <code>x &gt; 0</code>). Vychází z ní vždy dvě cesty (Pravda / Nepravda).</p>
                 </div>
               </div>
-              <div onClick={() => setActiveDeepDive('LOOP_CONTAINER')} className="border border-purple-200 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
-                <Hexagon size={24} className="text-purple-600 mt-1 shrink-0" />
+              <div onClick={() => setActiveDeepDive('LOOP_CONTAINER')} className="border border-purple-200 dark:border-purple-800/60 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md dark:hover:border-purple-700/80 transition-all">
+                <Hexagon size={24} className="text-purple-600 dark:text-purple-400 mt-1 shrink-0" />
                 <div>
-                  <h4 className="font-bold text-purple-800 dark:text-purple-400">Cyklus (Skupina)</h4>
-                  <p className="text-xs mt-1">Obal, do kterého umísťujete bloky, které se mají opakovat jako smyčka WHILE.</p>
+                  <h4 className="font-bold text-purple-800 dark:text-purple-300">Cyklus (Skupina)</h4>
+                  <p className="text-xs mt-1 text-gray-600 dark:text-gray-300">Obal, do kterého umísťujete bloky, které se mají opakovat jako smyčka WHILE.</p>
                 </div>
               </div>
-              <div onClick={() => setActiveDeepDive('FOR_CONTAINER')} className="border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
-                <Box size={24} className="text-indigo-600 mt-1 shrink-0" />
+              <div onClick={() => setActiveDeepDive('FOR_CONTAINER')} className="border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md dark:hover:border-indigo-700/80 transition-all">
+                <Box size={24} className="text-indigo-600 dark:text-indigo-400 mt-1 shrink-0" />
                 <div>
-                  <h4 className="font-bold text-indigo-800 dark:text-indigo-400">FOR Cyklus</h4>
-                  <p className="text-xs mt-1">Iterační cyklus pro opakování bloku kódu s přesným počtem kroků (např. i od 0 do 10).</p>
+                  <h4 className="font-bold text-indigo-800 dark:text-indigo-300">FOR Cyklus</h4>
+                  <p className="text-xs mt-1 text-gray-600 dark:text-gray-300">Iterační cyklus pro opakování bloku kódu s přesným počtem kroků (např. i od 0 do 10).</p>
                 </div>
               </div>
-              <div onClick={() => setActiveDeepDive('SWITCH_CONTAINER')} className="border border-rose-200 bg-rose-50 dark:bg-rose-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
-                <Columns size={24} className="text-rose-600 mt-1 shrink-0" />
+              <div onClick={() => setActiveDeepDive('SWITCH_CONTAINER')} className="border border-rose-200 dark:border-rose-800/60 bg-rose-50 dark:bg-rose-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md dark:hover:border-rose-700/80 transition-all">
+                <Columns size={24} className="text-rose-600 dark:text-rose-400 mt-1 shrink-0" />
                 <div>
-                  <h4 className="font-bold text-rose-800 dark:text-rose-400">Větvení (Switch)</h4>
-                  <p className="text-xs mt-1">Strukturální blok pro rychlé rozdělení kódu do mnoha paralelních případů podle jedné hodnoty.</p>
+                  <h4 className="font-bold text-rose-800 dark:text-rose-300">Větvení (Switch)</h4>
+                  <p className="text-xs mt-1 text-gray-600 dark:text-gray-300">Strukturální blok pro rychlé rozdělení kódu do mnoha paralelních případů podle jedné hodnoty.</p>
                 </div>
               </div>
-              <div onClick={() => setActiveDeepDive('COMMENT')} className="border border-yellow-200 bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md transition-shadow">
-                <MessageSquare size={24} className="text-yellow-600 mt-1 shrink-0" />
+              <div onClick={() => setActiveDeepDive('COMMENT')} className="border border-yellow-200 dark:border-yellow-800/60 bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg flex items-start gap-3 cursor-pointer hover:shadow-md dark:hover:border-yellow-700/80 transition-all">
+                <MessageSquare size={24} className="text-yellow-600 dark:text-yellow-400 mt-1 shrink-0" />
                 <div>
-                  <h4 className="font-bold text-yellow-800 dark:text-yellow-400">Komentář</h4>
-                  <p className="text-xs mt-1">Textové poznámky, které debugger kompletně ignoruje. Slouží k vysvětlení kódu lidem.</p>
+                  <h4 className="font-bold text-yellow-800 dark:text-yellow-300">Komentář</h4>
+                  <p className="text-xs mt-1 text-gray-600 dark:text-gray-300">Textové poznámky, které debugger kompletně ignoruje. Slouží k vysvětlení kódu lidem.</p>
                 </div>
               </div>
             </div>

@@ -47,9 +47,38 @@ const handleNodeKeyDown = (e) => {
   }
 };
 
-export const GroupBgNode = ({ data }) => (
-    <div style={{ backgroundColor: data.bgColor, borderColor: data.borderColor }} className="w-full h-full rounded-[2rem] border-[3px] border-dashed pointer-events-none" />
-);
+export const GroupBgNode = ({ data }) => {
+  if (data?.bgColor === 'transparent') {
+    return <div className="w-full h-full pointer-events-none" />;
+  }
+
+  const isGray = data?.colorMode === false;
+  const type = data?.groupType || data?.type;
+
+  let colorClasses = '';
+  if (isGray) {
+    colorClasses = 'bg-gray-500/10 border-gray-400/40 dark:bg-gray-800/30 dark:border-gray-600/35';
+  } else if (type === 'ACTION') {
+    colorClasses = 'bg-blue-500/10 border-blue-400/50 dark:bg-blue-950/40 dark:border-blue-500/40';
+  } else if (type === 'IO') {
+    colorClasses = 'bg-emerald-500/10 border-emerald-400/50 dark:bg-emerald-950/40 dark:border-emerald-500/40';
+  } else if (type === 'LOOP') {
+    colorClasses = 'bg-amber-500/10 border-amber-400/50 dark:bg-amber-950/40 dark:border-amber-500/40';
+  } else if (data?.bgColor && data?.borderColor) {
+    return (
+      <div 
+        style={{ backgroundColor: data.bgColor, borderColor: data.borderColor }} 
+        className="w-full h-full rounded-[2rem] border-[3px] border-dashed pointer-events-none transition-colors duration-200" 
+      />
+    );
+  }
+
+  return (
+    <div 
+      className={`w-full h-full rounded-[2rem] border-[3px] border-dashed pointer-events-none transition-colors duration-200 ${colorClasses}`} 
+    />
+  );
+};
 
 const handleBaseClass = "!w-2 !h-2 after:content-[''] after:absolute after:-top-3 after:-bottom-3 after:-left-3 after:-right-3 after:cursor-crosshair";
 
@@ -416,15 +445,16 @@ export const LoopContainerNode = ({ id, data, selected, dragging }) => {
             defaultValue={data.label} 
             onChange={data.onChange}
             onMouseDown={e => e.stopPropagation()}
-            className="outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-xs font-mono w-24 border border-transparent focus:border-purple-300 cursor-text"
+            readOnly={data.readOnly}
+            className={`outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-xs font-mono w-24 border border-transparent focus:border-purple-300 ${data.readOnly ? 'cursor-default pointer-events-none' : 'cursor-text'}`}
             placeholder="Podmínka"
         />
 
         {/* Toggle přesunutý napravo od inputu */}
-        <div className="flex items-center gap-1 ml-1 pl-2 border-l border-gray-200 dark:border-gray-600">
+        <div className={`flex items-center gap-1 ml-1 pl-2 border-l border-gray-200 dark:border-gray-600 ${data.readOnly ? 'pointer-events-none' : ''}`}>
             <span className="text-[10px] font-bold text-gray-500">DO</span>
             <div 
-            onClick={toggleDoWhile}
+            onClick={data.readOnly ? undefined : toggleDoWhile}
             className={`w-7 h-3.5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors ${isDoWhile ? 'bg-purple-500' : 'bg-gray-300 dark:bg-gray-600'}`}
             title="Přepnout na testování podmínky na konci cyklu (Do-While)"
             >

@@ -108,7 +108,7 @@ export const getGroupDefs = (nodes, edges) => {
     return groupDefs;
 };
 
-export const computeGroupBounds = (nodes, groupDefs) => {
+export const computeGroupBounds = (nodes, groupDefs, colorMode = true) => {
     if (!Array.isArray(nodes) || !Array.isArray(groupDefs)) return [];
     return groupDefs.map(g => {
          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -154,7 +154,15 @@ export const computeGroupBounds = (nodes, groupDefs) => {
              position: { x: minX - padLeft, y: minY - padTop },
              width: groupW,  
              height: groupH, 
-             data: { bgColor, borderColor, width: groupW, height: groupH },
+             data: { 
+                 groupType: g.type,
+                 type: g.type,
+                 colorMode,
+                 bgColor, 
+                 borderColor, 
+                 width: groupW, 
+                 height: groupH 
+             },
              style: { width: groupW, height: groupH, pointerEvents: 'none', opacity: 1 },
              zIndex: g.type === 'LOOP' ? -16000 : -15000,
              selectable: false,

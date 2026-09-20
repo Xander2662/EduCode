@@ -68,104 +68,91 @@ const ACTION_DEFINITIONS = [
     label: 'Krok zpět (Undo)',
     desc: 'Vrátí zpět poslední provedenou úpravu v diagramu',
     icon: Undo2,
-    badge: 'Historie',
-    maxSlots: 3
+    badge: 'Historie'
   },
   {
     key: 'redo',
     label: 'Krok vpřed (Redo)',
     desc: 'Znovu provede vrácenou úpravu v diagramu',
     icon: Redo2,
-    badge: 'Historie',
-    maxSlots: 3
+    badge: 'Historie'
   },
   {
     key: 'delete',
     label: 'Smazat vybrané',
     desc: 'Odstraní označený blok nebo hranu z diagramu',
     icon: Trash2,
-    badge: 'Úpravy',
-    maxSlots: 3
+    badge: 'Úpravy'
   },
   {
     key: 'rename',
     label: 'Přejmenovat / Editovat text',
     desc: 'Okamžitě aktivuje editaci textu vybraného bloku na plátně',
     icon: Edit3,
-    badge: 'Úpravy',
-    maxSlots: 2
+    badge: 'Úpravy'
   },
   {
     key: 'copy',
     label: 'Kopírovat',
     desc: 'Zkopíruje označené bloky včetně jejich vazeb',
     icon: Copy,
-    badge: 'Schránka',
-    maxSlots: 2
+    badge: 'Schránka'
   },
   {
     key: 'paste',
     label: 'Vložit',
     desc: 'Vloží zkopírované bloky na pozici kurzoru',
     icon: ClipboardPaste,
-    badge: 'Schránka',
-    maxSlots: 2
+    badge: 'Schránka'
   },
   {
     key: 'contextMenu',
     label: 'Nabídka bloků / Kontextové menu',
     desc: 'Otevře nabídku pro rychlé vložení nového bloku na pozici kurzoru (neposouvá pohled)',
     icon: Plus,
-    badge: 'Plátno & Myš',
-    maxSlots: 2
+    badge: 'Plátno & Myš'
   },
   {
     key: 'selectAll',
     label: 'Vybrat vše',
     desc: 'Označí všechny bloky a hrany na plátně',
     icon: CheckSquare,
-    badge: 'Výběr',
-    maxSlots: 2
+    badge: 'Výběr'
   },
   {
     key: 'multiSelect',
     label: 'Vícenásobný výběr bloků',
     desc: 'Postupné přidávání a odebírání jednotlivých bloků nebo hran z výběru',
     icon: MousePointerClick,
-    badge: 'Výběr & Myš',
-    maxSlots: 2
+    badge: 'Výběr & Myš'
   },
   {
     key: 'lassoSelect',
     label: 'Laso / Obdélníkový výběr',
     desc: 'Hromadný výběr bloků tažením obdélníku (velmi užitečné uvnitř kontejnerů cyklů, kde běžné tažení posouvá celý kontejner)',
     icon: BoxSelect,
-    badge: 'Výběr & Myš',
-    maxSlots: 2
+    badge: 'Výběr & Myš'
   },
   {
     key: 'zoomIn',
     label: 'Přiblížit (Zoom In)',
     desc: 'Plynule zvětší pohled na diagramové plátno',
     icon: ZoomIn,
-    badge: 'Pohled',
-    maxSlots: 2
+    badge: 'Pohled'
   },
   {
     key: 'zoomOut',
     label: 'Oddálit (Zoom Out)',
     desc: 'Plynule zmenší pohled na diagramové plátno',
     icon: ZoomOut,
-    badge: 'Pohled',
-    maxSlots: 2
+    badge: 'Pohled'
   },
   {
     key: 'pan',
     label: 'Posun celého plátna (Pan)',
     desc: 'Stisknutím prostředního tlačítka (kolečka) myši uchopíte a posunete celé plátno',
     icon: Move,
-    badge: 'Pohled & Myš',
-    maxSlots: 2
+    badge: 'Pohled & Myš'
   }
 ];
 
@@ -388,117 +375,10 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
     ];
   }, [settings.edgeStyle]);
 
-  // Controls Tab: While loop with recursive action blocks + debugger stepping
+  // Controls Tab: While loop container for Simple mode, condition loopback for Advanced mode + debugger stepping
   const getControlsNodes = useCallback((currentActiveId = null) => {
     if (isSimple) {
-      return [
-        {
-          id: 'ctrl-start',
-          type: 'START_END',
-          position: { x: 130, y: -30 },
-          data: {
-            mode: 'start',
-            label: 'main',
-            readOnly: true,
-            colorMode: settings.colorMode,
-            entityType: 'FUNCTION',
-            isRuntimeActive: currentActiveId === 'ctrl-start'
-          }
-        },
-        {
-          id: 'ctrl-init',
-          type: 'ACTION',
-          position: { x: 130, y: 70 },
-          data: {
-            label: 'i = 0',
-            readOnly: true,
-            colorMode: settings.colorMode,
-            isRuntimeActive: currentActiveId === 'ctrl-init'
-          }
-        },
-        {
-          id: 'ctrl-cond',
-          type: 'CONDITION',
-          position: { x: 105, y: 175 },
-          data: {
-            label: 'i < 5',
-            readOnly: true,
-            conditionShape: settings.conditionShape,
-            edgeStyle: settings.edgeStyle,
-            colorMode: settings.colorMode,
-            isRuntimeActive: currentActiveId === 'ctrl-cond'
-          }
-        },
-        {
-          id: 'ctrl-act1',
-          type: 'ACTION',
-          position: { x: 25, y: 295 },
-          data: {
-            label: 'krok_1()',
-            readOnly: true,
-            colorMode: settings.colorMode,
-            isRuntimeActive: currentActiveId === 'ctrl-act1'
-          }
-        },
-        {
-          id: 'ctrl-act2',
-          type: 'ACTION',
-          position: { x: 25, y: 385 },
-          data: {
-            label: 'krok_2()',
-            readOnly: true,
-            colorMode: settings.colorMode,
-            isRuntimeActive: currentActiveId === 'ctrl-act2'
-          }
-        },
-        {
-          id: 'ctrl-act3',
-          type: 'ACTION',
-          position: { x: 25, y: 475 },
-          data: {
-            label: 'vypocet()',
-            readOnly: true,
-            colorMode: settings.colorMode,
-            isRuntimeActive: currentActiveId === 'ctrl-act3'
-          }
-        },
-        {
-          id: 'ctrl-act4',
-          type: 'ACTION',
-          position: { x: 25, y: 565 },
-          data: {
-            label: 'i = i + 1',
-            readOnly: true,
-            colorMode: settings.colorMode,
-            isRuntimeActive: currentActiveId === 'ctrl-act4'
-          }
-        },
-        {
-          id: 'ctrl-end',
-          type: 'START_END',
-          position: { x: 300, y: 280 },
-          data: {
-            mode: 'end',
-            label: 'KONEC',
-            readOnly: true,
-            colorMode: settings.colorMode,
-            entityType: 'FUNCTION',
-            isRuntimeActive: currentActiveId === 'ctrl-end'
-          }
-        },
-        // Invisible spacer ensuring clear separation between the function and the bottom debugger panel
-        {
-          id: 'ctrl-bottom-spacer',
-          type: 'GROUP_BG',
-          position: { x: 130, y: 720 },
-          style: { width: 1, height: 1, opacity: 0, pointerEvents: 'none' },
-          data: { bgColor: 'transparent', borderColor: 'transparent' },
-          selectable: false,
-          draggable: false
-        }
-      ];
-    } else {
-      // Advanced mode: Loop container wrapping actions
+      // Simple (Začátečník) mode: Loop container (while loop) wrapping actions
       return [
         {
           id: 'ctrl-start',
@@ -605,12 +485,179 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
           draggable: false
         }
       ];
+    } else {
+      // Advanced (Pokročilý) mode: Flowchart while loop with Condition block and loopback arrow
+      return [
+        {
+          id: 'ctrl-start',
+          type: 'START_END',
+          position: { x: 130, y: -30 },
+          data: {
+            mode: 'start',
+            label: 'main',
+            readOnly: true,
+            colorMode: settings.colorMode,
+            entityType: 'FUNCTION',
+            isRuntimeActive: currentActiveId === 'ctrl-start'
+          }
+        },
+        {
+          id: 'ctrl-init',
+          type: 'ACTION',
+          position: { x: 130, y: 70 },
+          data: {
+            label: 'i = 0',
+            readOnly: true,
+            colorMode: settings.colorMode,
+            isRuntimeActive: currentActiveId === 'ctrl-init'
+          }
+        },
+        {
+          id: 'ctrl-cond',
+          type: 'CONDITION',
+          position: { x: 105, y: 175 },
+          data: {
+            label: 'i < 5',
+            readOnly: true,
+            conditionShape: settings.conditionShape,
+            edgeStyle: settings.edgeStyle,
+            colorMode: settings.colorMode,
+            isRuntimeActive: currentActiveId === 'ctrl-cond'
+          }
+        },
+        {
+          id: 'ctrl-act1',
+          type: 'ACTION',
+          position: { x: 25, y: 295 },
+          data: {
+            label: 'krok_1()',
+            readOnly: true,
+            colorMode: settings.colorMode,
+            isRuntimeActive: currentActiveId === 'ctrl-act1'
+          }
+        },
+        {
+          id: 'ctrl-act2',
+          type: 'ACTION',
+          position: { x: 25, y: 385 },
+          data: {
+            label: 'krok_2()',
+            readOnly: true,
+            colorMode: settings.colorMode,
+            isRuntimeActive: currentActiveId === 'ctrl-act2'
+          }
+        },
+        {
+          id: 'ctrl-act3',
+          type: 'ACTION',
+          position: { x: 25, y: 475 },
+          data: {
+            label: 'vypocet()',
+            readOnly: true,
+            colorMode: settings.colorMode,
+            isRuntimeActive: currentActiveId === 'ctrl-act3'
+          }
+        },
+        {
+          id: 'ctrl-act4',
+          type: 'ACTION',
+          position: { x: 25, y: 565 },
+          data: {
+            label: 'i = i + 1',
+            readOnly: true,
+            colorMode: settings.colorMode,
+            isRuntimeActive: currentActiveId === 'ctrl-act4'
+          }
+        },
+        {
+          id: 'ctrl-end',
+          type: 'START_END',
+          position: { x: 300, y: 280 },
+          data: {
+            mode: 'end',
+            label: 'KONEC',
+            readOnly: true,
+            colorMode: settings.colorMode,
+            entityType: 'FUNCTION',
+            isRuntimeActive: currentActiveId === 'ctrl-end'
+          }
+        },
+        // Invisible spacer ensuring clear separation between the function and the bottom debugger panel
+        {
+          id: 'ctrl-bottom-spacer',
+          type: 'GROUP_BG',
+          position: { x: 130, y: 720 },
+          style: { width: 1, height: 1, opacity: 0, pointerEvents: 'none' },
+          data: { bgColor: 'transparent', borderColor: 'transparent' },
+          selectable: false,
+          draggable: false
+        }
+      ];
     }
   }, [isSimple, settings.colorMode, settings.conditionShape, settings.edgeStyle]);
 
   const getControlsEdges = useCallback(() => {
     const p = edgeLabels[settings.edgeStyle || 'true-false'] || { t: 'True', f: 'False' };
     if (isSimple) {
+      // Simple (Začátečník) mode: Sequential edges inside LOOP_CONTAINER
+      return [
+        {
+          id: 'ec-start-init',
+          source: 'ctrl-start',
+          target: 'ctrl-init',
+          sourceHandle: 's-bottom',
+          targetHandle: 't-top',
+          type: 'customEdge',
+          data: { readOnly: true }
+        },
+        {
+          id: 'ec-init-act1',
+          source: 'ctrl-init',
+          target: 'ctrl-act1',
+          sourceHandle: 's-bottom',
+          targetHandle: 't-top',
+          type: 'customEdge',
+          data: { readOnly: true }
+        },
+        {
+          id: 'ec-act1-act2',
+          source: 'ctrl-act1',
+          target: 'ctrl-act2',
+          sourceHandle: 's-bottom',
+          targetHandle: 't-top',
+          type: 'customEdge',
+          data: { readOnly: true }
+        },
+        {
+          id: 'ec-act2-act3',
+          source: 'ctrl-act2',
+          target: 'ctrl-act3',
+          sourceHandle: 's-bottom',
+          targetHandle: 't-top',
+          type: 'customEdge',
+          data: { readOnly: true }
+        },
+        {
+          id: 'ec-act3-act4',
+          source: 'ctrl-act3',
+          target: 'ctrl-act4',
+          sourceHandle: 's-bottom',
+          targetHandle: 't-top',
+          type: 'customEdge',
+          data: { readOnly: true }
+        },
+        {
+          id: 'ec-act4-end',
+          source: 'ctrl-act4',
+          target: 'ctrl-end',
+          sourceHandle: 's-bottom',
+          targetHandle: 't-top',
+          type: 'customEdge',
+          data: { readOnly: true }
+        }
+      ];
+    } else {
+      // Advanced (Pokročilý) mode: Loopback and condition edges
       return [
         {
           id: 'ec-start-init',
@@ -695,63 +742,6 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
           }
         }
       ];
-    } else {
-      return [
-        {
-          id: 'ec-start-init',
-          source: 'ctrl-start',
-          target: 'ctrl-init',
-          sourceHandle: 's-bottom',
-          targetHandle: 't-top',
-          type: 'customEdge',
-          data: { readOnly: true }
-        },
-        {
-          id: 'ec-init-act1',
-          source: 'ctrl-init',
-          target: 'ctrl-act1',
-          sourceHandle: 's-bottom',
-          targetHandle: 't-top',
-          type: 'customEdge',
-          data: { readOnly: true }
-        },
-        {
-          id: 'ec-act1-act2',
-          source: 'ctrl-act1',
-          target: 'ctrl-act2',
-          sourceHandle: 's-bottom',
-          targetHandle: 't-top',
-          type: 'customEdge',
-          data: { readOnly: true }
-        },
-        {
-          id: 'ec-act2-act3',
-          source: 'ctrl-act2',
-          target: 'ctrl-act3',
-          sourceHandle: 's-bottom',
-          targetHandle: 't-top',
-          type: 'customEdge',
-          data: { readOnly: true }
-        },
-        {
-          id: 'ec-act3-act4',
-          source: 'ctrl-act3',
-          target: 'ctrl-act4',
-          sourceHandle: 's-bottom',
-          targetHandle: 't-top',
-          type: 'customEdge',
-          data: { readOnly: true }
-        },
-        {
-          id: 'ec-act4-end',
-          source: 'ctrl-act4',
-          target: 'ctrl-end',
-          sourceHandle: 's-bottom',
-          targetHandle: 't-top',
-          type: 'customEdge',
-          data: { readOnly: true }
-        }
-      ];
     }
   }, [isSimple, settings.edgeStyle]);
 
@@ -759,31 +749,31 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
   const simpleStepPath = useMemo(() => [
     'ctrl-start',
     'ctrl-init',
-    'ctrl-cond',
     'ctrl-act1',
     'ctrl-act2',
     'ctrl-act3',
     'ctrl-act4',
-    'ctrl-cond',
     'ctrl-act1',
     'ctrl-act2',
     'ctrl-act3',
     'ctrl-act4',
-    'ctrl-cond',
     'ctrl-end'
   ], []);
 
   const advancedStepPath = useMemo(() => [
     'ctrl-start',
     'ctrl-init',
+    'ctrl-cond',
     'ctrl-act1',
     'ctrl-act2',
     'ctrl-act3',
     'ctrl-act4',
+    'ctrl-cond',
     'ctrl-act1',
     'ctrl-act2',
     'ctrl-act3',
     'ctrl-act4',
+    'ctrl-cond',
     'ctrl-end'
   ], []);
 
@@ -832,8 +822,8 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
 
   const bgNodes = useMemo(() => {
     if (!settings.groupColoring || !Array.isArray(nodes) || groupDefs.length === 0) return [];
-    return computeGroupBounds(nodes, groupDefs);
-  }, [nodes, groupDefs, settings.groupColoring]);
+    return computeGroupBounds(nodes, groupDefs, settings.colorMode);
+  }, [nodes, groupDefs, settings.groupColoring, settings.colorMode]);
 
   const allNodes = useMemo(() => [...(bgNodes || []), ...(nodes || [])], [bgNodes, nodes]);
 
@@ -946,7 +936,7 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
         </div>
       </div>
 
-      <div className="flex-1 relative w-full h-full overflow-hidden">
+      <div className="preview-canvas-container flex-1 relative w-full h-full overflow-hidden">
         {/* Diagram Debugger Control Panel placed bottom-center matching App.jsx */}
         {settings.showDebugger && activeTab === 'controls' && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 pointer-events-auto">
@@ -1018,6 +1008,11 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
           panOnScroll={true}
           nodesDraggable={true}
           elementsSelectable={true}
+          nodesConnectable={false}
+          nodesFocusable={false}
+          edgesFocusable={false}
+          edgesUpdatable={false}
+          deleteKeyCode={null}
           elevateNodesOnSelect={false}
           proOptions={{ hideAttribution: true }}
         >
@@ -1217,6 +1212,24 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
     onUpdate('hotkeys', { ...hotkeys, [actionKey]: currentSlots });
   };
 
+  useEffect(() => {
+    if (!showResetConfirm) return;
+    const handleConfirmKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowResetConfirm(false);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        onUpdate('resetHotkeys', true);
+        setShowResetConfirm(false);
+      }
+    };
+    window.addEventListener('keydown', handleConfirmKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleConfirmKeyDown, { capture: true });
+  }, [showResetConfirm, onUpdate]);
+
   return (
     <div className="flex-1 h-full p-6 md:p-8 overflow-y-auto bg-gray-50/50 dark:bg-gray-900/40 space-y-6">
       
@@ -1257,13 +1270,13 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
             <p className="text-xs text-gray-600 dark:text-gray-300 mb-6 leading-relaxed">
               Všechna vaše vlastní přiřazení kláves budou smazána a nahrazena výchozí sadou zkratek. Tuto akci nelze vzít zpět.
             </p>
-            <div className="flex justify-end gap-2">
+            <div className="flex items-center justify-between">
               <button
                 type="button"
                 onClick={() => setShowResetConfirm(false)}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
               >
-                Zrušit
+                Zrušit (Esc)
               </button>
               <button
                 type="button"
@@ -1273,7 +1286,7 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
                 }}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-sm"
               >
-                Obnovit výchozí
+                Obnovit výchozí (Enter)
               </button>
             </div>
           </div>
@@ -1318,7 +1331,6 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
         {ACTION_DEFINITIONS.map(action => {
           const slots = getActionSlots(action.key);
           const Icon = action.icon;
-          const isAtLimit = slots.length >= (action.maxSlots || 3);
 
           return (
             <div 
@@ -1384,6 +1396,34 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
                             className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
                           >
                             Shift+Tažení
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Alt+Tažení'); }}
+                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
+                          >
+                            Alt+Tažení
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Ctrl+Tažení'); }}
+                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
+                          >
+                            Ctrl+Tažení
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Mouse 1'); }}
+                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
+                          >
+                            Mouse 1
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Tažení'); }}
+                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
+                          >
+                            Tažení
                           </button>
                         </div>
                       </div>
@@ -1451,20 +1491,46 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
                       >
                         Shift+Tažení
                       </button>
+                      <button
+                        type="button"
+                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Alt+Tažení'); }}
+                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
+                      >
+                        Alt+Tažení
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Ctrl+Tažení'); }}
+                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
+                      >
+                        Ctrl+Tažení
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Mouse 1'); }}
+                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
+                      >
+                        Mouse 1
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Tažení'); }}
+                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
+                      >
+                        Tažení
+                      </button>
                     </div>
                   </div>
                 ) : (
-                  !isAtLimit && (
-                    <button
-                      type="button"
-                      onClick={() => { setConflictWarning(null); setRecording({ actionKey: action.key, slotIndex: -1 }); }}
-                      title="Přidat další klávesovou zkratku pro tuto akci"
-                      className="flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 border border-dashed border-indigo-200 dark:border-indigo-800 rounded-lg px-2.5 py-1.5 transition-colors font-semibold"
-                    >
-                      <Plus size={13} />
-                      <span>Přidat</span>
-                    </button>
-                  )
+                  <button
+                    type="button"
+                    onClick={() => { setConflictWarning(null); setRecording({ actionKey: action.key, slotIndex: -1 }); }}
+                    title="Přidat další klávesovou zkratku pro tuto akci"
+                    className="flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 border border-dashed border-indigo-200 dark:border-indigo-800 rounded-lg px-2.5 py-1.5 transition-colors font-semibold"
+                  >
+                    <Plus size={13} />
+                    <span>Přidat</span>
+                  </button>
                 )}
 
                 {slots.length === 0 && recording?.actionKey !== action.key && (

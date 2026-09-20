@@ -599,7 +599,7 @@ function AppContent() {
     pan: ['Mouse 3'],
     contextMenu: ['Mouse 2'],
     multiSelect: ['Ctrl+Klik'],
-    lassoSelect: ['Shift+Tažení']
+    lassoSelect: ['Tažení', 'Shift+Tažení']
   };
 
   const normalizeHotkeys = (stored) => {
@@ -611,9 +611,12 @@ function AppContent() {
           res[key] = stored[key].length > 0 ? stored[key] : defaultHotkeys[key];
         } else if (typeof stored[key] === 'string') {
           res[key] = [stored[key]];
-          if (key === 'undo' && !res[key].includes('Alt+Z')) res[key].push('Alt+Z');
-          if (key === 'redo' && !res[key].includes('Ctrl+Shift+Z')) res[key].push('Ctrl+Shift+Z');
-          if (key === 'delete' && !res[key].includes('Backspace')) res[key].push('Backspace');
+        }
+        if (key === 'undo' && !res[key].includes('Alt+Z')) res[key].push('Alt+Z');
+        if (key === 'redo' && !res[key].includes('Ctrl+Shift+Z')) res[key].push('Ctrl+Shift+Z');
+        if (key === 'delete' && !res[key].includes('Backspace')) res[key].push('Backspace');
+        if (key === 'lassoSelect' && res[key].length === 1 && res[key][0] === 'Shift+Tažení') {
+          res[key] = ['Tažení', 'Shift+Tažení'];
         }
       }
     }

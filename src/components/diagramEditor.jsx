@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, ControlButton, Background, MarkerType, useReactFlow, ConnectionLineType } from '@xyflow/react';
+import { ReactFlow, ReactFlowProvider, addEdge, useNodesState, useEdgesState, Controls, ControlButton, Background, MarkerType, useReactFlow, ConnectionLineType, ViewportPortal } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Download, Upload, Square, Circle, Diamond, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box, Hexagon, Columns, Link2, Plus, Minus, Maximize, Lock, Unlock } from 'lucide-react';
+import { Download, Upload, Square, Circle, Diamond, Copy, Trash2, MessageSquare, FileJson, FileCode, Repeat, Box, Hexagon, Columns, Link2, Plus, Minus, Maximize, Maximize2, ZoomIn, ZoomOut, Lock, Unlock } from 'lucide-react';
 import { drawioToReactFlow, reactFlowToDrawio } from '../utils/diagramConverter';
 import { getGroupDefs, computeGroupBounds } from '../utils/grouping';
 import { calculateRestructuredLayout } from '../utils/visualLayoutEngine';
@@ -9,7 +9,18 @@ import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
 import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode, LoopContainerNode, ForContainerNode, SwitchContainerNode, CaseContainerNode } from './diagram/CustomNodes';
 import { Tooltip } from './Tooltip';
-import { checkHotkey } from '../utils/hotkeys';
+import { checkHotkey, getReactFlowKeyCodes, isKeyLassoTrigger } from '../utils/hotkeys';
+
+const DEFAULT_BLOCK_STRINGS = {
+  START_END: '',
+  ACTION: 'Operace',
+  IO: 'x',
+  CONDITION: 'x > 0',
+  LOOP_CONTAINER: '',
+  FOR_CONTAINER: '',
+  SWITCH_CONTAINER: 'x',
+  COMMENT: 'Komentář'
+};
 
 const IoIcon = ({ size = 24, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -39,13 +50,34 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [pendingImport, setPendingImport] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
+  const contextMenuRef = useRef(null);
+  contextMenuRef.current = contextMenu;
+  const contextMenuDomRef = useRef(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const reactFlowInstance = useReactFlow();
   const { screenToFlowPosition, flowToScreenPosition, getNode, getEdges } = reactFlowInstance;
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleOutsidePointer = (e) => {
+      if (Date.now() - (contextMenu.openedAt || 0) < 350) return;
+      if (contextMenuDomRef.current && contextMenuDomRef.current.contains(e.target)) return;
+      setContextMenu(null);
+    };
+    window.addEventListener('pointerdown', handleOutsidePointer);
+    return () => window.removeEventListener('pointerdown', handleOutsidePointer);
+  }, [contextMenu]);
+
   
   const hoveredEdgeRef = useRef(null);
   const lastXmlRef = useRef(''); 
+
+  const [keyLassoBox, setKeyLassoBox] = useState(null);
+  const keyLassoActiveRef = useRef(false);
+  const keyLassoStartRef = useRef(null);
+  const keyLassoKeyRef = useRef(null);
+  const keyLassoTouchedRef = useRef(new Set());
+  const keyLassoInitialRef = useRef(new Set());
 
   const lastMousePosRef = useRef({ 
     x: typeof window !== 'undefined' ? window.innerWidth / 2 : 0, 
@@ -57,11 +89,64 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     const handleMouseMove = (e) => { 
       if (e.clientX !== undefined && e.clientY !== undefined) {
         lastMousePosRef.current = { x: e.clientX, y: e.clientY }; 
+
+        // Active key-only lasso tracking (e.g. holding 'a' and moving mouse across blocks)
+        if (keyLassoActiveRef.current && keyLassoStartRef.current) {
+          const curFlow = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+          const startFlow = keyLassoStartRef.current;
+
+          const minX = Math.min(startFlow.x, curFlow.x);
+          const maxX = Math.max(startFlow.x, curFlow.x);
+          const minY = Math.min(startFlow.y, curFlow.y);
+          const maxY = Math.max(startFlow.y, curFlow.y);
+
+          const box = {
+            x: minX,
+            y: minY,
+            width: Math.max(1, maxX - minX),
+            height: Math.max(1, maxY - minY)
+          };
+
+          setKeyLassoBox(box);
+
+          // Get nodes intersecting the lasso box
+          const intersecting = reactFlowInstance.getIntersectingNodes(box, selectionMode === 'partial');
+          const boxIds = new Set(intersecting.filter(n => n.type !== 'GROUP_BG').map(n => n.id));
+
+          // Also check if mouse cursor directly touches any block while sweeping
+          const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.react-flow__node');
+          const hoveredId = el?.getAttribute('data-id');
+          if (hoveredId && hoveredId !== 'GROUP_BG') {
+            const hNode = reactFlowInstance.getNode(hoveredId);
+            if (hNode && hNode.type !== 'GROUP_BG') {
+              keyLassoTouchedRef.current.add(hoveredId);
+            }
+          }
+
+          boxIds.forEach(id => keyLassoTouchedRef.current.add(id));
+
+          const allSelected = new Set([...keyLassoInitialRef.current, ...keyLassoTouchedRef.current]);
+
+          setNodes(nds => nds.map(node => {
+            if (node.type === 'GROUP_BG') return node;
+            const isSel = allSelected.has(node.id);
+            return node.selected === isSel ? node : { ...node, selected: isSel };
+          }));
+
+          setEdges(eds => eds.map(edge => {
+            const isSel = allSelected.has(edge.source) && allSelected.has(edge.target);
+            return edge.selected === isSel ? edge : { ...edge, selected: isSel };
+          }));
+
+          if (onSelectionChangeRef.current) {
+            onSelectionChangeRef.current(Array.from(allSelected));
+          }
+        }
       }
     };
     window.addEventListener('mousemove', handleMouseMove, { passive: true });
     return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, []);
+  }, [screenToFlowPosition, reactFlowInstance, selectionMode, setNodes, setEdges]);
 
   const [hoveredToolbarItem, setHoveredToolbarItem] = useState(null);
   const [hoverProgress, setHoverProgress] = useState(0);
@@ -329,8 +414,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const bgNodes = useMemo(() => {
         if (!groupColoring || groupDefs.length === 0) return [];
-        return computeGroupBounds(nodes, groupDefs);
-  }, [nodes, groupDefs, groupColoring]);
+        return computeGroupBounds(nodes, groupDefs, colorMode);
+  }, [nodes, groupDefs, groupColoring, colorMode]);
   const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
 
   useEffect(() => {
@@ -579,6 +664,39 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
+  const handleZoom = useCallback((factor) => {
+    if (!reactFlowInstance) return;
+    const reactFlowEl = document.querySelector('.react-flow');
+    if (reactFlowEl && screenToFlowPosition) {
+      const bounds = reactFlowEl.getBoundingClientRect();
+      let clientX = lastMousePosRef.current ? lastMousePosRef.current.x : null;
+      let clientY = lastMousePosRef.current ? lastMousePosRef.current.y : null;
+
+      const isInside = clientX !== null && clientY !== null &&
+        clientX >= bounds.left && clientX <= bounds.right &&
+        clientY >= bounds.top && clientY <= bounds.bottom;
+
+      if (!isInside) {
+        clientX = bounds.left + bounds.width / 2;
+        clientY = bounds.top + bounds.height / 2;
+      }
+
+      const currentZoom = reactFlowInstance.getZoom();
+      const newZoom = Math.max(0.2, Math.min(3.0, currentZoom * factor));
+      const flowPos = screenToFlowPosition({ x: clientX, y: clientY });
+
+      const relX = clientX - bounds.left;
+      const relY = clientY - bounds.top;
+      const newX = relX - flowPos.x * newZoom;
+      const newY = relY - flowPos.y * newZoom;
+
+      reactFlowInstance.setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 150 });
+      return;
+    }
+    if (factor > 1) reactFlowInstance.zoomIn();
+    else reactFlowInstance.zoomOut();
+  }, [reactFlowInstance, screenToFlowPosition]);
+
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (readOnly) return;
@@ -588,10 +706,21 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         return;
       }
 
-      const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+      const isInput = e.target && (
+        e.target.tagName === 'INPUT' || 
+        e.target.tagName === 'TEXTAREA' || 
+        e.target.isContentEditable ||
+        Boolean(e.target.closest && e.target.closest('input, textarea, [contenteditable="true"]'))
+      );
 
       if (e.key === 'Escape') {
         if (isInput) e.target.blur();
+        keyLassoActiveRef.current = false;
+        setKeyLassoBox(null);
+        keyLassoStartRef.current = null;
+        keyLassoKeyRef.current = null;
+        keyLassoTouchedRef.current.clear();
+        keyLassoInitialRef.current.clear();
         setNodes(nds => nds.map(n => ({ ...n, selected: false })));
         setEdges(eds => eds.map(edge => ({ ...edge, selected: false })));
         setContextMenu(null); setShowExportMenu(false);
@@ -600,6 +729,46 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       }
       
       const safeHotkeys = hotkeys || {};
+
+      // Key-only lasso selection (e.g. holding 'a' and moving mouse across blocks without holding mouse1)
+      if (isKeyLassoTrigger(e, safeHotkeys.lassoSelect) && !isInput) {
+        if (!e.repeat && !keyLassoActiveRef.current) {
+          e.preventDefault();
+          keyLassoActiveRef.current = true;
+          keyLassoKeyRef.current = e.key ? e.key.toLowerCase() : '';
+
+          const startScreen = { ...lastMousePosRef.current };
+          const startFlow = screenToFlowPosition(startScreen);
+          keyLassoStartRef.current = startFlow;
+
+          const initialSel = (e.ctrlKey || e.metaKey)
+            ? new Set(selectedNodes.map(n => n.id))
+            : new Set();
+          keyLassoInitialRef.current = initialSel;
+          keyLassoTouchedRef.current = new Set();
+
+          // If cursor is already hovering a node when key is pressed, select it immediately
+          if (startScreen.x || startScreen.y) {
+            const el = document.elementFromPoint(startScreen.x, startScreen.y)?.closest('.react-flow__node');
+            const hId = el?.getAttribute('data-id');
+            if (hId && hId !== 'GROUP_BG') {
+              const hNode = reactFlowInstance.getNode(hId);
+              if (hNode && hNode.type !== 'GROUP_BG') {
+                keyLassoTouchedRef.current.add(hId);
+                setNodes(nds => nds.map(n => {
+                  if (n.type === 'GROUP_BG') return n;
+                  const isSel = initialSel.has(n.id) || n.id === hId;
+                  return n.selected === isSel ? n : { ...n, selected: isSel };
+                }));
+                if (onSelectionChangeRef.current) {
+                  onSelectionChangeRef.current(Array.from(new Set([...initialSel, hId])));
+                }
+              }
+            }
+          }
+        }
+        return;
+      }
 
       // Configurable F2 / rename hotkey (works automatically for the hovered block without selecting, or fallback to selected)
       if (checkHotkey(e, safeHotkeys.rename || ['F2']) && !isInput) {
@@ -695,23 +864,21 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           return;
         }
       } else if (checkHotkey(e, safeHotkeys.multiSelect) && !isInput) {
-        e.preventDefault();
+        // Multi-select toggle under cursor
         if (lastMousePosRef.current && (lastMousePosRef.current.x || lastMousePosRef.current.y)) {
           const elUnderCursor = document.elementFromPoint(lastMousePosRef.current.x, lastMousePosRef.current.y);
-          const nodeEl = elUnderCursor?.closest('.react-flow__node');
-          if (nodeEl) {
-            const targetId = nodeEl.dataset.id || nodeEl.getAttribute('data-id');
-            if (targetId) {
-              setNodes(nds => nds.map(n => n.id === targetId ? { ...n, selected: !n.selected } : n));
-              handleInteract();
-            }
-          } else {
-            const edgeEl = elUnderCursor?.closest('.react-flow__edge');
-            if (edgeEl) {
-              const targetId = edgeEl.dataset.id || edgeEl.getAttribute('data-id');
-              if (targetId) {
-                setEdges(eds => eds.map(edge => edge.id === targetId ? { ...edge, selected: !edge.selected } : edge));
-                handleInteract();
+          if (elUnderCursor) {
+            const targetNodeEl = elUnderCursor.closest('.react-flow__node');
+            if (targetNodeEl) {
+              const targetNodeId = targetNodeEl.getAttribute('data-id');
+              if (targetNodeId) {
+                e.preventDefault();
+                setNodes(nds => nds.map(n => {
+                  if (n.id === targetNodeId) {
+                    return { ...n, selected: !n.selected };
+                  }
+                  return n;
+                }));
               }
             }
           }
@@ -724,14 +891,15 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         e.preventDefault();
         if (selectedNodes.length === 0 && selectedEdges.length === 0 && lastMousePosRef.current) {
           const elUnderCursor = document.elementFromPoint(lastMousePosRef.current.x, lastMousePosRef.current.y);
-          const nodeEl = elUnderCursor?.closest('.react-flow__node');
-          if (nodeEl) {
-            const hoveredId = nodeEl.dataset.id || nodeEl.getAttribute('data-id');
-            const nodeToCopy = nodesRef.current.find(n => n.id === hoveredId);
-            if (nodeToCopy) {
-              setClipboard({ nodes: [nodeToCopy], edges: [] });
-              if (onLogAction) onLogAction('NODES_COPIED', { count: 1 });
-              return;
+          if (elUnderCursor) {
+            const targetNodeEl = elUnderCursor.closest('.react-flow__node');
+            if (targetNodeEl) {
+              const targetId = targetNodeEl.getAttribute('data-id');
+              const nodeToCopy = nodes.find(n => n.id === targetId);
+              if (nodeToCopy) {
+                handleCopy([nodeToCopy]);
+                return;
+              }
             }
           }
         }
@@ -744,38 +912,10 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         e.preventDefault(); handleRedo();
       } else if (checkHotkey(e, safeHotkeys.zoomIn || ['Ctrl++', 'Ctrl+=']) && !isInput) {
         e.preventDefault();
-        const reactFlowEl = document.querySelector('.react-flow');
-        if (reactFlowEl && lastMousePosRef.current && (lastMousePosRef.current.x || lastMousePosRef.current.y)) {
-          const bounds = reactFlowEl.getBoundingClientRect();
-          const { x: mouseX, y: mouseY } = lastMousePosRef.current;
-          if (mouseX >= bounds.left && mouseX <= bounds.right && mouseY >= bounds.top && mouseY <= bounds.bottom) {
-            const currentZoom = reactFlowInstance.getZoom();
-            const newZoom = Math.min(3.0, currentZoom * 1.2);
-            const flowPos = screenToFlowPosition({ x: mouseX, y: mouseY });
-            const newX = mouseX - flowPos.x * newZoom;
-            const newY = mouseY - flowPos.y * newZoom;
-            reactFlowInstance.setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 150 });
-            return;
-          }
-        }
-        reactFlowInstance?.zoomIn();
+        handleZoom(1.4);
       } else if (checkHotkey(e, safeHotkeys.zoomOut || ['Ctrl+-']) && !isInput) {
         e.preventDefault();
-        const reactFlowEl = document.querySelector('.react-flow');
-        if (reactFlowEl && lastMousePosRef.current && (lastMousePosRef.current.x || lastMousePosRef.current.y)) {
-          const bounds = reactFlowEl.getBoundingClientRect();
-          const { x: mouseX, y: mouseY } = lastMousePosRef.current;
-          if (mouseX >= bounds.left && mouseX <= bounds.right && mouseY >= bounds.top && mouseY <= bounds.bottom) {
-            const currentZoom = reactFlowInstance.getZoom();
-            const newZoom = Math.max(0.2, currentZoom / 1.2);
-            const flowPos = screenToFlowPosition({ x: mouseX, y: mouseY });
-            const newX = mouseX - flowPos.x * newZoom;
-            const newY = mouseY - flowPos.y * newZoom;
-            reactFlowInstance.setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 150 });
-            return;
-          }
-        }
-        reactFlowInstance?.zoomOut();
+        handleZoom(1 / 1.4);
       } else if (checkHotkey(e, safeHotkeys.contextMenu) && !isInput) {
         e.preventDefault();
         setContextMenu(prev => {
@@ -786,16 +926,68 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           if (prev && Math.hypot(prev.mouseX - mouseX, prev.mouseY - mouseY) < 15) {
             return null;
           }
-          return { mouseX, mouseY, connectSource: null };
+          const conn = connectingNodeRef.current;
+          connectingNodeRef.current = null;
+          const flowPos = screenToFlowPosition({ x: mouseX, y: mouseY });
+          return { 
+            mouseX, 
+            mouseY, 
+            flowX: flowPos.x, 
+            flowY: flowPos.y, 
+            connectSource: conn, 
+            openedAt: Date.now() 
+          };
         });
+      } else if (e.key === 'Escape') {
+        if (contextMenuRef.current) {
+          setContextMenu(null);
+        }
       } else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D') && !e.shiftKey && !e.altKey && !isInput && selectedNodes.length > 0) {
         e.preventDefault();
         handleDuplicate();
       }
     };
+
+    const handleKeyUp = (e) => {
+      if (keyLassoActiveRef.current) {
+        const releasedKey = e.key ? e.key.toLowerCase() : '';
+        const activeKey = keyLassoKeyRef.current;
+        const isModifierRelease = 
+          (activeKey === 'shift' && !e.shiftKey) ||
+          (activeKey === 'control' && !e.ctrlKey) ||
+          (activeKey === 'alt' && !e.altKey);
+
+        if (releasedKey === activeKey || isModifierRelease || !e.key) {
+          keyLassoActiveRef.current = false;
+          setKeyLassoBox(null);
+          keyLassoStartRef.current = null;
+          keyLassoKeyRef.current = null;
+          keyLassoTouchedRef.current.clear();
+          keyLassoInitialRef.current.clear();
+        }
+      }
+    };
+
+    const handleBlur = () => {
+      if (keyLassoActiveRef.current) {
+        keyLassoActiveRef.current = false;
+        setKeyLassoBox(null);
+        keyLassoStartRef.current = null;
+        keyLassoKeyRef.current = null;
+        keyLassoTouchedRef.current.clear();
+        keyLassoInitialRef.current.clear();
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete, handleCopy, handlePaste, handleUndo, handleRedo, handleDuplicate, setNodes, setEdges, hotkeys, reactFlowInstance, screenToFlowPosition, handleInteract]);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [selectedNodes, selectedEdges, clipboard, readOnly, deleteConfirm, executeDelete, handleCopy, handlePaste, handleUndo, handleRedo, handleDuplicate, setNodes, setEdges, hotkeys, handleZoom, reactFlowInstance, screenToFlowPosition, handleInteract]);
 
   const getHitEdge = (event, draggedNodes, currentEdges) => {
     const clientX = event.clientX || (event.touches && event.touches[0].clientX);
@@ -1223,7 +1415,11 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     const newId = 'node_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
     
     const offset = Math.floor(Math.random() * 40) - 20;
-    const position = clientPos ? screenToFlowPosition({ x: clientPos.mouseX, y: clientPos.mouseY }) : (() => {
+    const position = clientPos 
+      ? (clientPos.flowX !== undefined && clientPos.flowY !== undefined
+          ? { x: clientPos.flowX, y: clientPos.flowY }
+          : screenToFlowPosition({ x: clientPos.mouseX, y: clientPos.mouseY }))
+      : (() => {
         const bounds = document.querySelector('.react-flow').getBoundingClientRect();
         return screenToFlowPosition({ x: bounds.left + bounds.width / 2 + offset, y: bounds.top + bounds.height / 2 + offset });
     })();
@@ -1249,7 +1445,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     }));
 
     const conn = connectSource || clientPos?.connectSource;
-    if (conn && conn.nodeId) {
+    const CONNECTABLE_TYPES = ['IO', 'ACTION', 'CONDITION'];
+    if (conn && conn.nodeId && CONNECTABLE_TYPES.includes(type)) {
         setTimeout(() => {
             onConnect({
                 source: conn.nodeId,
@@ -1264,9 +1461,38 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const handlePaneContextMenu = useCallback((e) => { 
     if (readOnly) return; 
     e.preventDefault(); 
-    setContextMenu({ mouseX: e.clientX, mouseY: e.clientY, connectSource: connectingNodeRef.current }); 
+    const conn = connectingNodeRef.current;
     connectingNodeRef.current = null;
-  }, [readOnly]);
+    const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    setContextMenu({ 
+      mouseX: e.clientX, 
+      mouseY: e.clientY, 
+      flowX: flowPos.x, 
+      flowY: flowPos.y, 
+      connectSource: conn, 
+      openedAt: Date.now() 
+    }); 
+  }, [readOnly, screenToFlowPosition]);
+
+  const handlePaneMouseDown = useCallback((e) => {
+    if (readOnly) return;
+    const slots = Array.isArray(safeHotkeys.contextMenu) ? safeHotkeys.contextMenu : (safeHotkeys.contextMenu ? [safeHotkeys.contextMenu] : []);
+    const isMouse3 = slots.some(s => s.toLowerCase().trim() === 'mouse 3');
+    if (e.button === 1 && isMouse3) {
+      e.preventDefault();
+      const conn = connectingNodeRef.current;
+      connectingNodeRef.current = null;
+      const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      setContextMenu({ 
+        mouseX: e.clientX, 
+        mouseY: e.clientY, 
+        flowX: flowPos.x, 
+        flowY: flowPos.y, 
+        connectSource: conn, 
+        openedAt: Date.now() 
+      });
+    }
+  }, [readOnly, safeHotkeys.contextMenu, screenToFlowPosition]);
 
   const handleExportEduCode = () => {
     setShowExportMenu(false);
@@ -1412,47 +1638,49 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const btnClass = `p-2 rounded transition-opacity disabled:opacity-25 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 ${colorMode ? "text-gray-700 dark:text-gray-300" : "text-gray-500 dark:text-gray-400"}`;
 
   const panActivationKeyCode = useMemo(() => {
-    const slots = Array.isArray(safeHotkeys.pan) ? safeHotkeys.pan : (safeHotkeys.pan ? [safeHotkeys.pan] : []);
-    const keySlot = slots.find(s => !s.toLowerCase().includes('mouse'));
-    return keySlot || 'Space';
+    const codes = getReactFlowKeyCodes(safeHotkeys.pan);
+    return codes || 'Space';
   }, [safeHotkeys.pan]);
 
   const multiSelectionKeyCode = useMemo(() => {
-    const slots = Array.isArray(safeHotkeys.multiSelect) ? safeHotkeys.multiSelect : (safeHotkeys.multiSelect ? [safeHotkeys.multiSelect] : []);
-    const keys = [];
-    slots.forEach(s => {
-      const lower = s.toLowerCase();
-      if (lower.includes('ctrl')) keys.push('Control', 'Meta');
-      if (lower.includes('shift')) keys.push('Shift');
-      if (lower.includes('alt')) keys.push('Alt');
-      const parts = s.split('+');
-      const lastKey = parts[parts.length - 1].trim();
-      if (lastKey && !lastKey.toLowerCase().includes('klik') && !lastKey.toLowerCase().includes('mouse')) {
-        keys.push(lastKey);
-      }
-    });
-    return keys.length > 0 ? keys : ['Control', 'Meta'];
+    return getReactFlowKeyCodes(safeHotkeys.multiSelect) || ['Control', 'Meta'];
   }, [safeHotkeys.multiSelect]);
 
-  const selectionKeyCode = useMemo(() => {
-    const slots = Array.isArray(safeHotkeys.lassoSelect) ? safeHotkeys.lassoSelect : (safeHotkeys.lassoSelect ? [safeHotkeys.lassoSelect] : []);
-    const keys = [];
-    slots.forEach(s => {
-      const lower = s.toLowerCase();
-      if (lower.includes('shift')) keys.push('Shift');
-      if (lower.includes('ctrl')) keys.push('Control', 'Meta');
-      if (lower.includes('alt')) keys.push('Alt');
-      const parts = s.split('+');
-      const lastKey = parts[parts.length - 1].trim();
-      if (lastKey && !lastKey.toLowerCase().includes('tažení') && !lastKey.toLowerCase().includes('drag') && !lastKey.toLowerCase().includes('mouse')) {
-        keys.push(lastKey);
-      }
+  const isPanOnMouse1 = useMemo(() => {
+    const slots = Array.isArray(safeHotkeys.pan) ? safeHotkeys.pan : (safeHotkeys.pan ? [safeHotkeys.pan] : []);
+    return slots.some(s => {
+      const lower = s.toLowerCase().trim();
+      return lower === 'mouse 1' || lower === 'tažení' || lower === 'drag' || lower === 'tazeni';
     });
-    return keys.length > 0 ? keys : ['Shift'];
+  }, [safeHotkeys.pan]);
+
+  const selectionKeyCode = useMemo(() => {
+    return getReactFlowKeyCodes(safeHotkeys.lassoSelect);
   }, [safeHotkeys.lassoSelect]);
 
+  const panOnDrag = useMemo(() => {
+    if (isPanOnMouse1) return [0, 1, 2];
+    const slots = Array.isArray(safeHotkeys.pan) ? safeHotkeys.pan : (safeHotkeys.pan ? [safeHotkeys.pan] : []);
+    const buttons = [];
+    const hasMouse2 = slots.some(s => s.toLowerCase().trim() === 'mouse 2');
+    const hasMouse3 = slots.some(s => s.toLowerCase().trim() === 'mouse 3');
+    if (hasMouse3 || slots.length === 0) buttons.push(1);
+    if (hasMouse2) buttons.push(2);
+    if (buttons.length === 0) buttons.push(1);
+    return buttons;
+  }, [isPanOnMouse1, safeHotkeys.pan]);
+
+  const selectionOnDrag = useMemo(() => {
+    return !isPanOnMouse1;
+  }, [isPanOnMouse1]);
+
   return (
-    <div className="w-full h-full relative outline-none" tabIndex={0} onClick={() => { setContextMenu(null); setShowExportMenu(false); }} onPointerMove={handlePointerMove} onPointerUp={clearHover} onPointerLeave={clearHover}>
+    <div className="w-full h-full relative outline-none" tabIndex={0} onClick={() => { 
+      if (contextMenuRef.current && Date.now() - (contextMenuRef.current.openedAt || 0) > 350) {
+        setContextMenu(null);
+      }
+      setShowExportMenu(false); 
+    }} onPointerMove={handlePointerMove} onPointerUp={clearHover} onPointerLeave={clearHover}>
       <style>{`.react-flow__edge.drop-target .react-flow__edge-path { stroke: #4f46e5 !important; stroke-width: 4px !important; filter: drop-shadow(0 0 6px rgba(79,70,229,0.5)); transition: all 0.2s ease; }`}</style>
       
       {hoveredToolbarItem && hoverProgress > 0 && (
@@ -1493,158 +1721,19 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         </div>
       )}
 
-      {contextMenu && (
-        <>
-            <div className="fixed inset-0 z-[9998]" onClick={() => setContextMenu(null)} onContextMenu={(e) => e.preventDefault()} />
-            
-            {contextMenu.connectSource && (() => {
-              const srcNode = getNode(contextMenu.connectSource.nodeId);
-              if (!srcNode || !reactFlowInstance.getViewport) return null;
-              
-              let portOffsetX = (srcNode.measured?.width || 140) / 2;
-              let portOffsetY = (srcNode.measured?.height || 50) / 2;
-              
-              if (contextMenu.connectSource.handleId === 's-bottom') {
-                  portOffsetY = srcNode.measured?.height || 50;
-              } else if (contextMenu.connectSource.handleId === 's-right') {
-                  portOffsetX = srcNode.measured?.width || 140;
-              }
-              
-              const { x: transformX, y: transformY, zoom } = reactFlowInstance.getViewport();
-              const flowEl = document.querySelector('.react-flow');
-              const bounds = flowEl ? flowEl.getBoundingClientRect() : { left: 0, top: 0 };
-              
-              const screenPos = {
-                  x: (srcNode.position.x + portOffsetX) * zoom + transformX + bounds.left,
-                  y: (srcNode.position.y + portOffsetY) * zoom + transformY + bounds.top
-              };
-              
-              const menuWidth = 170;
-              const menuHeight = 260; 
-              
-              let menuLeft = contextMenu.mouseX;
-              if (contextMenu.mouseX + menuWidth > window.innerWidth) {
-                  menuLeft = window.innerWidth - (window.innerWidth - contextMenu.mouseX) - menuWidth;
-              }
-              
-              let menuTop = contextMenu.mouseY;
-              if (contextMenu.mouseY + menuHeight > window.innerHeight) {
-                  menuTop = window.innerHeight - (window.innerHeight - contextMenu.mouseY) - menuHeight;
-              }
-              
-              const targetX = menuLeft + menuWidth / 2;
-              const targetY = menuTop;
-              
-              const isRight = contextMenu.connectSource.handleId === 's-right';
-              let pathD = '';
-              if (isRight) {
-                  const midX = (screenPos.x + targetX) / 2;
-                  pathD = `M ${screenPos.x} ${screenPos.y} L ${midX} ${screenPos.y} L ${midX} ${targetY} L ${targetX} ${targetY}`;
-              } else {
-                  const midY = (screenPos.y + targetY) / 2;
-                  pathD = `M ${screenPos.x} ${screenPos.y} L ${screenPos.x} ${midY} L ${targetX} ${midY} L ${targetX} ${targetY}`;
-              }
-              
-              return (
-                <svg className="fixed inset-0 pointer-events-none z-[9997]" style={{ width: '100vw', height: '100vh' }}>
-                  <path d={pathD} fill="none" stroke="#6366f1" strokeWidth="3" strokeLinejoin="round" strokeDasharray="6,6" className="animate-pulse drop-shadow-md" />
-                  <circle cx={screenPos.x} cy={screenPos.y} r="4" fill="#6366f1" />
-                  <polygon points={`${targetX-4},${targetY-8} ${targetX+4},${targetY-8} ${targetX},${targetY}`} fill="#6366f1" />
-                </svg>
-              );
-            })()}
-
-            {(() => {
-                const menuWidth = 170;
-                const menuHeight = 260; // Estimated height with items
-                let style = {};
-                
-                if (contextMenu.mouseX + menuWidth > window.innerWidth) {
-                    style.right = window.innerWidth - contextMenu.mouseX;
-                } else {
-                    style.left = contextMenu.mouseX;
-                }
-                
-                if (contextMenu.mouseY + menuHeight > window.innerHeight) {
-                    style.bottom = window.innerHeight - contextMenu.mouseY;
-                } else {
-                    style.top = contextMenu.mouseY;
-                }
-
-                return (
-                  <div 
-                    className={`fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl flex flex-col pb-1 overflow-hidden min-w-[170px] ${!contextMenu.connectSource ? 'pt-1' : ''}`} 
-                    style={style}
-                  >
-                {contextMenu.connectSource ? (
-                  <div className="px-3 py-1.5 bg-indigo-50/80 dark:bg-indigo-950/60 border-b border-indigo-100 dark:border-indigo-800/60 flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400">
-                      <Link2 size={13} className="animate-pulse shrink-0" />
-                      <span>Napojit na blok</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="px-3 py-1 border-b border-gray-100 dark:border-gray-700/50 mb-1 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                    Přidat blok
-                  </div>
-                )}
-                {[
-                  {type: 'START_END', label: 'Start/End', icon: Circle, color: colorMode ? "text-fuchsia-500" : "text-gray-500"},
-                  {type: 'ACTION', label: 'Operace', icon: Square, color: colorMode ? "text-blue-500" : "text-gray-500"},
-                  {type: 'IO', label: 'Vstup/Výstup', icon: Square, color: colorMode ? "text-emerald-500" : "text-gray-500"},
-                  {type: 'CONDITION', label: 'Podmínka', icon: Diamond, color: colorMode ? "text-orange-500" : "text-gray-500"},
-                  ...(editorMode !== 'advanced' ? [
-                    {type: 'LOOP_CONTAINER', label: 'Cyklus (Skupina)', icon: Hexagon, color: colorMode ? "text-purple-500" : "text-gray-500"},
-                    {type: 'FOR_CONTAINER', label: 'FOR Cyklus', icon: Box, color: colorMode ? "text-indigo-500" : "text-gray-500"},
-                    {type: 'SWITCH_CONTAINER', label: 'Switch (Větvení)', icon: Columns, color: colorMode ? "text-rose-500" : "text-gray-500"}
-                  ] : []),
-                  {type: 'COMMENT', label: 'Komentář', icon: MessageSquare, color: colorMode ? "text-yellow-500" : "text-gray-500"}
-                ].filter(item => {
-                  if (!contextMenu.connectSource) return true;
-                  return item.type !== 'COMMENT';
-                }).map(item => (
-                  <button key={item.type} onClick={() => { 
-                    let t = item.type;
-                    let txt = item.type === 'COMMENT'?'Komentář':(item.type==='CONDITION'?'x>0':(item.type==='IO'?'x':(item.type==='LOOP_CONTAINER'?'':'')));
-                    if (t === 'FOR_CONTAINER' || t === 'SWITCH_CONTAINER') { txt = ''; }
-                    
-                    if (contextMenu.connectSource && (t === 'LOOP_CONTAINER' || t === 'FOR_CONTAINER')) {
-                        // Create the container at the current position without connecting it
-                        addNodeAt(t, txt, { mouseX: contextMenu.mouseX, mouseY: contextMenu.mouseY });
-                        // Move the context menu slightly so the inner block is spawned inside the container
-                        setContextMenu({
-                            ...contextMenu,
-                            mouseX: contextMenu.mouseX + 40,
-                            mouseY: contextMenu.mouseY + 40
-                        });
-                        return;
-                    }
-                    
-                    addNodeAt(t, txt, contextMenu); 
-                    setContextMenu(null); 
-                  }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
-                    {item.type === 'IO' ? <IoIcon size={14} className={item.color} /> : <item.icon size={14} className={item.color} />} {item.label}
-                  </button>
-                ))}                </div>
-                );
-            })()}
-        </>
-      )}
-
-
       <div className="absolute top-4 left-4 z-10 flex gap-2 bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700">
-        <button data-testid="Start/Konec" onClick={() => { clearHover(); addNodeAt('START_END', ''); }} onMouseEnter={(e) => handlePointerDown('START_END', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('START_END', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Circle size={18} className={colorMode ? "text-fuchsia-600" : ""} /></button>
-        <button data-testid="Operace" onClick={() => { clearHover(); addNodeAt('ACTION', 'Operace'); }} onMouseEnter={(e) => handlePointerDown('ACTION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('ACTION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Square size={18} className={colorMode ? "text-blue-600" : ""} /></button>
-        <button data-testid="Vstup/Výstup" onClick={() => { clearHover(); addNodeAt('IO', 'x'); }} onMouseEnter={(e) => handlePointerDown('IO', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('IO', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><IoIcon size={18} className={colorMode ? "text-emerald-600" : ""} /></button>
-        <button data-testid="Podmínka" onClick={() => { clearHover(); addNodeAt('CONDITION', 'x > 0'); }} onMouseEnter={(e) => handlePointerDown('CONDITION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('CONDITION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Diamond size={18} className={colorMode ? "text-orange-600" : ""} /></button>
+        <button data-testid="Start/Konec" onClick={() => { clearHover(); addNodeAt('START_END', DEFAULT_BLOCK_STRINGS.START_END); }} onMouseEnter={(e) => handlePointerDown('START_END', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('START_END', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Circle size={18} className={colorMode ? "text-fuchsia-600" : ""} /></button>
+        <button data-testid="Operace" onClick={() => { clearHover(); addNodeAt('ACTION', DEFAULT_BLOCK_STRINGS.ACTION); }} onMouseEnter={(e) => handlePointerDown('ACTION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('ACTION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Square size={18} className={colorMode ? "text-blue-600" : ""} /></button>
+        <button data-testid="Vstup/Výstup" onClick={() => { clearHover(); addNodeAt('IO', DEFAULT_BLOCK_STRINGS.IO); }} onMouseEnter={(e) => handlePointerDown('IO', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('IO', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><IoIcon size={18} className={colorMode ? "text-emerald-600" : ""} /></button>
+        <button data-testid="Podmínka" onClick={() => { clearHover(); addNodeAt('CONDITION', DEFAULT_BLOCK_STRINGS.CONDITION); }} onMouseEnter={(e) => handlePointerDown('CONDITION', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('CONDITION', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Diamond size={18} className={colorMode ? "text-orange-600" : ""} /></button>
         {editorMode !== 'advanced' && (
           <>
-            <button data-testid="Cyklus" onClick={() => { clearHover(); addNodeAt('LOOP_CONTAINER', ''); }} onMouseEnter={(e) => handlePointerDown('LOOP_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('LOOP_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Hexagon size={18} className={colorMode ? "text-purple-600" : ""} /></button>
-            <button data-testid="FOR Cyklus" onClick={() => { clearHover(); addNodeAt('FOR_CONTAINER', ''); }} onMouseEnter={(e) => handlePointerDown('FOR_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('FOR_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Box size={18} className={colorMode ? "text-indigo-600" : ""} /></button>
-            <button data-testid="Switch" onClick={() => { clearHover(); addNodeAt('SWITCH_CONTAINER', 'x'); }} onMouseEnter={(e) => handlePointerDown('SWITCH_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('SWITCH_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Columns size={18} className={colorMode ? "text-rose-600" : ""} /></button>
+            <button data-testid="Cyklus" onClick={() => { clearHover(); addNodeAt('LOOP_CONTAINER', DEFAULT_BLOCK_STRINGS.LOOP_CONTAINER); }} onMouseEnter={(e) => handlePointerDown('LOOP_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('LOOP_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Hexagon size={18} className={colorMode ? "text-purple-600" : ""} /></button>
+            <button data-testid="FOR Cyklus" onClick={() => { clearHover(); addNodeAt('FOR_CONTAINER', DEFAULT_BLOCK_STRINGS.FOR_CONTAINER); }} onMouseEnter={(e) => handlePointerDown('FOR_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('FOR_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Box size={18} className={colorMode ? "text-indigo-600" : ""} /></button>
+            <button data-testid="Switch" onClick={() => { clearHover(); addNodeAt('SWITCH_CONTAINER', DEFAULT_BLOCK_STRINGS.SWITCH_CONTAINER); }} onMouseEnter={(e) => handlePointerDown('SWITCH_CONTAINER', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('SWITCH_CONTAINER', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><Columns size={18} className={colorMode ? "text-rose-600" : ""} /></button>
           </>
         )}
-        <button data-testid="Komentář" onClick={() => { clearHover(); addNodeAt('COMMENT', 'Komentář'); }} onMouseEnter={(e) => handlePointerDown('COMMENT', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('COMMENT', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
+        <button data-testid="Komentář" onClick={() => { clearHover(); addNodeAt('COMMENT', DEFAULT_BLOCK_STRINGS.COMMENT); }} onMouseEnter={(e) => handlePointerDown('COMMENT', e)} onMouseLeave={clearHover} onTouchStart={(e) => handlePointerDown('COMMENT', e)} onTouchEnd={clearHover} onTouchCancel={clearHover} disabled={readOnly} className={btnClass}><MessageSquare size={18} className={colorMode ? "text-yellow-600" : ""} /></button>
       </div>
 
       {(selectedNodes.length > 0 || selectedEdges.length > 0) && !readOnly && (
@@ -1675,11 +1764,10 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         </div>
       </div>
 
-      <div className="w-full h-full" onContextMenu={handlePaneContextMenu}>
+      <div className="w-full h-full" onContextMenu={handlePaneContextMenu} onMouseDown={handlePaneMouseDown}>
         <ReactFlow 
           nodes={allNodes} edges={edges} 
           attributionPosition="bottom-left"
-          multiSelectionKeyCode={['Control', 'Meta', 'Shift']}
           onNodesChange={(changes) => { 
               const isUserChange = changes.some(c => c.type !== 'dimensions' && c.type !== 'replace');
               if (isUserChange) handleInteract(); 
@@ -1696,7 +1784,14 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           onNodeDragStart={() => { takeSnapshot(); handleInteract(); }}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
-          onPaneClick={() => { handleInteract(); setContextMenu(null); setShowExportMenu(false); if (onPaneClickRef.current) onPaneClickRef.current(); }}
+          onPaneClick={() => { 
+            handleInteract(); 
+            if (contextMenuRef.current && Date.now() - (contextMenuRef.current.openedAt || 0) > 350) {
+              setContextMenu(null);
+            }
+            setShowExportMenu(false); 
+            if (onPaneClickRef.current) onPaneClickRef.current(); 
+          }}
           onSelectionChange={({ nodes }) => { if (onSelectionChangeRef.current) onSelectionChangeRef.current(nodes.filter(n => n.type !== 'GROUP_BG').map(n => n.id)); }}
           isValidConnection={isValidConnection} 
           nodeTypes={nodeTypes} edgeTypes={edgeTypes} 
@@ -1707,7 +1802,11 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           minZoom={0.2}
           maxZoom={3.0}
           connectionLineType={ConnectionLineType.SmoothStep}
-          deleteKeyCode={null} selectionOnDrag={true} panOnDrag={[1, 2]} panOnScroll={true} selectionMode={selectionMode === 'full' ? 'full' : 'partial'}
+          deleteKeyCode={null} 
+          selectionOnDrag={selectionOnDrag} 
+          panOnDrag={panOnDrag} 
+          panOnScroll={true} 
+          selectionMode={selectionMode === 'full' ? 'full' : 'partial'}
           multiSelectionKeyCode={multiSelectionKeyCode}
           selectionKeyCode={selectionKeyCode}
           panActivationKeyCode={panActivationKeyCode}
@@ -1718,12 +1817,128 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           zoomOnDoubleClick={false}
         >
           <Background color={isDarkMode ? "#334155" : "#cbd5e1"} gap={16} />
-          <Controls showZoom={false} showFitView={false} showInteractive={false} className="mb-8">
-            <Tooltip text="Přiblížit" position="right"><ControlButton onClick={() => reactFlowInstance.zoomIn()}><Plus size={16}/></ControlButton></Tooltip>
-            <Tooltip text="Oddálit" position="right"><ControlButton onClick={() => reactFlowInstance.zoomOut()}><Minus size={16}/></ControlButton></Tooltip>
-            <Tooltip text="Přizpůsobit" position="right"><ControlButton onClick={() => reactFlowInstance.fitView({ padding: 0.2 })}><Maximize size={16}/></ControlButton></Tooltip>
-          </Controls>
+          <ViewportPortal>
+            {keyLassoBox && (
+              <div 
+                className="nodrag nopan pointer-events-none absolute z-[9000] border-2 border-dashed border-indigo-500 bg-indigo-500/15 dark:border-indigo-400 dark:bg-indigo-400/20 rounded shadow-sm"
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  transform: `translate(${keyLassoBox.x}px, ${keyLassoBox.y}px)`,
+                  width: `${keyLassoBox.width}px`,
+                  height: `${keyLassoBox.height}px`,
+                  pointerEvents: 'none'
+                }}
+              />
+            )}
+            {contextMenu && (
+              <div 
+                ref={contextMenuDomRef}
+                className={`nodrag nopan absolute z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl flex flex-col pb-1 overflow-hidden min-w-[170px] ${!contextMenu.connectSource ? 'pt-1' : ''}`} 
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  transform: `translate(${contextMenu.flowX}px, ${contextMenu.flowY}px)`,
+                  pointerEvents: 'all'
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {contextMenu.connectSource ? (
+                  <div className="px-3 py-1.5 bg-indigo-50/80 dark:bg-indigo-950/60 border-b border-indigo-100 dark:border-indigo-800/60 flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                      <Link2 size={13} className="animate-pulse shrink-0" />
+                      <span>Napojit na blok</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="px-3 py-1 border-b border-gray-100 dark:border-gray-700/50 mb-1 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                    Přidat blok
+                  </div>
+                )}
+                {[
+                  {type: 'START_END', label: 'Start/End', icon: Circle, color: colorMode ? "text-fuchsia-500" : "text-gray-500"},
+                  {type: 'ACTION', label: 'Operace', icon: Square, color: colorMode ? "text-blue-500" : "text-gray-500"},
+                  {type: 'IO', label: 'Vstup/Výstup', icon: Square, color: colorMode ? "text-emerald-500" : "text-gray-500"},
+                  {type: 'CONDITION', label: 'Podmínka', icon: Diamond, color: colorMode ? "text-orange-500" : "text-gray-500"},
+                  ...(editorMode !== 'advanced' ? [
+                    {type: 'LOOP_CONTAINER', label: 'Cyklus (Skupina)', icon: Hexagon, color: colorMode ? "text-purple-500" : "text-gray-500"},
+                    {type: 'FOR_CONTAINER', label: 'FOR Cyklus', icon: Box, color: colorMode ? "text-indigo-500" : "text-gray-500"},
+                    {type: 'SWITCH_CONTAINER', label: 'Switch (Větvení)', icon: Columns, color: colorMode ? "text-rose-500" : "text-gray-500"}
+                  ] : []),
+                  {type: 'COMMENT', label: 'Komentář', icon: MessageSquare, color: colorMode ? "text-yellow-500" : "text-gray-500"}
+                ].filter(item => {
+                  if (!contextMenu.connectSource) return true;
+                  return item.type !== 'COMMENT';
+                }).map(item => (
+                  <button key={item.type} onClick={() => { 
+                    const t = item.type;
+                    const txt = DEFAULT_BLOCK_STRINGS[t] ?? '';
+                    
+                    if (contextMenu.connectSource && (t === 'LOOP_CONTAINER' || t === 'FOR_CONTAINER')) {
+                        addNodeAt(t, txt, contextMenu);
+                        setContextMenu(prev => {
+                            if (!prev) return null;
+                            return {
+                                ...prev,
+                                mouseX: prev.mouseX + 40,
+                                mouseY: prev.mouseY + 40,
+                                flowX: prev.flowX + 40,
+                                flowY: prev.flowY + 40,
+                                openedAt: Date.now()
+                            };
+                        });
+                        return;
+                    }
+                    
+                    addNodeAt(t, txt, contextMenu); 
+                    setContextMenu(null); 
+                  }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                    {item.type === 'IO' ? <IoIcon size={14} className={item.color} /> : <item.icon size={14} className={item.color} />} {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </ViewportPortal>
         </ReactFlow>
+
+        {/* Bottom-left zoom & center controls styled to match EduCode app UI (vertical orientation) */}
+        <div className="absolute bottom-6 left-4 z-10 flex flex-col items-center gap-0.5 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
+          <Tooltip text="Přiblížit" position="right">
+            <button
+              type="button"
+              onClick={() => handleZoom(1.2)}
+              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded transition-colors"
+              aria-label="Přiblížit"
+            >
+              <ZoomIn size={16} />
+            </button>
+          </Tooltip>
+          <Tooltip text="Oddálit" position="right">
+            <button
+              type="button"
+              onClick={() => handleZoom(1 / 1.2)}
+              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded transition-colors"
+              aria-label="Oddálit"
+            >
+              <ZoomOut size={16} />
+            </button>
+          </Tooltip>
+          <div className="w-4 h-px bg-gray-200 dark:bg-gray-700 my-0.5" />
+          <Tooltip text="Vycentrovat" position="right">
+            <button
+              type="button"
+              onClick={() => reactFlowInstance?.fitView({ padding: 0.2, duration: 250 })}
+              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded transition-colors"
+              aria-label="Vycentrovat"
+            >
+              <Maximize2 size={16} />
+            </button>
+          </Tooltip>
+        </div>
       </div>
     </div>
   );
