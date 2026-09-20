@@ -39,14 +39,19 @@ import {
   Move,
   MousePointerClick,
   BoxSelect,
-  Mouse
+  Mouse,
+  Info,
+  SlidersHorizontal,
+  Lock
 } from 'lucide-react';
 
 import { StartEndNode, ConditionNode, ActionNode, GroupBgNode, LoopContainerNode } from './diagram/CustomNodes';
 import { CustomEdge } from './diagram/CustomEdge';
 import { edgeLabels } from './diagram/constants';
 import { Tooltip } from './Tooltip';
+import { ConfirmDialog } from './ConfirmDialog';
 import { getGroupDefs, computeGroupBounds } from '../utils/grouping';
+import { normalizeKeyStr, DEFAULT_HOTKEYS } from '../utils/hotkeys';
 
 // Node and Edge types defined outside component to avoid React Flow warnings
 const previewNodeTypes = {
@@ -176,9 +181,9 @@ const CustomSelect = ({ label, value, options, onChange, description }) => {
     <div className="relative mb-5" ref={containerRef}>
       {label && (
         <div className="mb-1.5">
-          <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
+          <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
             {label}
-          </label>
+          </span>
           {description && <p className="text-xs text-gray-400 dark:text-gray-500">{description}</p>}
         </div>
       )}
@@ -218,21 +223,31 @@ const CustomSelect = ({ label, value, options, onChange, description }) => {
 };
 
 // Toggle switch matching EduCode app style
-const ToggleSwitch = ({ checked, onChange, label, description }) => (
-  <label className="flex items-center justify-between cursor-pointer group py-2.5 px-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors border border-transparent hover:border-gray-100 dark:hover:border-gray-800">
-    <div className="pr-4">
-      <span className="text-sm font-medium text-gray-800 dark:text-gray-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors block">
-        {label}
-      </span>
-      {description && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{description}</p>}
-    </div>
-    <div className="relative shrink-0">
-      <input type="checkbox" className="sr-only" checked={checked} onChange={onChange} />
-      <div className={`block w-11 h-6 rounded-full transition-colors ${checked ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
-      <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${checked ? 'transform translate-x-5' : ''} shadow-sm`}></div>
-    </div>
-  </label>
-);
+const ToggleSwitch = ({ checked, onChange, label, description, id, name }) => {
+  const toggleId = id || `toggle-${(label || '').toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+  return (
+    <label htmlFor={toggleId} className="flex items-center justify-between cursor-pointer group py-2.5 px-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors border border-transparent hover:border-gray-100 dark:hover:border-gray-800">
+      <div className="pr-4">
+        <span className="text-sm font-medium text-gray-800 dark:text-gray-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors block">
+          {label}
+        </span>
+        {description && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{description}</p>}
+      </div>
+      <div className="relative shrink-0">
+        <input 
+          id={toggleId}
+          name={name || toggleId}
+          type="checkbox" 
+          className="sr-only" 
+          checked={checked} 
+          onChange={onChange} 
+        />
+        <div className={`block w-11 h-6 rounded-full transition-colors ${checked ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
+        <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${checked ? 'transform translate-x-5' : ''} shadow-sm`}></div>
+      </div>
+    </label>
+  );
+};
 
 // 1:1 Live Diagram Canvas Preview Component
 function DiagramPreviewCanvas({ settings, activeTab }) {
@@ -806,6 +821,8 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
 
   const activeNodeId = (settings.showDebugger && activeTab === 'controls') ? stepPath[debugStepIndex] : null;
 
+  const [isViewportMoved, setIsViewportMoved] = useState(false);
+
   const [nodes, setNodes, onNodesChange] = useNodesState(
     activeTab === 'appearance' ? getAppearanceNodes() : getControlsNodes(null)
   );
@@ -813,6 +830,21 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
     activeTab === 'appearance' ? getAppearanceEdges() : getControlsEdges()
   );
   const reactFlowInstance = useReactFlow();
+
+  const defaultNodes = useMemo(() => {
+    return activeTab === 'appearance' ? getAppearanceNodes() : getControlsNodes(null);
+  }, [activeTab, getAppearanceNodes, getControlsNodes]);
+
+  const isNodesMoved = useMemo(() => {
+    if (!nodes || !defaultNodes) return false;
+    return nodes.some(n => {
+      const def = defaultNodes.find(d => d.id === n.id);
+      if (!def) return false;
+      return Math.abs(n.position.x - def.position.x) > 1 || Math.abs(n.position.y - def.position.y) > 1;
+    });
+  }, [nodes, defaultNodes]);
+
+  const canReset = isNodesMoved || isViewportMoved;
 
   // Dynamic color grouping using EduCode's grouping.js
   const groupDefs = useMemo(() => {
@@ -838,6 +870,7 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
     prevEditorModeRef.current = settings.editorMode;
 
     if (tabChanged || (activeTab === 'controls' && modeChanged)) {
+      setIsViewportMoved(false);
       if (activeTab === 'appearance') {
         setNodes(getAppearanceNodes());
         setEdges(getAppearanceEdges());
@@ -900,6 +933,8 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
   }, [activeNodeId, activeTab, setNodes]);
 
   const handleReset = () => {
+    if (!canReset) return;
+    setIsViewportMoved(false);
     if (activeTab === 'appearance') {
       setNodes(getAppearanceNodes());
       setEdges(getAppearanceEdges());
@@ -925,14 +960,21 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleReset}
-            title="Obnovit výchozí pozice"
-            className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors shadow-sm"
-          >
-            <RotateCcw size={11} />
-            <span>Reset</span>
-          </button>
+          <Tooltip text={!canReset ? 'Plátno je již ve výchozím stavu' : 'Obnovit výchozí pozice'} position="bottom-left">
+            <button
+              type="button"
+              disabled={!canReset}
+              onClick={handleReset}
+              className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border transition-colors shadow-2xs ${
+                !canReset
+                  ? 'opacity-40 cursor-default bg-gray-100 dark:bg-gray-800/40 text-gray-400 dark:text-gray-600 border-gray-200 dark:border-gray-800'
+                  : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 shadow-sm cursor-pointer'
+              }`}
+            >
+              <RotateCcw size={11} className={!canReset ? 'text-gray-400 dark:text-gray-600' : 'text-indigo-500'} />
+              <span>Reset</span>
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -1011,36 +1053,51 @@ function DiagramPreviewCanvas({ settings, activeTab }) {
           nodesConnectable={false}
           nodesFocusable={false}
           edgesFocusable={false}
-          edgesUpdatable={false}
+          edgesReconnectable={false}
           deleteKeyCode={null}
           elevateNodesOnSelect={false}
           proOptions={{ hideAttribution: true }}
+          onMoveEnd={(e) => {
+            if (e) setIsViewportMoved(true);
+          }}
         >
           <Background color={isDark ? "#334155" : "#cbd5e1"} gap={16} />
         </ReactFlow>
 
         <div className="absolute bottom-3 right-3 z-10 flex gap-1 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
-          <button
-            onClick={() => reactFlowInstance?.zoomIn()}
-            title="Přiblížit"
-            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded transition-colors"
-          >
-            <ZoomIn size={14} />
-          </button>
-          <button
-            onClick={() => reactFlowInstance?.zoomOut()}
-            title="Oddálit"
-            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded transition-colors"
-          >
-            <ZoomOut size={14} />
-          </button>
-          <button
-            onClick={() => reactFlowInstance?.fitView({ padding: 0.25 })}
-            title="Vycentrovat pohled"
-            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded transition-colors"
-          >
-            <Maximize2 size={14} />
-          </button>
+          <Tooltip text="Přiblížit" position="top">
+            <button
+              onClick={() => {
+                reactFlowInstance?.zoomIn();
+                setIsViewportMoved(true);
+              }}
+              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded transition-colors"
+            >
+              <ZoomIn size={14} />
+            </button>
+          </Tooltip>
+          <Tooltip text="Oddálit" position="top">
+            <button
+              onClick={() => {
+                reactFlowInstance?.zoomOut();
+                setIsViewportMoved(true);
+              }}
+              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded transition-colors"
+            >
+              <ZoomOut size={14} />
+            </button>
+          </Tooltip>
+          <Tooltip text="Vycentrovat pohled" position="top-left">
+            <button
+              onClick={() => {
+                reactFlowInstance?.fitView({ padding: 0.25 });
+                setIsViewportMoved(false);
+              }}
+              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded transition-colors"
+            >
+              <Maximize2 size={14} />
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -1067,11 +1124,21 @@ const PreviewCanvas = ({ settings, activeTab }) => {
   );
 };
 
+// Helper to detect mouse-type hotkeys for badge icon
+const isMouseHotkey = (hotkey) => {
+  if (!hotkey || typeof hotkey !== 'string') return false;
+  const l = hotkey.toLowerCase();
+  return l.startsWith('mouse') || l.includes('klik') || l.includes('tažení') || l.includes('tazeni');
+};
+
 // Full-featured Hotkeys Manager Component
 const HotkeysManager = ({ hotkeys, onUpdate }) => {
   const [recording, setRecording] = useState(null); // { actionKey, slotIndex }
+  const [heldModifiers, setHeldModifiers] = useState([]); // ['Ctrl', 'Shift', 'Alt']
   const [conflictWarning, setConflictWarning] = useState(null); // { newKey, conflictWith, targetAction, targetSlot }
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [actionConfirm, setActionConfirm] = useState(null); // { type: 'restore' | 'remove', actionKey, actionLabel, defaultSlots, anchoredSlots }
+  const [expandedRow, setExpandedRow] = useState(null); // actionKey of expanded row
 
   const getActionSlots = useCallback((actionKey) => {
     const val = hotkeys?.[actionKey];
@@ -1089,24 +1156,37 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
     }
     onUpdate('hotkeys', { ...hotkeys, [actionKey]: currentSlots });
     setRecording(null);
+    setHeldModifiers([]);
     setConflictWarning(null);
   }, [getActionSlots, hotkeys, onUpdate]);
 
   const handleAssign = useCallback((hotkeyString) => {
     if (!recording) return;
+    if (isMouseHotkey(hotkeyString)) return; // Mouse hotkeys cannot be assigned
+
+    const normalizedNew = normalizeKeyStr(hotkeyString);
+
+    // If already in the same action, don't duplicate
+    const currentSlots = getActionSlots(recording.actionKey);
+    const alreadyInSameAction = currentSlots.some((s, idx) => idx !== recording.slotIndex && normalizeKeyStr(s) === normalizedNew);
+    if (alreadyInSameAction) {
+      setRecording(null);
+      setHeldModifiers([]);
+      return;
+    }
 
     // Check for conflicts across all actions and slots
     let conflict = null;
     ACTION_DEFINITIONS.forEach(def => {
       const slots = getActionSlots(def.key);
       slots.forEach((s, sIdx) => {
-        if (s.toLowerCase() === hotkeyString.toLowerCase()) {
+        if (normalizeKeyStr(s) === normalizedNew) {
           if (def.key !== recording.actionKey || sIdx !== recording.slotIndex) {
             conflict = {
               actionKey: def.key,
               actionLabel: def.label,
               slotIndex: sIdx,
-              key: hotkeyString
+              key: s
             };
           }
         }
@@ -1127,8 +1207,20 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
     applyHotkey(recording.actionKey, recording.slotIndex, hotkeyString);
   }, [recording, getActionSlots, applyHotkey]);
 
+  // Live modifier tracking & key recording
   useEffect(() => {
-    if (!recording) return;
+    if (!recording) {
+      setHeldModifiers([]);
+      return;
+    }
+
+    const getModifiers = (e) => {
+      const mods = [];
+      if (e.ctrlKey || e.metaKey) mods.push('Ctrl');
+      if (e.altKey) mods.push('Alt');
+      if (e.shiftKey) mods.push('Shift');
+      return mods;
+    };
 
     const handleKeyDown = (e) => {
       e.preventDefault();
@@ -1137,58 +1229,68 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
       // Escape cancels recording
       if (e.key === 'Escape') {
         setRecording(null);
+        setHeldModifiers([]);
         setConflictWarning(null);
         return;
       }
 
-      // Ignore bare modifiers
-      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+      // If modifier key is pressed, update held modifiers
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
+        setHeldModifiers(getModifiers(e));
+        return;
+      }
 
-      let keys = [];
-      if (e.ctrlKey || e.metaKey) keys.push('Ctrl');
-      if (e.shiftKey) keys.push('Shift');
-      if (e.altKey) keys.push('Alt');
-
+      // Non-modifier key pressed - finalize combination
+      const mods = getModifiers(e);
       let key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
       if (key === ' ') key = 'Space';
       if (key === '=' || key === '+') key = '+';
       if (key === '-') key = '-';
 
-      keys.push(key);
-      const hotkeyString = keys.join('+');
-
+      const hotkeyString = [...mods, key].join('+');
+      setHeldModifiers([]);
       handleAssign(hotkeyString);
     };
 
-    const handleMouseDown = (e) => {
-      // Direct mouse 3 (wheel click) or mouse 2 (right click) assignment
-      if (e.button === 1) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleAssign('Mouse 3');
-      } else if (e.button === 2) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleAssign('Mouse 2');
+    const handleKeyUp = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Modifier key released - update live modifier display
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
+        setHeldModifiers(getModifiers(e));
       }
     };
 
+    const handleMouseDown = (e) => {
+      // Don't intercept clicks on interactive buttons (options, cancel, etc.)
+      if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a')) {
+        return;
+      }
+
+      // Clicking outside cancels recording (mouse hotkeys cannot be assigned)
+      setRecording(null);
+      setHeldModifiers([]);
+    };
+
     window.addEventListener('keydown', handleKeyDown, { capture: true });
+    window.addEventListener('keyup', handleKeyUp, { capture: true });
     window.addEventListener('mousedown', handleMouseDown, { capture: true });
     return () => {
       window.removeEventListener('keydown', handleKeyDown, { capture: true });
+      window.removeEventListener('keyup', handleKeyUp, { capture: true });
       window.removeEventListener('mousedown', handleMouseDown, { capture: true });
     };
   }, [recording, handleAssign]);
 
-  const handleConfirmOverwrite = () => {
+  const handleConfirmOverwrite = useCallback(() => {
     if (!conflictWarning) return;
     const { newKey, conflictWith, targetAction, targetSlot } = conflictWarning;
     const updated = { ...hotkeys };
 
     // Remove from the conflicting action
     const oldSlots = [...getActionSlots(conflictWith.actionKey)].filter(
-      k => k.toLowerCase() !== newKey.toLowerCase()
+      k => normalizeKeyStr(k) !== normalizeKeyStr(newKey)
     );
     updated[conflictWith.actionKey] = oldSlots;
 
@@ -1203,44 +1305,31 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
 
     onUpdate('hotkeys', updated);
     setRecording(null);
+    setHeldModifiers([]);
     setConflictWarning(null);
-  };
+  }, [conflictWarning, hotkeys, getActionSlots, onUpdate]);
 
   const handleRemoveSlot = (actionKey, slotIndex) => {
     const currentSlots = [...getActionSlots(actionKey)];
+    if (isMouseHotkey(currentSlots[slotIndex])) return; // Anchored mouse hotkeys cannot be removed
     currentSlots.splice(slotIndex, 1);
     onUpdate('hotkeys', { ...hotkeys, [actionKey]: currentSlots });
   };
 
-  useEffect(() => {
-    if (!showResetConfirm) return;
-    const handleConfirmKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        setShowResetConfirm(false);
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        e.stopPropagation();
-        onUpdate('resetHotkeys', true);
-        setShowResetConfirm(false);
-      }
-    };
-    window.addEventListener('keydown', handleConfirmKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', handleConfirmKeyDown, { capture: true });
-  }, [showResetConfirm, onUpdate]);
-
   return (
-    <div className="flex-1 h-full p-6 md:p-8 overflow-y-auto bg-gray-50/50 dark:bg-gray-900/40 space-y-6">
+    <div 
+      className="flex-1 h-full pl-6 pr-4 pt-2.5 pb-3 md:pl-8 md:pr-6 md:pt-2.5 md:pb-3 overflow-y-auto bg-gray-50/50 dark:bg-gray-900/40 space-y-3 [scrollbar-gutter:stable]"
+      style={{ scrollbarGutter: 'stable' }}
+    >
       
       {/* Header bar */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-gray-200 dark:border-gray-800">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-2.5 border-b border-gray-200 dark:border-gray-800">
         <div>
           <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
             <Keyboard size={19} className="text-indigo-500" />
             Správce klávesových zkratek
           </h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
             Každá akce může mít více alternativních zkratek (např. <strong>Ctrl+Z</strong> i <strong>Alt+Z</strong> pro Krok zpět).
           </p>
         </div>
@@ -1255,288 +1344,277 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
       </div>
 
       {/* Warning pop-up for Reset to Default Hotkeys */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 z-[1200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowResetConfirm(false)}>
-          <div 
-            className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-gray-200 dark:border-gray-800 animate-in fade-in zoom-in-95 duration-150"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-3 mb-3 text-amber-600 dark:text-amber-400">
-              <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-900/40">
-                <AlertTriangle size={22} />
-              </div>
-              <h4 className="text-base font-bold text-gray-900 dark:text-white">Obnovit výchozí zkratky?</h4>
-            </div>
-            <p className="text-xs text-gray-600 dark:text-gray-300 mb-6 leading-relaxed">
-              Všechna vaše vlastní přiřazení kláves budou smazána a nahrazena výchozí sadou zkratek. Tuto akci nelze vzít zpět.
-            </p>
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setShowResetConfirm(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-              >
-                Zrušit (Esc)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdate('resetHotkeys', true);
-                  setShowResetConfirm(false);
-                }}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-sm"
-              >
-                Obnovit výchozí (Enter)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={showResetConfirm}
+        title="Obnovit výchozí zkratky?"
+        info="Všechna vaše vlastní přiřazení kláves budou smazána a nahrazena výchozí sadou zkratek. Tuto akci nelze vzít zpět."
+        confirmText="Obnovit výchozí (Enter)"
+        cancelText="Zrušit (Esc)"
+        confirmVariant="danger"
+        zIndex={1200}
+        onConfirm={() => {
+          onUpdate('resetHotkeys', true);
+          setShowResetConfirm(false);
+        }}
+        onCancel={() => setShowResetConfirm(false)}
+      />
 
-      {/* Conflict Warning Banner */}
-      {conflictWarning && (
-        <div className="p-4 rounded-xl border border-amber-300 dark:border-amber-700/70 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2 duration-150 shadow-sm">
-          <div className="flex items-start gap-3">
-            <AlertTriangle size={20} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+      {/* Action-specific Confirmation Popup for Restore / Remove */}
+      <ConfirmDialog
+        isOpen={Boolean(actionConfirm)}
+        title={actionConfirm?.type === 'remove' ? 'Smazat zkratky?' : 'Obnovit výchozí zkratky?'}
+        info={
+          actionConfirm?.type === 'remove'
+            ? `Opravdu chcete smazat všechny klávesové zkratky pro akci "${actionConfirm?.actionLabel}"?`
+            : `Opravdu chcete obnovit výchozí klávesové zkratky pro akci "${actionConfirm?.actionLabel}"?`
+        }
+        confirmText={actionConfirm?.type === 'remove' ? 'Smazat (Enter)' : 'Obnovit (Enter)'}
+        cancelText="Zrušit (Esc)"
+        confirmVariant={actionConfirm?.type === 'remove' ? 'danger' : 'primary'}
+        zIndex={1200}
+        onConfirm={() => {
+          if (!actionConfirm) return;
+          if (actionConfirm.type === 'remove') {
+            onUpdate('hotkeys', { ...hotkeys, [actionConfirm.actionKey]: actionConfirm.anchoredSlots });
+          } else {
+            onUpdate('hotkeys', { ...hotkeys, [actionConfirm.actionKey]: actionConfirm.defaultSlots });
+          }
+          setActionConfirm(null);
+        }}
+        onCancel={() => setActionConfirm(null)}
+      />
+
+      {/* Prominent Conflict Warning Modal */}
+      <ConfirmDialog
+        isOpen={Boolean(conflictWarning)}
+        title="Konflikt klávesové zkratky"
+        info={
+          conflictWarning ? (
             <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
-                Konflikt zkratky: {conflictWarning.newKey}
-              </h4>
-              <p className="text-xs mt-0.5 text-amber-700 dark:text-amber-300">
-                Tato zkratka je již přiřazena k akci <strong>{conflictWarning.conflictWith.actionLabel}</strong>. Přejete si ji odebrat z původní akce a přepsat sem?
+              <div className="mb-2">
+                <span className="inline-block px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                  {conflictWarning.newKey}
+                </span>
+              </div>
+              <p>
+                Tato zkratka je již přiřazena k akci <strong>{conflictWarning.conflictWith?.actionLabel || conflictWarning.conflictWith}</strong>.
+                Přejete si ji odebrat z původní akce a přepsat pro <strong>{ACTION_DEFINITIONS.find(a => a.key === conflictWarning.targetAction)?.label || conflictWarning.targetAction}</strong>?
               </p>
             </div>
-          </div>
-          <div className="flex items-center gap-2 self-end md:self-center shrink-0">
-            <button
-              type="button"
-              onClick={() => { setConflictWarning(null); setRecording(null); }}
-              className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm"
-            >
-              Zrušit
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmOverwrite}
-              className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition-colors shadow-sm"
-            >
-              Přepsat a přiřadit
-            </button>
-          </div>
-        </div>
-      )}
+          ) : null
+        }
+        confirmText="Přepsat a přiřadit (Enter)"
+        cancelText="Zrušit (Esc)"
+        confirmVariant="warning"
+        zIndex={1200}
+        onConfirm={handleConfirmOverwrite}
+        onCancel={() => {
+          setConflictWarning(null);
+          setRecording(null);
+        }}
+      />
 
-      {/* Grid of Action Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Action Rows List - Narrow rows divided by lines, hotkeys on left side */}
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 shadow-sm overflow-hidden">
         {ACTION_DEFINITIONS.map(action => {
           const slots = getActionSlots(action.key);
           const Icon = action.icon;
+          const isThisActionRecording = recording?.actionKey === action.key;
+          const isExpanded = expandedRow === action.key;
+          const defaultSlots = DEFAULT_HOTKEYS[action.key] || [];
+          const currentNormalized = slots.map(normalizeKeyStr).sort();
+          const defaultNormalized = defaultSlots.map(normalizeKeyStr).sort();
+          const isAlreadyDefault = currentNormalized.length === defaultNormalized.length &&
+            currentNormalized.every((v, i) => v === defaultNormalized[i]);
+          const hasRemovableSlots = slots.some(s => !isMouseHotkey(s));
+          const anchoredSlots = slots.filter(isMouseHotkey);
 
           return (
-            <div 
-              key={action.key}
-              className="bg-white dark:bg-gray-800/80 p-4 rounded-xl border border-gray-200/80 dark:border-gray-800 shadow-sm hover:border-gray-300 dark:hover:border-gray-700 transition-all flex flex-col justify-between gap-3"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-md bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
-                      <Icon size={16} />
-                    </div>
-                    <span className="text-sm font-bold text-gray-900 dark:text-gray-100">{action.label}</span>
-                  </div>
-                  <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full border border-gray-200/60 dark:border-gray-700/60">
-                    {action.badge}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 pl-8">
-                  {action.desc}
-                </p>
-              </div>
-
-              {/* Slots Row */}
-              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-800/70">
-                {slots.map((hotkey, sIdx) => {
-                  const isThisRecording = recording?.actionKey === action.key && recording?.slotIndex === sIdx;
-
-                  if (isThisRecording) {
-                    return (
-                      <div key={sIdx} className="flex flex-col gap-1.5 py-1">
-                        <span 
-                          className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-indigo-600 text-white animate-pulse ring-2 ring-indigo-400 flex items-center gap-1.5 shadow-sm"
-                        >
-                          <span>Stiskněte klávesy nebo myš... (Esc)</span>
-                        </span>
-                        <div className="flex flex-wrap items-center gap-1">
-                          <span className="text-[10px] text-gray-400 font-medium">Volba:</span>
-                          <button
-                            type="button"
-                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Mouse 3'); }}
-                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                          >
-                            Mouse 3
-                          </button>
-                          <button
-                            type="button"
-                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Mouse 2'); }}
-                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                          >
-                            Mouse 2
-                          </button>
-                          <button
-                            type="button"
-                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Ctrl+Klik'); }}
-                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                          >
-                            Ctrl+Klik
-                          </button>
-                          <button
-                            type="button"
-                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Shift+Tažení'); }}
-                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                          >
-                            Shift+Tažení
-                          </button>
-                          <button
-                            type="button"
-                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Alt+Tažení'); }}
-                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                          >
-                            Alt+Tažení
-                          </button>
-                          <button
-                            type="button"
-                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Ctrl+Tažení'); }}
-                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                          >
-                            Ctrl+Tažení
-                          </button>
-                          <button
-                            type="button"
-                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Mouse 1'); }}
-                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                          >
-                            Mouse 1
-                          </button>
-                          <button
-                            type="button"
-                            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Tažení'); }}
-                            className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                          >
-                            Tažení
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div 
-                      key={sIdx}
-                      className="group flex items-center gap-1 bg-gray-50 dark:bg-gray-900/80 border border-gray-200 dark:border-gray-700 rounded-lg pl-2.5 pr-1.5 py-1 shadow-sm hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => { setConflictWarning(null); setRecording({ actionKey: action.key, slotIndex: sIdx }); }}
-                        title="Klikněte pro změnu zkratky"
-                        className="font-mono text-xs font-bold text-gray-800 dark:text-gray-200 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                      >
-                        {hotkey}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveSlot(action.key, sIdx)}
-                        title="Odstranit tuto zkratku"
-                        className="text-gray-400 hover:text-red-500 p-0.5 rounded transition-colors"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  );
-                })}
-
-                {/* Add Slot Button or New Recording Badge */}
-                {recording?.actionKey === action.key && recording?.slotIndex === -1 ? (
-                  <div className="flex flex-col gap-1.5 py-1">
-                    <span className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-indigo-600 text-white animate-pulse ring-2 ring-indigo-400 flex items-center gap-1.5 shadow-sm">
-                      <span>Stiskněte klávesy nebo myš... (Esc)</span>
-                    </span>
-                    <div className="flex flex-wrap items-center gap-1">
-                      <span className="text-[10px] text-gray-400 font-medium">Volba:</span>
-                      <button
-                        type="button"
-                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Mouse 3'); }}
-                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                      >
-                        Mouse 3
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Mouse 2'); }}
-                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                      >
-                        Mouse 2
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Ctrl+Klik'); }}
-                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                      >
-                        Ctrl+Klik
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Shift+Tažení'); }}
-                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                      >
-                        Shift+Tažení
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Alt+Tažení'); }}
-                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                      >
-                        Alt+Tažení
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Ctrl+Tažení'); }}
-                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                      >
-                        Ctrl+Tažení
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Mouse 1'); }}
-                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                      >
-                        Mouse 1
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleAssign('Tažení'); }}
-                        className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-gray-100 hover:bg-indigo-50 dark:bg-gray-700 dark:hover:bg-indigo-900/50 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors"
-                      >
-                        Tažení
-                      </button>
-                    </div>
-                  </div>
-                ) : (
+            <div key={action.key} className="flex flex-col transition-colors">
+              {/* Main Row */}
+              <div 
+                className={`px-3.5 py-2 flex items-center gap-3 hover:bg-gray-50/80 dark:hover:bg-gray-800/50 transition-colors group relative ${
+                  isThisActionRecording ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : ''
+                } ${isExpanded ? 'bg-gray-50/50 dark:bg-gray-800/30' : ''}`}
+              >
+                {/* Dropdown / Expand Button on the far left */}
+                <Tooltip text={isExpanded ? 'Sbalit podrobnosti' : 'Rozbalit podrobnosti a možnosti'} position="right">
                   <button
                     type="button"
-                    onClick={() => { setConflictWarning(null); setRecording({ actionKey: action.key, slotIndex: -1 }); }}
-                    title="Přidat další klávesovou zkratku pro tuto akci"
-                    className="flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 border border-dashed border-indigo-200 dark:border-indigo-800 rounded-lg px-2.5 py-1.5 transition-colors font-semibold"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedRow(isExpanded ? null : action.key);
+                    }}
+                    className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors flex items-center justify-center shrink-0"
                   >
-                    <Plus size={13} />
-                    <span>Přidat</span>
+                    <ChevronDown size={14} className={`transition-transform duration-200 ${isExpanded ? 'rotate-180 text-indigo-500' : ''}`} />
                   </button>
-                )}
+                </Tooltip>
 
-                {slots.length === 0 && recording?.actionKey !== action.key && (
-                  <span className="text-xs text-gray-400 italic">Žádná zkratka nepřiřazena</span>
-                )}
+                {/* Action Icon */}
+                <div className="p-1 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 shrink-0">
+                  <Icon size={14} />
+                </div>
+
+                {/* Action Name */}
+                <span className="text-xs font-semibold text-gray-800 dark:text-gray-200 w-44 sm:w-52 shrink-0 truncate">
+                  {action.label}
+                </span>
+
+                {/* Hotkeys Badges & '+' Button - Left-aligned directly after action name */}
+                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                  {slots.map((hotkey, sIdx) => {
+                    const isMouse = isMouseHotkey(hotkey);
+                    const isThisRecording = isThisActionRecording && recording?.slotIndex === sIdx;
+
+                    if (isThisRecording) {
+                      return (
+                        <div key={sIdx} className="flex items-center gap-2 animate-in fade-in zoom-in-95 duration-100">
+                          <div className="px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-400 animate-pulse flex items-center gap-1.5 shrink-0">
+                            {heldModifiers.length > 0 ? (
+                              <span>{heldModifiers.join(' + ')} + ...</span>
+                            ) : (
+                              <span>Stiskněte klávesu... (Esc)</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    if (isMouse) {
+                      return (
+                        <div 
+                          key={sIdx}
+                          className="inline-flex items-center gap-1.5 bg-slate-100/90 dark:bg-slate-800/80 border border-slate-300/80 dark:border-slate-700/80 rounded-md px-2 py-0.5 shadow-2xs select-none cursor-default"
+                        >
+                          <Mouse size={11} className="text-slate-500 dark:text-slate-400 shrink-0" />
+                          <span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
+                            {hotkey}
+                          </span>
+                          <Lock size={10} className="text-slate-400 dark:text-slate-500 shrink-0 ml-0.5 opacity-70" />
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div 
+                        key={sIdx}
+                        className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-0.5 shadow-xs hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors"
+                      >
+                        <Tooltip text="Klikněte pro změnu zkratky" position="top">
+                          <button
+                            type="button"
+                            onClick={() => { setConflictWarning(null); setRecording({ actionKey: action.key, slotIndex: sIdx }); }}
+                            className="font-mono text-xs font-semibold text-gray-800 dark:text-gray-200 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                          >
+                            {hotkey}
+                          </button>
+                        </Tooltip>
+                        <Tooltip text="Odstranit tuto zkratku" position="top">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSlot(action.key, sIdx)}
+                            className="text-gray-400 hover:text-red-500 p-0.5 rounded transition-colors flex items-center justify-center"
+                          >
+                            <X size={10} />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    );
+                  })}
+
+                  {/* New Slot Recording Badge */}
+                  {isThisActionRecording && recording?.slotIndex === -1 && (
+                    <div className="flex items-center gap-2 animate-in fade-in zoom-in-95 duration-100">
+                      <div className="px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-400 animate-pulse flex items-center gap-1.5 shrink-0">
+                        {heldModifiers.length > 0 ? (
+                          <span>{heldModifiers.join(' + ')} + ...</span>
+                        ) : (
+                          <span>Stiskněte klávesu... (Esc)</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* '+' Button showing up on hover */}
+                  {(!isThisActionRecording || recording?.slotIndex !== -1) && (
+                    <Tooltip text="Přidat další klávesovou zkratku pro tuto akci" position="top">
+                      <button
+                        type="button"
+                        onClick={() => { setConflictWarning(null); setRecording({ actionKey: action.key, slotIndex: -1 }); }}
+                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded border border-dashed border-gray-300 dark:border-gray-600 hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all flex items-center justify-center shrink-0"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </Tooltip>
+                  )}
+
+                  {slots.length === 0 && !isThisActionRecording && (
+                    <span className="text-[11px] text-gray-400 italic">Žádná zkratka nepřiřazena</span>
+                  )}
+                </div>
               </div>
+
+              {/* Expanded Row Downwards: Info and Useful Buttons */}
+              {isExpanded && (
+                <div className="px-10 py-2.5 bg-gray-50/70 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800/80 space-y-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                  {/* Description */}
+                  <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{action.desc}</p>
+
+                  {/* Useful Buttons */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Tooltip text={isAlreadyDefault ? 'Klávesové zkratky jsou již ve výchozím nastavení' : 'Obnovit výchozí zkratky pro tuto akci'} position="top-right">
+                      <button
+                        type="button"
+                        disabled={isAlreadyDefault}
+                        onClick={() => {
+                          if (isAlreadyDefault) return;
+                          setActionConfirm({
+                            type: 'restore',
+                            actionKey: action.key,
+                            actionLabel: action.label,
+                            defaultSlots,
+                            anchoredSlots
+                          });
+                        }}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-colors shadow-2xs ${
+                          isAlreadyDefault
+                            ? 'opacity-40 cursor-default bg-gray-100 dark:bg-gray-800/40 text-gray-400 dark:text-gray-600 border-gray-200 dark:border-gray-800'
+                            : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 cursor-pointer'
+                        }`}
+                      >
+                        <RotateCcw size={12} className={isAlreadyDefault ? 'text-gray-400 dark:text-gray-600' : 'text-indigo-500'} />
+                        <span>Obnovit výchozí</span>
+                      </button>
+                    </Tooltip>
+
+                    <Tooltip text={!hasRemovableSlots ? 'Nejsou přiřazeny žádné vlastní klávesové zkratky ke smazání' : 'Smazat všechny klávesové zkratky pro tuto akci'} position="top-right">
+                      <button
+                        type="button"
+                        disabled={!hasRemovableSlots}
+                        onClick={() => {
+                          if (!hasRemovableSlots) return;
+                          setActionConfirm({
+                            type: 'remove',
+                            actionKey: action.key,
+                            actionLabel: action.label,
+                            defaultSlots,
+                            anchoredSlots
+                          });
+                        }}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-colors shadow-2xs ${
+                          !hasRemovableSlots
+                            ? 'opacity-40 cursor-default bg-gray-100 dark:bg-gray-800/40 text-gray-400 dark:text-gray-600 border-gray-200 dark:border-gray-800'
+                            : 'bg-white dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-950/30 text-red-600 dark:text-red-400 border-gray-200 dark:border-gray-700 hover:border-red-200 dark:hover:border-red-800/50 cursor-pointer'
+                        }`}
+                      >
+                        <Trash2 size={12} className={!hasRemovableSlots ? 'text-gray-400 dark:text-gray-600' : ''} />
+                        <span>Smazat zkratky</span>
+                      </button>
+                    </Tooltip>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -1583,13 +1661,14 @@ export const SettingsDialog = ({ isOpen, onClose, settings, onUpdate }) => {
               </p>
             </div>
           </div>
-          <button 
-            onClick={onClose} 
-            className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-            title="Zavřít (Esc)"
-          >
-            <X size={18} />
-          </button>
+          <Tooltip text="Zavřít (Esc)" position="bottom-left">
+            <button 
+              onClick={onClose} 
+              className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              <X size={18} />
+            </button>
+          </Tooltip>
         </div>
 
         {/* Modal Body: Left Navigation + Content View */}
@@ -1622,10 +1701,10 @@ export const SettingsDialog = ({ isOpen, onClose, settings, onUpdate }) => {
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/80 hover:text-gray-900 dark:hover:text-gray-200'
                 }`}
               >
-                <MousePointer2 size={16} className={activeTab === 'controls' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'} /> 
+                <SlidersHorizontal size={16} className={activeTab === 'controls' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'} /> 
                 <div>
-                  <span>Ovládání a výběr</span>
-                  <span className="block text-[10px] font-normal opacity-70">Lasso, režim editoru</span>
+                  <span>Režim a debugger</span>
+                  <span className="block text-[10px] font-normal opacity-70">Lasso, editor a ladění</span>
                 </div>
               </button>
 
@@ -1716,10 +1795,10 @@ export const SettingsDialog = ({ isOpen, onClose, settings, onUpdate }) => {
                   <div className="animate-in fade-in slide-in-from-right-2 duration-200 space-y-5">
                     <div className="border-b border-gray-100 dark:border-gray-800 pb-3">
                       <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wider">
-                        Ovládání a výběr
+                        Režim a debugger
                       </h3>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        Přizpůsobení chování myši a úrovně rozhraní
+                        Přizpůsobení chování editoru, výběru a ladění kódu
                       </p>
                     </div>
                     
@@ -1735,9 +1814,9 @@ export const SettingsDialog = ({ isOpen, onClose, settings, onUpdate }) => {
                     />
 
                     <div>
-                      <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider block mb-1.5">
+                      <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider block mb-1.5">
                         Režim editoru
-                      </label>
+                      </span>
                       <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">
                         Ovlivňuje dostupné bloky v horní liště diagramu.
                       </p>
@@ -1782,6 +1861,9 @@ export const SettingsDialog = ({ isOpen, onClose, settings, onUpdate }) => {
                             </span>
                           </div>
                           <input 
+                            id="settings-debug-speed-slider"
+                            name="debugSpeedPercent"
+                            aria-label="Rychlost automatického běhu"
                             type="range" min="0" max="500" step="10" 
                             value={settings.debugSpeedPercent} 
                             onChange={(e) => onUpdate('debugSpeedPercent', parseInt(e.target.value))} 

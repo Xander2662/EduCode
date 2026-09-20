@@ -2,6 +2,27 @@
  * Utility functions for checking and matching keyboard shortcuts and hotkeys.
  */
 
+export function normalizeKeyStr(s) {
+  if (!s || typeof s !== 'string') return '';
+  return s.toLowerCase().replace(/\s+/g, '');
+}
+
+export const DEFAULT_HOTKEYS = {
+  undo: ['Ctrl+Z', 'Alt+Z'],
+  redo: ['Ctrl+Y', 'Ctrl+Shift+Z'],
+  delete: ['Delete', 'Backspace'],
+  copy: ['Ctrl+C'],
+  paste: ['Ctrl+V'],
+  selectAll: ['Ctrl+A'],
+  rename: ['F2'],
+  zoomIn: ['Ctrl++', 'Ctrl+='],
+  zoomOut: ['Ctrl+-'],
+  pan: ['Mouse 3'],
+  contextMenu: ['Mouse 2'],
+  multiSelect: ['Ctrl+Klik'],
+  lassoSelect: ['Tažení', 'Shift+Tažení']
+};
+
 export function checkSingleHotkey(e, hotkeyStr) {
   if (!e || !hotkeyStr || typeof hotkeyStr !== 'string') return false;
 

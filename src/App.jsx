@@ -10,6 +10,7 @@ import { DiagramRunner } from './utils/runner';
 import { drawioToReactFlow } from './utils/diagramConverter';
 import DiagramEditor from './components/diagramEditor';
 import TutorialDialog from './components/TutorialDialog';
+import { ConfirmDialog } from './components/ConfirmDialog';
 
 const DebuggerConsole = ({ events }) => {
     const [expanded, setExpanded] = useState(true);
@@ -23,11 +24,15 @@ const DebuggerConsole = ({ events }) => {
     }, [events, expanded]);
 
     useEffect(() => {
-        const handleClickOutside = () => setShowInfo(false);
-        if (showInfo) {
-            window.addEventListener('click', handleClickOutside);
-            return () => window.removeEventListener('click', handleClickOutside);
-        }
+        if (!showInfo) return;
+        const handleClickOutside = (e) => {
+            if (e.target.closest('.console-info-btn') || e.target.closest('.console-info-popup')) {
+                return;
+            }
+            setShowInfo(false);
+        };
+        window.addEventListener('pointerdown', handleClickOutside);
+        return () => window.removeEventListener('pointerdown', handleClickOutside);
     }, [showInfo]);
 
     if (!expanded) {
@@ -45,19 +50,19 @@ const DebuggerConsole = ({ events }) => {
 
     return (
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow w-full pointer-events-auto flex flex-col transition-all duration-300 relative" style={{ maxHeight: '200px' }}>
-            <div className="flex justify-between items-center px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 rounded-t">
+            <div className="flex justify-between items-center px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-t">
                 <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2 relative">
                     <Terminal size={12} />
                     Konzole
                     <div className="relative flex items-center">
                         <Tooltip text="Nápověda pro Debugger Konzoli">
-                            <button onClick={(e) => { e.stopPropagation(); setShowInfo(!showInfo); }} className="text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-0.5 ml-1 flex items-center justify-center">
+                            <button onClick={(e) => { e.stopPropagation(); setShowInfo(prev => !prev); }} className="console-info-btn text-indigo-500 hover:text-indigo-600 transition-colors bg-indigo-50 dark:bg-indigo-900/30 rounded-full p-0.5 ml-1 flex items-center justify-center">
                                 <HelpCircle size={10} />
                             </button>
                         </Tooltip>
                         
                         {showInfo && (
-                            <div className="absolute bottom-[calc(100%+10px)] left-1/2 -translate-x-1/2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-4 w-72 z-[9999] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case text-left cursor-default" onClick={e => e.stopPropagation()}>
+                            <div className="console-info-popup absolute bottom-[calc(100%+10px)] left-1/2 -translate-x-1/2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-4 w-72 z-[9999] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case text-left cursor-default" onClick={e => e.stopPropagation()}>
                                 <p className="mb-2 text-sm text-gray-800 dark:text-gray-100 font-semibold border-b border-gray-100 dark:border-gray-700 pb-2">Debugger Konzole</p>
                                 <p className="mb-3 text-gray-600 dark:text-gray-400">Tento panel zachycuje veškerý výstup běžícího programu.</p>
                                 <ul className="space-y-2 text-gray-600 dark:text-gray-400">
@@ -514,16 +519,26 @@ const LineNumberedTextarea = React.forwardRef(({ value, onChange, readOnly, plac
   );
 });
 
-const ToggleSwitch = ({ checked, onChange, label }) => (
-  <label className="flex items-center justify-between cursor-pointer w-full group py-1.5">
-    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{label}</span>
-    <div className="relative">
-      <input type="checkbox" className="sr-only" checked={checked} onChange={onChange} />
-      <div className={`block w-10 h-6 rounded-full transition-colors ${checked ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
-      <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${checked ? 'transform translate-x-4' : ''}`}></div>
-    </div>
-  </label>
-);
+const ToggleSwitch = ({ checked, onChange, label, id, name }) => {
+  const switchId = id || (label ? `app-toggle-${label.toLowerCase().replace(/[^a-z0-9]/g, '-')}` : undefined);
+  return (
+    <label htmlFor={switchId} className="flex items-center justify-between cursor-pointer w-full group py-1.5">
+      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{label}</span>
+      <div className="relative">
+        <input 
+          id={switchId}
+          name={name || switchId}
+          type="checkbox" 
+          className="sr-only" 
+          checked={checked} 
+          onChange={onChange} 
+        />
+        <div className={`block w-10 h-6 rounded-full transition-colors ${checked ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
+        <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${checked ? 'transform translate-x-4' : ''}`}></div>
+      </div>
+    </label>
+  );
+};
 
 const CustomSelect = ({ value, options, onChange, label }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -531,7 +546,7 @@ const CustomSelect = ({ value, options, onChange, label }) => {
 
   return (
     <div className="relative mb-5">
-      {label && <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">{label}</label>}
+      {label && <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 block">{label}</span>}
       <button 
         onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
         className="w-full text-sm bg-gray-50/50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg outline-none px-3 py-2 flex items-center justify-between text-gray-700 dark:text-gray-300 hover:border-indigo-400 transition-colors"
@@ -793,6 +808,8 @@ function AppContent() {
               e.target.closest('.dropdown-container') ||
               e.target.closest('.interactive-popup') ||
               e.target.closest('.watcher-panel') ||
+              e.target.closest('.watcher-info-btn') ||
+              e.target.closest('.watcher-info-popup') ||
               e.target.closest('.settings-panel')) {
               return;
           }
@@ -1258,13 +1275,15 @@ function AppContent() {
                       <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{inputRequest.message}</p>
                       <input 
                           type="text" 
+                          id="debug-input-field"
+                          name="debugInput"
+                          aria-label="Vstup hodnoty"
                           autoFocus
                           className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 mb-4 bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 outline-none focus:ring-2 focus:ring-indigo-500"
                           onKeyDown={(e) => {
                               if (e.key === 'Enter') handleInputSubmit(e.target.value);
                               if (e.key === 'Escape') handleInputCancel();
                           }}
-                          id="debug-input-field"
                       />
                       <div className="flex justify-end gap-2">
                           <button onClick={handleInputCancel} className="px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-sm text-gray-700 dark:text-gray-300 transition-colors">Zrušit běh</button>
@@ -1285,12 +1304,12 @@ function AppContent() {
                               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Paměť (Variables)</span>
                               <div className="relative flex items-center">
                                   <Tooltip text="Nápověda pro Paměť (Variables)">
-                                      <button onClick={(e) => { e.stopPropagation(); setShowWatcherInfo(!showWatcherInfo); }} className="text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-full p-1 transition-colors flex items-center justify-center">
+                                      <button onClick={(e) => { e.stopPropagation(); setShowWatcherInfo(prev => !prev); }} className="watcher-info-btn text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-full p-1 transition-colors flex items-center justify-center">
                                           <HelpCircle size={12} />
                                       </button>
                                   </Tooltip>
                                   {showWatcherInfo && (
-                                      <div className="absolute top-[calc(100%+10px)] left-1/2 -translate-x-1/2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-4 w-64 z-[9999] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case cursor-default" onClick={e => e.stopPropagation()}>
+                                      <div className="watcher-info-popup absolute top-[calc(100%+10px)] left-1/2 -translate-x-1/2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-4 w-64 z-[9999] text-xs text-gray-700 dark:text-gray-300 font-normal normal-case cursor-default" onClick={e => e.stopPropagation()}>
                                           <p className="mb-2 text-sm text-gray-800 dark:text-gray-100 font-semibold border-b border-gray-100 dark:border-gray-700 pb-2">Paměť (Variables)</p>
                                           <p className="mb-3 text-gray-600 dark:text-gray-400">Zobrazuje aktuální stav proměnných během krokování kódu.</p>
                                           <p className="text-[10px] text-gray-500">Změny uvidíte okamžitě, jakmile proběhne operace jako <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded text-gray-800 dark:text-gray-200 font-mono">x = 1</code>.</p>
@@ -1460,16 +1479,20 @@ function AppContent() {
       <div className="hidden md:flex flex-col h-full overflow-hidden w-full">
       {showTutorial && <TutorialDialog type={tutorialType} focusedBlock={tutorialFocusedBlock} onClose={() => { setShowTutorial(false); setTutorialFocusedBlock(null); }} />}
       {dialog && (
-        <div className="fixed inset-0 bg-black/50 z-[300] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-sm w-full border border-gray-200 dark:border-gray-700">
-            <h3 className="text-lg font-bold mb-2 text-gray-900 dark:text-white">{dialog.title}</h3>
-            <p className="text-gray-600 dark:text-gray-300 mb-6 text-sm">{dialog.desc}</p>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setDialog(null)} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors text-sm font-semibold">Zrušit (Esc)</button>
-              <button onClick={dialog.onConfirm} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded transition-colors text-sm font-semibold">{dialog.confirmText || 'Smazat (Enter)'}</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          isOpen={Boolean(dialog)}
+          title={dialog.title}
+          info={dialog.desc || dialog.info}
+          confirmText={dialog.confirmText || 'Smazat (Enter)'}
+          cancelText={dialog.cancelText || 'Zrušit (Esc)'}
+          confirmVariant={dialog.confirmVariant || 'danger'}
+          zIndex={300}
+          onConfirm={() => {
+            dialog.onConfirm?.();
+            setDialog(null);
+          }}
+          onCancel={() => setDialog(null)}
+        />
       )}
       
       {/* BETA BANNERS & HEADER */}

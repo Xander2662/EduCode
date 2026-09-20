@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getReactFlowKeyCodes, checkHotkey, checkSingleHotkey, isKeyLassoTrigger } from './hotkeys';
+import { getReactFlowKeyCodes, checkHotkey, checkSingleHotkey, isKeyLassoTrigger, normalizeKeyStr } from './hotkeys';
 
 describe('getReactFlowKeyCodes', () => {
   it('should convert single letter key "A" to lowercase, uppercase, and KeyA code', () => {
@@ -112,5 +112,20 @@ describe('isKeyLassoTrigger', () => {
   it('should return false for pure mouse descriptors like "Tažení"', () => {
     const eventA = { key: 'a', code: 'KeyA', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false };
     expect(isKeyLassoTrigger(eventA, ['Tažení'])).toBe(false);
+  });
+});
+
+describe('normalizeKeyStr', () => {
+  it('should lowercase and strip whitespace', () => {
+    expect(normalizeKeyStr('Ctrl + Z')).toBe('ctrl+z');
+    expect(normalizeKeyStr('ctrl+z')).toBe('ctrl+z');
+    expect(normalizeKeyStr('Shift + Alt + A')).toBe('shift+alt+a');
+    expect(normalizeKeyStr('  Mouse 3  ')).toBe('mouse3');
+  });
+
+  it('should handle falsy or empty inputs', () => {
+    expect(normalizeKeyStr('')).toBe('');
+    expect(normalizeKeyStr(null)).toBe('');
+    expect(normalizeKeyStr(undefined)).toBe('');
   });
 });

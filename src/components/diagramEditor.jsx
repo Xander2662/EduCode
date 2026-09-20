@@ -9,6 +9,7 @@ import { edgeLabels } from './diagram/constants';
 import { CustomEdge } from './diagram/CustomEdge';
 import { ActionNode, IONode, ConditionNode, StartEndNode, CommentNode, MergeNode, GroupBgNode, LoopContainerNode, ForContainerNode, SwitchContainerNode, CaseContainerNode } from './diagram/CustomNodes';
 import { Tooltip } from './Tooltip';
+import { ConfirmDialog } from './ConfirmDialog';
 import { checkHotkey, getReactFlowKeyCodes, isKeyLassoTrigger } from '../utils/hotkeys';
 
 const DEFAULT_BLOCK_STRINGS = {
@@ -72,12 +73,10 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const hoveredEdgeRef = useRef(null);
   const lastXmlRef = useRef(''); 
 
-  const [keyLassoBox, setKeyLassoBox] = useState(null);
+  const keyPanActiveRef = useRef(false);
+  const lastPanMousePosRef = useRef(null);
   const keyLassoActiveRef = useRef(false);
-  const keyLassoStartRef = useRef(null);
   const keyLassoKeyRef = useRef(null);
-  const keyLassoTouchedRef = useRef(new Set());
-  const keyLassoInitialRef = useRef(new Set());
 
   const lastMousePosRef = useRef({ 
     x: typeof window !== 'undefined' ? window.innerWidth / 2 : 0, 
@@ -90,56 +89,31 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       if (e.clientX !== undefined && e.clientY !== undefined) {
         lastMousePosRef.current = { x: e.clientX, y: e.clientY }; 
 
-        // Active key-only lasso tracking (e.g. holding 'a' and moving mouse across blocks)
-        if (keyLassoActiveRef.current && keyLassoStartRef.current) {
-          const curFlow = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-          const startFlow = keyLassoStartRef.current;
-
-          const minX = Math.min(startFlow.x, curFlow.x);
-          const maxX = Math.max(startFlow.x, curFlow.x);
-          const minY = Math.min(startFlow.y, curFlow.y);
-          const maxY = Math.max(startFlow.y, curFlow.y);
-
-          const box = {
-            x: minX,
-            y: minY,
-            width: Math.max(1, maxX - minX),
-            height: Math.max(1, maxY - minY)
-          };
-
-          setKeyLassoBox(box);
-
-          // Get nodes intersecting the lasso box
-          const intersecting = reactFlowInstance.getIntersectingNodes(box, selectionMode === 'partial');
-          const boxIds = new Set(intersecting.filter(n => n.type !== 'GROUP_BG').map(n => n.id));
-
-          // Also check if mouse cursor directly touches any block while sweeping
-          const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.react-flow__node');
-          const hoveredId = el?.getAttribute('data-id');
-          if (hoveredId && hoveredId !== 'GROUP_BG') {
-            const hNode = reactFlowInstance.getNode(hoveredId);
-            if (hNode && hNode.type !== 'GROUP_BG') {
-              keyLassoTouchedRef.current.add(hoveredId);
-            }
+        // Custom keyboard pan (holding pan key and moving mouse without holding mouse1)
+        if (keyPanActiveRef.current && lastPanMousePosRef.current) {
+          const dx = e.clientX - lastPanMousePosRef.current.x;
+          const dy = e.clientY - lastPanMousePosRef.current.y;
+          lastPanMousePosRef.current = { x: e.clientX, y: e.clientY };
+          if (reactFlowInstance) {
+            const { x, y, zoom } = reactFlowInstance.getViewport();
+            reactFlowInstance.setViewport({ x: x + dx, y: y + dy, zoom });
           }
+        }
 
-          boxIds.forEach(id => keyLassoTouchedRef.current.add(id));
-
-          const allSelected = new Set([...keyLassoInitialRef.current, ...keyLassoTouchedRef.current]);
-
-          setNodes(nds => nds.map(node => {
-            if (node.type === 'GROUP_BG') return node;
-            const isSel = allSelected.has(node.id);
-            return node.selected === isSel ? node : { ...node, selected: isSel };
-          }));
-
-          setEdges(eds => eds.map(edge => {
-            const isSel = allSelected.has(edge.source) && allSelected.has(edge.target);
-            return edge.selected === isSel ? edge : { ...edge, selected: isSel };
-          }));
-
-          if (onSelectionChangeRef.current) {
-            onSelectionChangeRef.current(Array.from(allSelected));
+        // Custom keyboard lasso (holding custom lasso key and moving mouse without holding mouse1)
+        if (keyLassoActiveRef.current) {
+          const pane = reactFlowWrapper.current?.querySelector('.react-flow__pane');
+          if (pane) {
+            pane.dispatchEvent(new PointerEvent('pointermove', {
+              bubbles: true,
+              cancelable: true,
+              clientX: e.clientX,
+              clientY: e.clientY,
+              button: 0,
+              buttons: 1,
+              isPrimary: true,
+              pointerId: 1
+            }));
           }
         }
       }
@@ -715,12 +689,25 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
       if (e.key === 'Escape') {
         if (isInput) e.target.blur();
-        keyLassoActiveRef.current = false;
-        setKeyLassoBox(null);
-        keyLassoStartRef.current = null;
-        keyLassoKeyRef.current = null;
-        keyLassoTouchedRef.current.clear();
-        keyLassoInitialRef.current.clear();
+        keyPanActiveRef.current = false;
+        lastPanMousePosRef.current = null;
+        if (keyLassoActiveRef.current) {
+          keyLassoActiveRef.current = false;
+          keyLassoKeyRef.current = null;
+          const pane = reactFlowWrapper.current?.querySelector('.react-flow__pane');
+          if (pane) {
+            pane.dispatchEvent(new PointerEvent('pointerup', {
+              bubbles: true,
+              cancelable: true,
+              clientX: lastMousePosRef.current.x,
+              clientY: lastMousePosRef.current.y,
+              button: 0,
+              buttons: 0,
+              isPrimary: true,
+              pointerId: 1
+            }));
+          }
+        }
         setNodes(nds => nds.map(n => ({ ...n, selected: false })));
         setEdges(eds => eds.map(edge => ({ ...edge, selected: false })));
         setContextMenu(null); setShowExportMenu(false);
@@ -730,43 +717,45 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       
       const safeHotkeys = hotkeys || {};
 
-      // Key-only lasso selection (e.g. holding 'a' and moving mouse across blocks without holding mouse1)
-      if (isKeyLassoTrigger(e, safeHotkeys.lassoSelect) && !isInput) {
+      // Custom keyboard lasso (holding custom lasso key and moving mouse without holding mouse1)
+      const isCustomKeyLasso = (safeHotkeys.lassoSelect || []).some(s => {
+        const lower = s.toLowerCase().trim();
+        return !lower.startsWith('mouse') && !lower.includes('tažení') && !lower.includes('tazeni') && !lower.includes('klik') && !lower.includes('drag') && checkSingleHotkey(e, s);
+      });
+      if (isCustomKeyLasso && !isInput) {
         if (!e.repeat && !keyLassoActiveRef.current) {
           e.preventDefault();
           keyLassoActiveRef.current = true;
           keyLassoKeyRef.current = e.key ? e.key.toLowerCase() : '';
-
-          const startScreen = { ...lastMousePosRef.current };
-          const startFlow = screenToFlowPosition(startScreen);
-          keyLassoStartRef.current = startFlow;
-
-          const initialSel = (e.ctrlKey || e.metaKey)
-            ? new Set(selectedNodes.map(n => n.id))
-            : new Set();
-          keyLassoInitialRef.current = initialSel;
-          keyLassoTouchedRef.current = new Set();
-
-          // If cursor is already hovering a node when key is pressed, select it immediately
-          if (startScreen.x || startScreen.y) {
-            const el = document.elementFromPoint(startScreen.x, startScreen.y)?.closest('.react-flow__node');
-            const hId = el?.getAttribute('data-id');
-            if (hId && hId !== 'GROUP_BG') {
-              const hNode = reactFlowInstance.getNode(hId);
-              if (hNode && hNode.type !== 'GROUP_BG') {
-                keyLassoTouchedRef.current.add(hId);
-                setNodes(nds => nds.map(n => {
-                  if (n.type === 'GROUP_BG') return n;
-                  const isSel = initialSel.has(n.id) || n.id === hId;
-                  return n.selected === isSel ? n : { ...n, selected: isSel };
-                }));
-                if (onSelectionChangeRef.current) {
-                  onSelectionChangeRef.current(Array.from(new Set([...initialSel, hId])));
-                }
-              }
-            }
+          const pane = reactFlowWrapper.current?.querySelector('.react-flow__pane');
+          if (pane) {
+            const origSetCapture = pane.setPointerCapture;
+            pane.setPointerCapture = () => {};
+            pane.dispatchEvent(new PointerEvent('pointerdown', {
+              bubbles: true,
+              cancelable: true,
+              clientX: lastMousePosRef.current.x,
+              clientY: lastMousePosRef.current.y,
+              button: 0,
+              buttons: 1,
+              isPrimary: true,
+              pointerId: 1
+            }));
+            pane.setPointerCapture = origSetCapture;
           }
         }
+        return;
+      }
+
+      // Custom keyboard pan (holding pan key and moving mouse without holding mouse1)
+      const isCustomKeyPan = (safeHotkeys.pan || []).some(s => {
+        const lower = s.toLowerCase().trim();
+        return !lower.startsWith('mouse') && !lower.includes('tažení') && !lower.includes('klik') && checkSingleHotkey(e, s);
+      });
+      if (isCustomKeyPan && !isInput) {
+        e.preventDefault();
+        keyPanActiveRef.current = true;
+        lastPanMousePosRef.current = { ...lastMousePosRef.current };
         return;
       }
 
@@ -949,33 +938,63 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     };
 
     const handleKeyUp = (e) => {
-      if (keyLassoActiveRef.current) {
-        const releasedKey = e.key ? e.key.toLowerCase() : '';
-        const activeKey = keyLassoKeyRef.current;
-        const isModifierRelease = 
-          (activeKey === 'shift' && !e.shiftKey) ||
-          (activeKey === 'control' && !e.ctrlKey) ||
-          (activeKey === 'alt' && !e.altKey);
+      if (keyPanActiveRef.current) {
+        const isCustomKeyPan = (safeHotkeys.pan || []).some(s => {
+          const lower = s.toLowerCase().trim();
+          return !lower.startsWith('mouse') && !lower.includes('tažení') && !lower.includes('klik');
+        });
+        if (isCustomKeyPan) {
+          keyPanActiveRef.current = false;
+          lastPanMousePosRef.current = null;
+        }
+      }
 
-        if (releasedKey === activeKey || isModifierRelease || !e.key) {
+      if (keyLassoActiveRef.current) {
+        if (e.key?.toLowerCase() === keyLassoKeyRef.current) {
           keyLassoActiveRef.current = false;
-          setKeyLassoBox(null);
-          keyLassoStartRef.current = null;
           keyLassoKeyRef.current = null;
-          keyLassoTouchedRef.current.clear();
-          keyLassoInitialRef.current.clear();
+          const pane = reactFlowWrapper.current?.querySelector('.react-flow__pane');
+          if (pane) {
+            const origRelease = pane.releasePointerCapture;
+            pane.releasePointerCapture = () => {};
+            pane.dispatchEvent(new PointerEvent('pointerup', {
+              bubbles: true,
+              cancelable: true,
+              clientX: lastMousePosRef.current.x,
+              clientY: lastMousePosRef.current.y,
+              button: 0,
+              buttons: 0,
+              isPrimary: true,
+              pointerId: 1
+            }));
+            pane.releasePointerCapture = origRelease;
+          }
         }
       }
     };
 
     const handleBlur = () => {
+      keyPanActiveRef.current = false;
+      lastPanMousePosRef.current = null;
       if (keyLassoActiveRef.current) {
         keyLassoActiveRef.current = false;
-        setKeyLassoBox(null);
-        keyLassoStartRef.current = null;
         keyLassoKeyRef.current = null;
-        keyLassoTouchedRef.current.clear();
-        keyLassoInitialRef.current.clear();
+        const pane = reactFlowWrapper.current?.querySelector('.react-flow__pane');
+        if (pane) {
+          const origRelease = pane.releasePointerCapture;
+          pane.releasePointerCapture = () => {};
+          pane.dispatchEvent(new PointerEvent('pointerup', {
+            bubbles: true,
+            cancelable: true,
+            clientX: lastMousePosRef.current.x,
+            clientY: lastMousePosRef.current.y,
+            button: 0,
+            buttons: 0,
+            isPrimary: true,
+            pointerId: 1
+          }));
+          pane.releasePointerCapture = origRelease;
+        }
       }
     };
 
@@ -1670,9 +1689,17 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     return buttons;
   }, [isPanOnMouse1, safeHotkeys.pan]);
 
+  const hasPureDragLasso = useMemo(() => {
+    const slots = Array.isArray(safeHotkeys.lassoSelect) ? safeHotkeys.lassoSelect : (safeHotkeys.lassoSelect ? [safeHotkeys.lassoSelect] : []);
+    return slots.some(s => {
+      const lower = s.toLowerCase().trim();
+      return lower === 'tažení' || lower === 'tazeni' || lower === 'drag' || lower === 'mouse 1';
+    });
+  }, [safeHotkeys.lassoSelect]);
+
   const selectionOnDrag = useMemo(() => {
-    return !isPanOnMouse1;
-  }, [isPanOnMouse1]);
+    return hasPureDragLasso && !isPanOnMouse1;
+  }, [hasPureDragLasso, isPanOnMouse1]);
 
   return (
     <div className="w-full h-full relative outline-none" tabIndex={0} onClick={() => { 
@@ -1695,17 +1722,16 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           </div>
       )}
       
-      {deleteConfirm && (
-        <div className="absolute inset-0 z-[9999] flex items-center justify-center bg-gray-900/20 backdrop-blur-sm rounded-lg">
-          <div className="bg-white dark:bg-gray-800 p-4 rounded shadow-lg border border-gray-200 dark:border-gray-700">
-            <h3 className="font-bold mb-2 dark:text-gray-100">Smazat vybrané prvky?</h3>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleteConfirm(false)} className="px-3 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-sm dark:text-gray-300 transition-colors">Zrušit (Esc)</button>
-              <button onClick={executeDelete} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm transition-colors">Smazat (Enter)</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={deleteConfirm}
+        position="absolute"
+        title="Smazat vybrané prvky?"
+        confirmText="Smazat (Enter)"
+        cancelText="Zrušit (Esc)"
+        confirmVariant="danger"
+        onConfirm={executeDelete}
+        onCancel={() => setDeleteConfirm(false)}
+      />
 
       {pendingImport && (
         <div className="absolute inset-0 bg-gray-900/40 dark:bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]">
@@ -1746,13 +1772,13 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
       <div className="absolute top-4 right-4 z-10 flex gap-2 bg-white dark:bg-gray-800 p-2 rounded shadow border border-gray-200 dark:border-gray-700">
         <Tooltip text="Import diagramu" position="bottom">
-          <label className={`p-2 rounded cursor-pointer text-gray-700 dark:text-gray-300 ${readOnly ? 'opacity-25 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+          <label htmlFor="diagram-file-import" className={`p-2 rounded cursor-pointer text-gray-700 dark:text-gray-300 ${readOnly ? 'opacity-25 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
             <Upload size={18}/>
-            <input type="file" accept=".xml,.drawio,.json" className="hidden" onChange={handleImport} disabled={readOnly} />
+            <input id="diagram-file-import" name="diagramFileImport" aria-label="Import diagramu" type="file" accept=".xml,.drawio,.json" className="hidden" onChange={handleImport} disabled={readOnly} />
           </label>
         </Tooltip>
         <div className="relative">
-            <Tooltip text="Export diagramu" position="bottom">
+            <Tooltip text="Export diagramu" position="bottom-left">
               <button onClick={(e) => { e.stopPropagation(); setShowExportMenu(!showExportMenu); }} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-700 dark:text-gray-300 transition-colors"><Download size={18}/></button>
             </Tooltip>
             {showExportMenu && (
@@ -1818,20 +1844,6 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         >
           <Background color={isDarkMode ? "#334155" : "#cbd5e1"} gap={16} />
           <ViewportPortal>
-            {keyLassoBox && (
-              <div 
-                className="nodrag nopan pointer-events-none absolute z-[9000] border-2 border-dashed border-indigo-500 bg-indigo-500/15 dark:border-indigo-400 dark:bg-indigo-400/20 rounded shadow-sm"
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  transform: `translate(${keyLassoBox.x}px, ${keyLassoBox.y}px)`,
-                  width: `${keyLassoBox.width}px`,
-                  height: `${keyLassoBox.height}px`,
-                  pointerEvents: 'none'
-                }}
-              />
-            )}
             {contextMenu && (
               <div 
                 ref={contextMenuDomRef}
