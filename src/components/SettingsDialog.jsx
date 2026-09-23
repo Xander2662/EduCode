@@ -1416,11 +1416,13 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
 
       {/* Action Rows List - Narrow rows divided by lines, hotkeys on left side */}
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 shadow-sm overflow-hidden">
-        {ACTION_DEFINITIONS.map(action => {
+        {ACTION_DEFINITIONS.map((action, actionIndex) => {
           const slots = getActionSlots(action.key);
           const Icon = action.icon;
           const isThisActionRecording = recording?.actionKey === action.key;
           const isExpanded = expandedRow === action.key;
+          const isFirstRow = actionIndex === 0;
+          const rowTooltipPosition = isFirstRow ? 'bottom' : 'top';
           const defaultSlots = DEFAULT_HOTKEYS[action.key] || [];
           const currentNormalized = slots.map(normalizeKeyStr).sort();
           const defaultNormalized = defaultSlots.map(normalizeKeyStr).sort();
@@ -1501,7 +1503,7 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
                         key={sIdx}
                         className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-0.5 shadow-xs hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors"
                       >
-                        <Tooltip text="Klikněte pro změnu zkratky" position="top">
+                        <Tooltip text="Klikněte pro změnu zkratky" position={rowTooltipPosition}>
                           <button
                             type="button"
                             onClick={() => { setConflictWarning(null); setRecording({ actionKey: action.key, slotIndex: sIdx }); }}
@@ -1510,7 +1512,7 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
                             {hotkey}
                           </button>
                         </Tooltip>
-                        <Tooltip text="Odstranit tuto zkratku" position="top">
+                        <Tooltip text="Odstranit tuto zkratku" position={rowTooltipPosition}>
                           <button
                             type="button"
                             onClick={() => handleRemoveSlot(action.key, sIdx)}
@@ -1538,7 +1540,7 @@ const HotkeysManager = ({ hotkeys, onUpdate }) => {
 
                   {/* '+' Button showing up on hover */}
                   {(!isThisActionRecording || recording?.slotIndex !== -1) && (
-                    <Tooltip text="Přidat další klávesovou zkratku pro tuto akci" position="top">
+                    <Tooltip text="Přidat další klávesovou zkratku pro tuto akci" position={rowTooltipPosition}>
                       <button
                         type="button"
                         onClick={() => { setConflictWarning(null); setRecording({ actionKey: action.key, slotIndex: -1 }); }}
@@ -1746,12 +1748,12 @@ export const SettingsDialog = ({ isOpen, onClose, settings, onUpdate }) => {
                         Vzhled diagramu
                       </h3>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        Nastavení geometrie a textu pro vizuální prvky
+                        Nastavení vzhledu a textu pro vizuální prvky
                       </p>
                     </div>
                     
                     <CustomSelect 
-                      label="Tvar podmínky (If / While)"
+                      label="Tvar podmínky (if blok)"
                       description="Zvolte tvar bloku pro rozhodovací podmínky v diagramu."
                       value={settings.conditionShape}
                       onChange={(v) => onUpdate('conditionShape', v)}
@@ -1770,7 +1772,7 @@ export const SettingsDialog = ({ isOpen, onClose, settings, onUpdate }) => {
                         { value: 'true-false', label: 'True / False', subtext: 'Výchozí programátorské označení' },
                         { value: 'ano-ne', label: 'Ano / Ne', subtext: 'České slovní označení' },
                         { value: 'yes-no', label: 'Yes / No', subtext: 'Anglické slovní označení' },
-                        { value: '+-', label: '+ / -', subtext: 'Kompaktní matematické symboly' }
+                        { value: '+-', label: '+ / -', subtext: 'Matematické označení' }
                       ]}
                     />
 
@@ -1779,13 +1781,13 @@ export const SettingsDialog = ({ isOpen, onClose, settings, onUpdate }) => {
                         checked={settings.colorMode} 
                         onChange={(e) => onUpdate('colorMode', e.target.checked)} 
                         label="Barevné bloky"
-                        description="Každý typ bloku má vlastní rozpoznatelnou barvu."
+                        description="Každý typ bloku má vlastní barvu."
                       />
                       <ToggleSwitch 
                         checked={settings.groupColoring} 
                         onChange={(e) => onUpdate('groupColoring', e.target.checked)} 
                         label="Zbarvení skupin"
-                        description="Zvýrazňuje vnitřní bloky cyklů a větvení jemným podbarvením."
+                        description="Vytváří barevné seskupení podle skupin bloků."
                       />
                     </div>
                   </div>

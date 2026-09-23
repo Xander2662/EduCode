@@ -456,6 +456,9 @@ const LineNumberedTextarea = React.forwardRef(({ value, onChange, readOnly, plac
 
   const handleLineClick = (lineIndex) => {
      if (!showDebugger) return;
+     const lines = (value || '').split('\n');
+     const lineText = (lines[lineIndex] || '').trim();
+     if (lineText.toUpperCase().startsWith('END')) return;
      const nodeId = Object.keys(nodeLineMap).find(id => Array.isArray(nodeLineMap[id]) ? nodeLineMap[id].includes(lineIndex) : nodeLineMap[id] === lineIndex);
      if (nodeId && onBreakpointToggle) onBreakpointToggle(nodeId);
   };
@@ -468,9 +471,13 @@ const LineNumberedTextarea = React.forwardRef(({ value, onChange, readOnly, plac
 
       <div ref={lineNumbersRef} className="w-12 bg-gray-50 dark:bg-gray-800 text-gray-400 text-right pr-3 py-4 font-mono text-sm overflow-hidden select-none border-r border-gray-200 dark:border-gray-700 z-10">
         {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => {
-          const nodeId = Object.keys(nodeLineMap).find(id => Array.isArray(nodeLineMap[id]) ? nodeLineMap[id].includes(i) : nodeLineMap[id] === i);
+          const lines = (value || '').split('\n');
+          const lineText = (lines[i] || '').trim();
+          const isEndLine = lineText.toUpperCase().startsWith('END');
+
+          const nodeId = !isEndLine && Object.keys(nodeLineMap).find(id => Array.isArray(nodeLineMap[id]) ? nodeLineMap[id].includes(i) : nodeLineMap[id] === i);
           const isBp = nodeId && breakpoints.includes(nodeId);
-          const hasMapping = !!nodeId && showDebugger;
+          const hasMapping = !!nodeId && showDebugger && !isEndLine;
 
           return (
              <div key={i} className={`leading-6 relative group ${hasMapping ? 'cursor-pointer hover:text-gray-900 dark:hover:text-gray-100' : ''}`} onClick={() => handleLineClick(i)}>
@@ -893,7 +900,7 @@ function AppContent() {
       setExternalSelectedIds([]);
       return;
     }
-    const nodeId = Object.keys(pseudoNodeLineMap).find(id => pseudoNodeLineMap[id] === lineIdx);
+    const nodeId = Object.keys(pseudoNodeLineMap).find(id => Array.isArray(pseudoNodeLineMap[id]) ? pseudoNodeLineMap[id].includes(lineIdx) : pseudoNodeLineMap[id] === lineIdx);
     if (nodeId) setExternalSelectedIds([nodeId]);
     else setExternalSelectedIds([]);
   };
@@ -903,7 +910,7 @@ function AppContent() {
       setExternalSelectedIds([]);
       return;
     }
-    const nodeId = Object.keys(pythonNodeLineMap).find(id => pythonNodeLineMap[id] === lineIdx);
+    const nodeId = Object.keys(pythonNodeLineMap).find(id => Array.isArray(pythonNodeLineMap[id]) ? pythonNodeLineMap[id].includes(lineIdx) : pythonNodeLineMap[id] === lineIdx);
     if (nodeId) setExternalSelectedIds([nodeId]);
     else setExternalSelectedIds([]);
   };
@@ -976,7 +983,7 @@ function AppContent() {
             return;
         }
 
-        const { xml: generatedXml, errors: genErrors } = parsePseudocodeToDrawio(pseudocode, latestDiagramXmlRef.current, edgeStyle, conditionShape, editorMode);
+        const { xml: generatedXml, errors: genErrors, nodeLineMap: genNodeLineMap } = parsePseudocodeToDrawio(pseudocode, latestDiagramXmlRef.current, edgeStyle, conditionShape, editorMode);
         
         const parser = new DOMParser();
         const doc = parser.parseFromString(generatedXml, "text/xml");
@@ -1000,6 +1007,9 @@ function AppContent() {
             return prev;
         });
         setParseErrors(genErrors || []);
+        if (genNodeLineMap) {
+            setPseudoNodeLineMap(genNodeLineMap);
+        }
       } catch (err) {
         setParseErrors([err.message]);
       }
@@ -1689,8 +1699,30 @@ function AppContent() {
               localStorage.setItem('hotkeys', JSON.stringify(defaultHotkeys));
               logAction('SETTINGS_CHANGED', { hotkeys: defaultHotkeys });
             }
-            if (key === 'editorMode') { setEditorMode(value); localStorage.setItem('editorMode', value); logAction('SETTINGS_CHANGED', { editorMode: value }); }
             if (key === 'colorMode') { setColorMode(value); localStorage.setItem('colorMode', value); logAction('SETTINGS_CHANGED', { colorMode: value }); }
+            if (key === 'editorMode') { 
+              setEditorMode(value); 
+              localStorage.setItem('editorMode', value); 
+              logAction('SETTINGS_CHANGED', { editorMode: value }); 
+              try {
+                const currentXml = latestDiagramXmlRef.current || diagramXml;
+                let pseudo = pseudocode;
+                const parsed = parseDrawioToPseudocode(currentXml);
+                if (parsed?.code) {
+                  pseudo = parsed.code;
+                  setPseudocode(pseudo);
+                }
+                if (pseudo && pseudo.trim()) {
+                  const { xml: newXml } = parsePseudocodeToDrawio(pseudo, currentXml, edgeStyle, conditionShape, value);
+                  if (newXml && newXml !== currentXml) {
+                    latestDiagramXmlRef.current = newXml;
+                    setDiagramXml(newXml);
+                  }
+                }
+              } catch (e) {
+                console.error("Failed to convert editor mode:", e);
+              }
+            }
             if (key === 'groupColoring') { setGroupColoring(value); localStorage.setItem('groupColoring', value); logAction('SETTINGS_CHANGED', { groupColoring: value }); }
             if (key === 'showDebugger') { setShowDebugger(value); localStorage.setItem('showDebugger', value); logAction('SETTINGS_CHANGED', { showDebugger: value }); if(!value) stopDebugger(); }
             if (key === 'debugSpeedPercent') { setDebugSpeedPercent(value); }

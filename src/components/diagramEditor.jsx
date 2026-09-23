@@ -61,6 +61,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   useEffect(() => {
     if (!contextMenu) return;
     const handleOutsidePointer = (e) => {
+      if (e.button === 1) return;
       if (Date.now() - (contextMenu.openedAt || 0) < 350) return;
       if (contextMenuDomRef.current && contextMenuDomRef.current.contains(e.target)) return;
       setContextMenu(null);
@@ -83,6 +84,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     y: typeof window !== 'undefined' ? window.innerHeight / 2 : 0 
   });
   const lastDragTimeRef = useRef(0);
+  const dragStartPositionsRef = useRef(null);
   const reactFlowWrapper = useRef(null);
   useEffect(() => {
     const handleMouseMove = (e) => { 
@@ -391,6 +393,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         return computeGroupBounds(nodes, groupDefs, colorMode);
   }, [nodes, groupDefs, groupColoring, colorMode]);
   const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
+  const allEdges = useMemo(() => edges.map(e => ({ ...e, data: { ...e.data, readOnly, edgeStyle } })), [edges, readOnly, edgeStyle]);
 
   useEffect(() => {
     setEdges(eds => {
@@ -1044,6 +1047,29 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     return foundEdge;
   };
 
+  const onNodeDragStart = useCallback((event, node, draggedNodesList) => {
+    takeSnapshot();
+    handleInteract();
+    const startMap = new Map();
+    const currentNodes = reactFlowInstance ? reactFlowInstance.getNodes() : (nodesRef.current || nodes || []);
+    currentNodes.forEach(n => {
+      if (n && n.position) {
+        startMap.set(n.id, { x: Math.round(n.position.x), y: Math.round(n.position.y) });
+      }
+    });
+    if (node && node.id && !startMap.has(node.id) && node.position) {
+      startMap.set(node.id, { x: Math.round(node.position.x), y: Math.round(node.position.y) });
+    }
+    if (Array.isArray(draggedNodesList)) {
+      draggedNodesList.forEach(dn => {
+        if (dn && dn.id && !startMap.has(dn.id) && dn.position) {
+          startMap.set(dn.id, { x: Math.round(dn.position.x), y: Math.round(dn.position.y) });
+        }
+      });
+    }
+    dragStartPositionsRef.current = startMap;
+  }, [takeSnapshot, handleInteract, reactFlowInstance, nodes]);
+
   const onNodeDrag = useCallback((event, node) => {
     if (readOnly) return;
     setContextMenu(null); setShowExportMenu(false);
@@ -1115,16 +1141,19 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     }
   }, [edges, nodes, readOnly, setNodes]);
 
-  const onNodeDragStop = useCallback((event, node) => {
+  const onNodeDragStop = useCallback((event, node, draggedNodesList) => {
     if (readOnly) return;
     handleInteract();
     if (hoveredEdgeRef.current) { hoveredEdgeRef.current.classList.remove('drop-target'); hoveredEdgeRef.current = null; }
 
-    let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
-    if (draggedNodes.length === 0) draggedNodes = [node];
+    let draggedNodes = (draggedNodesList && draggedNodesList.length > 0)
+      ? draggedNodesList
+      : nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
+    if (draggedNodes.length === 0 && node) draggedNodes = [node];
 
     const draggedIds = new Set(draggedNodes.map(n => n.id));
     
+    let snappedPositions = new Map();
     if (screenToFlowPosition) {
         const mousePos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
         const intersectingContainers = nodes.filter(n => {
@@ -1190,7 +1219,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             });
         });
 
-        if (targetContainer) {
+        if (targetContainer && targetContainer.type === 'CASE_CONTAINER') {
             let needsSnap = false;
             const newPositions = new Map();
 
@@ -1211,6 +1240,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             });
 
             if (needsSnap) {
+                snappedPositions = newPositions;
                 setNodes(nds => nds.map(n => newPositions.has(n.id) ? { ...n, position: newPositions.get(n.id) } : n));
             }
 
@@ -1245,6 +1275,67 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
                 }
             }
         }
+    }
+
+    // --- Record block move in log ---
+    if (dragStartPositionsRef.current) {
+        if (onLogAction) {
+            const movedNodes = [];
+            draggedNodes.forEach(dn => {
+                if (dn.type === 'GROUP_BG') return;
+                const fromPos = dragStartPositionsRef.current.get(dn.id);
+                if (!fromPos) return;
+
+                let toX = dn.position.x;
+                let toY = dn.position.y;
+                if (snappedPositions.has(dn.id)) {
+                    const sp = snappedPositions.get(dn.id);
+                    toX = sp.x;
+                    toY = sp.y;
+                } else if (dn.data?.morphOffset) {
+                    toX += dn.data.morphOffset.x;
+                    toY += dn.data.morphOffset.y;
+                } else if (dn.id === node?.id && node?.position) {
+                    toX = node.position.x;
+                    toY = node.position.y;
+                } else {
+                    const rfNode = reactFlowInstance?.getNode(dn.id);
+                    if (rfNode?.position) {
+                        toX = rfNode.position.x;
+                        toY = rfNode.position.y;
+                    }
+                }
+
+                const from = { x: Math.round(fromPos.x), y: Math.round(fromPos.y) };
+                const to = { x: Math.round(toX), y: Math.round(toY) };
+
+                if (from.x !== to.x || from.y !== to.y) {
+                    movedNodes.push({
+                        id: dn.id,
+                        type: dn.type,
+                        label: dn.data?.label || '',
+                        from,
+                        to
+                    });
+                }
+            });
+
+            if (movedNodes.length === 1) {
+                onLogAction('NODE_MOVED', {
+                    id: movedNodes[0].id,
+                    type: movedNodes[0].type,
+                    label: movedNodes[0].label,
+                    from: movedNodes[0].from,
+                    to: movedNodes[0].to
+                });
+            } else if (movedNodes.length > 1) {
+                onLogAction('NODES_MOVED', {
+                    count: movedNodes.length,
+                    nodes: movedNodes
+                });
+            }
+        }
+        dragStartPositionsRef.current = null;
     }
 
     if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER')) return;
@@ -1306,7 +1397,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             });
         }
     }
-  }, [edges, nodes, setEdges, edgeStyle, readOnly, handleInteract, onLogAction]);
+  }, [edges, nodes, setEdges, edgeStyle, readOnly, handleInteract, onLogAction, screenToFlowPosition, reactFlowInstance]);
 
 
   
@@ -1317,18 +1408,25 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       setNodes(prev => parsedNodes.map(n => ({ 
           ...n, 
           selected: prev.find(p => p.id === n.id)?.selected || false, 
-          data: { ...n.data, readOnly, edgeStyle, onStartEdit: takeSnapshot, onChange: (e) => updateNodeLabel(n.id, e.target.value, true), onUpdateData: (newData) => updateNodeData(n.id, newData) } 
+          data: { ...n.data, readOnly, edgeStyle, onStartEdit: takeSnapshot, handleInteract, onChange: (e) => updateNodeLabel(n.id, e.target.value, true), onUpdateData: (newData) => updateNodeData(n.id, newData) } 
       })));
       
-      setEdges(prev => parsedEdges.map(e => ({ 
-          ...e, 
-          type: 'customEdge',
-          selected: prev.find(p => p.id === e.id)?.selected || false, 
-          data: { ...e.data, readOnly, edgeStyle }, 
-          markerEnd: { type: MarkerType.ArrowClosed } 
-      })));
+      setEdges(prev => parsedEdges.map(e => {
+          const srcNode = parsedNodes.find(n => n.id === e.source);
+          const isCond = e.data?.isCondition || srcNode?.type === 'CONDITION' || ['ano', 'ne', 'yes', 'no', 'true', 'false', '+', '-'].includes((e.data?.label || '').toLowerCase().trim());
+          const pref = edgeLabels[edgeStyle || 'true-false'];
+          const isSwapped = srcNode?.data?.isSwapped === true;
+          const label = e.data?.label || (isCond ? (e.sourceHandle === 's-right' ? (isSwapped ? pref.t : pref.f) : (isSwapped ? pref.f : pref.t)) : '');
+          return { 
+              ...e, 
+              type: 'customEdge',
+              selected: prev.find(p => p.id === e.id)?.selected || false, 
+              data: { ...e.data, label, readOnly, edgeStyle, isCondition: isCond, handleInteract, takeSnapshot }, 
+              markerEnd: { type: MarkerType.ArrowClosed } 
+          };
+      }));
     }
-  }, [xml, readOnly, edgeStyle, setNodes, setEdges, updateNodeLabel, updateNodeData]);
+  }, [xml, readOnly, edgeStyle, setNodes, setEdges, updateNodeLabel, updateNodeData, handleInteract, takeSnapshot]);
 
   // =========================================================================================
   // CRITICAL WARNING: XML EMISSION & INTERACTION FLAG
@@ -1394,13 +1492,16 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     if (sourceNode?.type === 'START_END' && sourceNode.data?.mode === 'unassigned') updateNodeData(params.source, { mode: 'start', label: 'main' });
     if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'unassigned') updateNodeData(params.target, { mode: 'end', label: 'ENDFUNCTION' });
 
-    let data = { edgeStyle };
+    let data = { edgeStyle, handleInteract, takeSnapshot };
     if (sourceNode?.type === 'CONDITION') {
         const currentEdges = getEdges();
         const outEdges = currentEdges.filter(e => e.source === params.source);
         const pref = edgeLabels[edgeStyle || 'true-false'];
         
-        let newLabel = params.sourceHandle === 's-right' ? pref.f : pref.t;
+        const isSwapped = sourceNode.data?.isSwapped === true;
+        let newLabel = params.sourceHandle === 's-right' 
+            ? (isSwapped ? pref.t : pref.f) 
+            : (isSwapped ? pref.f : pref.t);
         
         if (outEdges.length === 1) {
             const existingLabel = outEdges[0].data?.label;
@@ -1409,6 +1510,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             else newLabel = pref.t;
         }
         data.label = newLabel;
+        data.isCondition = true;
     }
 
     setEdges(eds => {
@@ -1416,9 +1518,73 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             // Remove existing outgoing edge on the source handle
             if (sourceNode && sourceNode.type !== 'CONDITION' && e.source === params.source) return false;
             if (sourceNode && sourceNode.type === 'CONDITION' && e.source === params.source && e.sourceHandle === params.sourceHandle) return false;
-            
-            // Remove existing incoming edge on the target handle
-            if (e.target === params.target && (e.targetHandle === params.targetHandle || (!params.targetHandle && !e.targetHandle))) return false;
+
+            // Check existing incoming edge on target handle
+            const isSameTargetHandle = e.target === params.target && (e.targetHandle || null) === (params.targetHandle || null);
+            if (isSameTargetHandle) {
+                // 1. ENDFUNCTION / END node or MERGE node can always have multiple incoming edges
+                if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'end') return true;
+                if (targetNode?.type === 'MERGE') return true;
+
+                const existingSourceNode = getNode(e.source);
+
+                // 2. Loopback to CONDITION (IF) block
+                if (targetNode?.type === 'CONDITION') {
+                    const isDownstream = (startId, targetId, visited = new Set()) => {
+                        if (startId === targetId) return true;
+                        if (visited.has(startId)) return false;
+                        visited.add(startId);
+                        return eds.filter(ed => ed.source === startId).some(ed => isDownstream(ed.target, targetId, visited));
+                    };
+                    const isNewLoopback = isDownstream(targetNode.id, params.source) || (sourceNode && sourceNode.position.y > targetNode.position.y);
+                    const isExistingLoopback = isDownstream(targetNode.id, e.source) || (existingSourceNode && existingSourceNode.position.y > targetNode.position.y);
+                    if (isNewLoopback || isExistingLoopback) return true;
+                }
+
+                // 3. Convergence of two branches of an IF (CONDITION) block
+                const getConditionBranches = (startNodeId, startHandle = null) => {
+                    const result = new Map();
+                    const queue = [{ id: startNodeId, handle: startHandle }];
+                    const visited = new Set();
+                    while (queue.length > 0) {
+                        const curr = queue.shift();
+                        const key = `${curr.id}_${curr.handle || ''}`;
+                        if (visited.has(key)) continue;
+                        visited.add(key);
+
+                        const n = getNode(curr.id);
+                        if (n && n.type === 'CONDITION' && curr.handle) {
+                            if (!result.has(n.id)) result.set(n.id, new Set());
+                            result.get(n.id).add(curr.handle);
+                        }
+
+                        eds.filter(ed => ed.target === curr.id).forEach(ed => {
+                            queue.push({ id: ed.source, handle: ed.sourceHandle });
+                        });
+                    }
+                    return result;
+                };
+
+                const newBranches = getConditionBranches(params.source, sourceNode?.type === 'CONDITION' ? params.sourceHandle : null);
+                const existingBranches = getConditionBranches(e.source, existingSourceNode?.type === 'CONDITION' ? e.sourceHandle : null);
+
+                let isIfBranchConvergence = false;
+                for (const [condId, newSet] of newBranches.entries()) {
+                    if (existingBranches.has(condId)) {
+                        const existingSet = existingBranches.get(condId);
+                        const hasDifferentBranch = Array.from(newSet).some(h => !existingSet.has(h)) ||
+                                                   Array.from(existingSet).some(h => !newSet.has(h));
+                        if (hasDifferentBranch) {
+                            isIfBranchConvergence = true;
+                            break;
+                        }
+                    }
+                }
+                if (isIfBranchConvergence) return true;
+
+                // In all other cases: delete the existing incoming edge (replace with new connection)
+                return false;
+            }
 
             return true;
         });
@@ -1453,6 +1619,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             readOnly, 
             ...(type === 'START_END' ? { mode: 'unassigned', entityType: 'FUNCTION' } : {}), 
             ...((type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER') ? { isNew: true, doWhile: false } : {}),
+            ...(type === 'FOR_CONTAINER' ? { forInit: 'i = 0', forLimit: '10', forStep: '1' } : {}),
             ...(type === 'IO' ? { ioType: 'input' } : {}),
             onStartEdit: takeSnapshot,
             onChange: (e) => updateNodeLabel(newId, e.target.value, true),
@@ -1495,6 +1662,11 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
   const handlePaneMouseDown = useCallback((e) => {
     if (readOnly) return;
+    if (e.button === 1) {
+      if (contextMenuRef.current && contextMenuRef.current.connectSource) {
+        return;
+      }
+    }
     const slots = Array.isArray(safeHotkeys.contextMenu) ? safeHotkeys.contextMenu : (safeHotkeys.contextMenu ? [safeHotkeys.contextMenu] : []);
     const isMouse3 = slots.some(s => s.toLowerCase().trim() === 'mouse 3');
     if (e.button === 1 && isMouse3) {
@@ -1702,7 +1874,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   }, [hasPureDragLasso, isPanOnMouse1]);
 
   return (
-    <div className="w-full h-full relative outline-none" tabIndex={0} onClick={() => { 
+    <div className="w-full h-full relative outline-none" tabIndex={0} onClick={(e) => { 
+      if (e && e.button === 1) return;
       if (contextMenuRef.current && Date.now() - (contextMenuRef.current.openedAt || 0) > 350) {
         setContextMenu(null);
       }
@@ -1729,6 +1902,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         confirmText="Smazat (Enter)"
         cancelText="Zrušit (Esc)"
         confirmVariant="danger"
+        maxWidth="max-w-[280px]"
         onConfirm={executeDelete}
         onCancel={() => setDeleteConfirm(false)}
       />
@@ -1792,7 +1966,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
       <div className="w-full h-full" onContextMenu={handlePaneContextMenu} onMouseDown={handlePaneMouseDown}>
         <ReactFlow 
-          nodes={allNodes} edges={edges} 
+          nodes={allNodes} edges={allEdges} 
           attributionPosition="bottom-left"
           onNodesChange={(changes) => { 
               const isUserChange = changes.some(c => c.type !== 'dimensions' && c.type !== 'replace');
@@ -1806,12 +1980,13 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           }} 
           onConnect={(params) => { if (!readOnly) onConnect(params); }} 
           onConnectStart={(event, params) => { connectingNodeRef.current = params; }}
-          onConnectEnd={() => { setTimeout(() => { if (!contextMenu) connectingNodeRef.current = null; }, 150); }}
-          onNodeDragStart={() => { takeSnapshot(); handleInteract(); }}
+          onConnectEnd={() => { setTimeout(() => { if (!contextMenuRef.current) connectingNodeRef.current = null; }, 150); }}
+          onNodeDragStart={onNodeDragStart}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
-          onPaneClick={() => { 
+          onPaneClick={(e) => { 
             handleInteract(); 
+            if (e && e.button === 1) return;
             if (contextMenuRef.current && Date.now() - (contextMenuRef.current.openedAt || 0) > 350) {
               setContextMenu(null);
             }

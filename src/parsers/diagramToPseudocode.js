@@ -77,9 +77,10 @@ export const parseDrawioToPseudocode = (xml) => {
         else if (style.includes('shape=parallelogram') || cellTypeAttr === 'IO' || cellTypeAttr === 'io') {
             type = 'IO';
         }
-        else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellTypeAttr === 'LOOP_CONTAINER' || style.includes('SWITCH_CONTAINER') || style.includes('CASE_CONTAINER')) {
-            if (style.includes('SWITCH_CONTAINER')) type = 'SWITCH_CONTAINER';
-            else if (style.includes('CASE_CONTAINER')) type = 'CASE_CONTAINER';
+        else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellTypeAttr === 'LOOP_CONTAINER' || style.includes('FOR_CONTAINER') || cellTypeAttr === 'FOR_CONTAINER' || style.includes('forInit=') || cell.getAttribute('forInit') || style.includes('SWITCH_CONTAINER') || cellTypeAttr === 'SWITCH_CONTAINER' || style.includes('CASE_CONTAINER') || cellTypeAttr === 'CASE_CONTAINER') {
+            if (style.includes('SWITCH_CONTAINER') || cellTypeAttr === 'SWITCH_CONTAINER') type = 'SWITCH_CONTAINER';
+            else if (style.includes('CASE_CONTAINER') || cellTypeAttr === 'CASE_CONTAINER') type = 'CASE_CONTAINER';
+            else if (style.includes('FOR_CONTAINER') || cellTypeAttr === 'FOR_CONTAINER' || style.includes('forInit=') || cell.getAttribute('forInit') || value.toUpperCase().startsWith('FOR ')) type = 'FOR_CONTAINER';
             else type = 'LOOP_CONTAINER';
             
             try {
@@ -89,16 +90,27 @@ export const parseDrawioToPseudocode = (xml) => {
                 }
             } catch {
             }
-            if (style.includes('forInit=')) {
-                type = 'FOR_CONTAINER';
+            if (type === 'FOR_CONTAINER') {
                 const initMatch = style.match(/forInit=([^;]+)/);
-                if (initMatch) forInit = decodeURIComponent(initMatch[1]);
+                forInit = initMatch ? decodeURIComponent(initMatch[1]) : (cell.getAttribute('forInit') ? decodeURIComponent(cell.getAttribute('forInit')) : '');
                 
                 const limitMatch = style.match(/forLimit=([^;]+)/);
-                if (limitMatch) forLimit = decodeURIComponent(limitMatch[1]);
+                forLimit = limitMatch ? decodeURIComponent(limitMatch[1]) : (cell.getAttribute('forLimit') ? decodeURIComponent(cell.getAttribute('forLimit')) : '');
                 
                 const stepMatch = style.match(/forStep=([^;]+)/);
-                if (stepMatch) forStep = decodeURIComponent(stepMatch[1]);
+                forStep = stepMatch ? decodeURIComponent(stepMatch[1]) : (cell.getAttribute('forStep') ? decodeURIComponent(cell.getAttribute('forStep')) : '');
+
+                if (!forInit && value.toUpperCase().startsWith('FOR ')) {
+                    const forMatch = value.match(/^FOR\s+([a-zA-Z_]\w*)\s*(?:=|<-)\s*(.*?)\s+TO\s+(.*?)(?:\s+STEP\s+(.*?))?(?:\s+DO)?$/i);
+                    if (forMatch) {
+                        forInit = `${forMatch[1]} = ${forMatch[2].trim()}`;
+                        forLimit = forMatch[3].trim();
+                        forStep = forMatch[4] ? forMatch[4].trim() : '1';
+                    }
+                }
+                if (!forInit) forInit = 'i = 0';
+                if (!forLimit) forLimit = '10';
+                if (!forStep) forStep = '1';
             }
             if (style.includes('switchVar=')) {
                 const svMatch = style.match(/switchVar=([^;]+)/);
@@ -114,6 +126,12 @@ export const parseDrawioToPseudocode = (xml) => {
             }
         }
         
+        let isSwapped = false;
+        if (style.includes('isSwapped=')) {
+            const swMatch = style.match(/isSwapped=([^;]+)/);
+            if (swMatch) isSwapped = swMatch[1] === 'true';
+        }
+        
         const entityMatch = style.match(/entityType=([^;]+)/);
         const entityType = entityMatch ? entityMatch[1] : 'FUNCTION';
         
@@ -124,13 +142,16 @@ export const parseDrawioToPseudocode = (xml) => {
         const height = geo ? parseFloat(geo.getAttribute('height') || 0) : 0;
         const parentId = cell.getAttribute('parent');
 
-        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep, switchVar, caseVal, isDefault, parentId };
+        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep, switchVar, caseVal, isDefault, isSwapped, parentId };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
         const target = cell.getAttribute('target');
         const value = cleanTextWithLines(cell.getAttribute('value')).toLowerCase().replace('\n', ' ');
-        if (source && target) edges.push({ source, target, value });
+        const style = cell.getAttribute('style') || '';
+        const shMatch = style.match(/sourceHandle=([^;]+)/);
+        const sourceHandle = shMatch ? shMatch[1] : undefined;
+        if (source && target) edges.push({ source, target, value, sourceHandle });
       }
     });
 
@@ -208,13 +229,11 @@ export const parseDrawioToPseudocode = (xml) => {
         if (node.type === 'START' || node.type === 'START_END' || node.type === 'END') return false;
         const nW = node.width || 100;
         const nH = node.height || 50;
-        const coreW = nW * 0.5;
-        const coreH = nH * 0.5;
-        const coreX = node.x + (nW - coreW) / 2;
-        const coreY = node.y + (nH - coreH) / 2;
+        const centerX = node.x + nW / 2;
+        const centerY = node.y + nH / 2;
         const loopW = loop.width || 300;
         const loopH = loop.height || 150;
-        const isInside = (coreX < loop.x + loopW && coreX + coreW > loop.x && coreY < loop.y + loopH && coreY + coreH > loop.y);
+        const isInside = (centerX < loop.x + loopW && centerX > loop.x && centerY < loop.y + loopH && centerY > loop.y);
         return isInside;
     };
 
@@ -253,7 +272,48 @@ export const parseDrawioToPseudocode = (xml) => {
     const startNodes = Object.values(nodes).filter(n => n.type === 'START');
     startNodes.sort((a, b) => a.x - b.x || a.y - b.y);
 
-    let clusterId = 1;
+    if (startNodes.length === 1 && (!startNodes[0].value || startNodes[0].value === 'Start/End')) {
+        startNodes[0].value = 'main';
+    }
+
+    const usedFuncNames = new Set();
+    let maxFragNum = 0;
+    startNodes.forEach(sn => {
+        const val = (sn.value || '').trim();
+        const m = val.match(/^fragment_(\d+)$/i);
+        if (m) {
+            const num = parseInt(m[1], 10);
+            if (num > maxFragNum) maxFragNum = num;
+        }
+        if (val && !usedFuncNames.has(val)) {
+            usedFuncNames.add(val);
+        } else if (val && usedFuncNames.has(val)) {
+            maxFragNum++;
+            while (usedFuncNames.has(`fragment_${maxFragNum}`)) {
+                maxFragNum++;
+            }
+            sn.value = `fragment_${maxFragNum}`;
+            usedFuncNames.add(sn.value);
+        }
+    });
+
+    startNodes.forEach(sn => {
+        let val = (sn.value || '').trim();
+        if (!val || val === 'Start/End') {
+            if (startNodes.length === 1 && !usedFuncNames.has('main')) {
+                sn.value = 'main';
+            } else {
+                maxFragNum++;
+                while (usedFuncNames.has(`fragment_${maxFragNum}`)) {
+                    maxFragNum++;
+                }
+                sn.value = `fragment_${maxFragNum}`;
+            }
+            usedFuncNames.add(sn.value);
+        }
+    });
+
+    let clusterId = maxFragNum + 1;
     let assigned = new Set();
     
     const markCluster = (startId) => {
@@ -289,11 +349,18 @@ export const parseDrawioToPseudocode = (xml) => {
 
     const realStartsCount = startNodes.length;
 
-    let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type));
+    let roots = Object.values(nodes)
+        .filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type))
+        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
     
     roots.forEach(r => {
+        while (usedFuncNames.has(`fragment_${clusterId}`)) {
+            clusterId++;
+        }
+        const fragName = `fragment_${clusterId}`;
+        usedFuncNames.add(fragName);
         const ghostId = `ghost_start_${clusterId}`;
-        nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: r.x, y: r.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
+        nodes[ghostId] = { id: ghostId, value: fragName, type: 'START', x: r.x, y: r.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
         edges.push({ source: ghostId, target: r.id, value: '' });
         nodes[ghostId].next.push({ target: r.id, value: '' });
         r.prev.push({ source: ghostId, value: '' });
@@ -303,10 +370,19 @@ export const parseDrawioToPseudocode = (xml) => {
         markCluster(r.id);
     });
 
-    Object.values(nodes).forEach(n => {
-        if (!assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type)) {
+    const unassignedNodes = Object.values(nodes)
+        .filter(n => !assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type))
+        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+
+    unassignedNodes.forEach(n => {
+        if (!assigned.has(n.id)) {
+            while (usedFuncNames.has(`fragment_${clusterId}`)) {
+                clusterId++;
+            }
+            const fragName = `fragment_${clusterId}`;
+            usedFuncNames.add(fragName);
             const ghostId = `ghost_start_${clusterId}`;
-            nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
+            nodes[ghostId] = { id: ghostId, value: fragName, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
             edges.push({ source: ghostId, target: n.id, value: '' });
             nodes[ghostId].next.push({ target: n.id, value: '' });
             n.prev.push({ source: ghostId, value: '' });
@@ -419,9 +495,7 @@ export const parseDrawioToPseudocode = (xml) => {
     };
 
     const findConvergence = (tId, fId) => {
-        if (!tId && !fId) return null;
-        if (!tId) return fId;
-        if (!fId) return tId;
+        if (!tId || !fId) return null;
         
         const pathT = [];
         let curr = tId;
@@ -484,7 +558,7 @@ export const parseDrawioToPseudocode = (xml) => {
             return ind;
         };
 
-        const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null, currentScope = new Set(), currentLoopStack = []) => {
+        const traverse = (nodeId, indent = "", inPath = new Set(), stopId = null, currentScope = new Set(), currentLoopStack = [], minLoopDepth = 0) => {
             if (!nodeId || !nodes[nodeId] || visited.has(nodeId)) {
                 return;
             }
@@ -539,9 +613,9 @@ export const parseDrawioToPseudocode = (xml) => {
                 declaredFuncs.add(fName);
 
                 appendLine(`${indent}${node.entityType} ${fName}()`, node.id);
-                if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId, currentScope, [...currentLoopStack]);
+                if (node.next.length > 0) traverse(node.next[0].target, indent + "    ", new Set(inPath), stopId, currentScope, [...currentLoopStack], minLoopDepth);
                 else if (!stopId) {
-                    while (currentLoopStack.length > 0) {
+                    while (currentLoopStack.length > minLoopDepth) {
                         const l = currentLoopStack.pop();
                         indent = closeLoop(l, indent, currentScope);
                     }
@@ -559,9 +633,9 @@ export const parseDrawioToPseudocode = (xml) => {
                 }
                 
                 if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
-                    traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack]);
+                    traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], minLoopDepth);
                 } else if (!stopId) {
-                    while (currentLoopStack.length > 0) {
+                    while (currentLoopStack.length > minLoopDepth) {
                         const l = currentLoopStack.pop();
                         indent = closeLoop(l, indent, currentScope);
                     }
@@ -582,16 +656,17 @@ export const parseDrawioToPseudocode = (xml) => {
                     mergeNode = node.next[0].target;
                 }
 
+                const switchMinDepth = currentLoopStack.length;
                 node.next.forEach(e => {
                     if (!inPath.has(e.target)) {
-                        traverse(e.target, indent + "    ", new Set(inPath), mergeNode, currentScope, [...currentLoopStack]);
+                        traverse(e.target, indent + "    ", new Set(inPath), mergeNode, currentScope, [...currentLoopStack], switchMinDepth);
                     }
                 });
                 
                 appendLine(`${indent}ENDSWITCH`, node.id);
 
                 if (mergeNode && !inPath.has(mergeNode)) {
-                    traverse(mergeNode, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack]);
+                    traverse(mergeNode, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], minLoopDepth);
                 }
             }
             else if (node.type === 'CONDITION') {
@@ -599,13 +674,23 @@ export const parseDrawioToPseudocode = (xml) => {
                 
                 checkVariables(node.value, currentScope);
 
-                let trueEdge = node.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes(e.value?.toLowerCase().trim()));
-                let falseEdge = node.next.find(e => ['ne', 'no', 'false', '0', 'n', '-'].includes(e.value?.toLowerCase().trim()));
+                let trueEdge = node.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes((e.value || '').toLowerCase().trim()));
+                let falseEdge = node.next.find(e => ['ne', 'no', 'false', '0', 'n', '-'].includes((e.value || '').toLowerCase().trim()));
 
                 if (node.next.length === 2) {
                     if (!trueEdge && !falseEdge) {
-                        trueEdge = node.next[0];
-                        falseEdge = node.next[1];
+                        const bottomEdge = node.next.find(e => e.sourceHandle === 's-bottom');
+                        const rightEdge = node.next.find(e => e.sourceHandle === 's-right');
+                        if (node.isSwapped) {
+                            trueEdge = rightEdge || node.next[0];
+                            falseEdge = bottomEdge || node.next[1];
+                        } else {
+                            trueEdge = bottomEdge || node.next[0];
+                            falseEdge = rightEdge || node.next[1];
+                        }
+                        if (trueEdge === falseEdge) {
+                            falseEdge = node.next.find(e => e !== trueEdge);
+                        }
                         const err = `Podmínka '${node.value}' nemá označené větve (Ano/Ne). Výsledek může být nepřesný.`;
                         if (!errors.includes(err)) errors.push(err);
                     } else if (trueEdge && !falseEdge) {
@@ -615,9 +700,21 @@ export const parseDrawioToPseudocode = (xml) => {
                     } else if (trueEdge === falseEdge) {
                         falseEdge = node.next.find(e => e !== trueEdge);
                     }
-                } else {
-                    trueEdge = trueEdge || node.next[0];
-                    falseEdge = falseEdge || node.next[1];
+                } else if (node.next.length === 1) {
+                    if (!trueEdge && !falseEdge) {
+                        const h = node.next[0].sourceHandle;
+                        const isRight = h === 's-right';
+                        const isBottom = h === 's-bottom';
+                        if (isRight) {
+                            if (node.isSwapped) trueEdge = node.next[0];
+                            else falseEdge = node.next[0];
+                        } else if (isBottom) {
+                            if (node.isSwapped) falseEdge = node.next[0];
+                            else trueEdge = node.next[0];
+                        } else {
+                            trueEdge = node.next[0];
+                        }
+                    }
                 }
                 
                 const tTarget = trueEdge?.target;
@@ -696,19 +793,109 @@ export const parseDrawioToPseudocode = (xml) => {
                     const exitNode = isTrueLoop ? fTarget : tTarget;
                     if (exitNode && exitNode !== stopId && !inPath.has(exitNode)) traverse(exitNode, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack]);
                 } else {
-                    let mergeNodeId = findConvergence(tTarget, fTarget);
-                    
-                    appendLine(`${indent}IF ${cleanCond} THEN`, node.id);
-                    if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope, [...currentLoopStack]);
-                    
-                    if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'END') {
-                        appendLine(`${indent}ELSE`);
-                        traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope, [...currentLoopStack]);
+                    // Check for chained conditions forming a SWITCH construct
+                    let isSwitch = false;
+                    const eqMatch = cleanCond.match(/^([a-zA-Z_]\w*)\s*(?:===|==|=)\s*(.+)$/);
+                    if (eqMatch && fTarget && nodes[fTarget] && nodes[fTarget].type === 'CONDITION') {
+                        const switchVar = eqMatch[1];
+                        const cases = [{ condNodeId: node.id, val: eqMatch[2].trim(), target: tTarget }];
+                        let lastFalse = fTarget;
+                        const chainCondIds = [node.id];
+
+                        while (lastFalse && nodes[lastFalse] && nodes[lastFalse].type === 'CONDITION') {
+                            const nextCond = nodes[lastFalse];
+                            let nextTrue = nextCond.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes((e.value || '').toLowerCase().trim()));
+                            let nextFalse = nextCond.next.find(e => ['ne', 'no', 'false', '0', 'n', '-'].includes((e.value || '').toLowerCase().trim()));
+                            if (!nextTrue && !nextFalse) {
+                                const bottomEdge = nextCond.next.find(e => e.sourceHandle === 's-bottom');
+                                const rightEdge = nextCond.next.find(e => e.sourceHandle === 's-right');
+                                if (nextCond.isSwapped) {
+                                    nextTrue = rightEdge || nextCond.next[0];
+                                    nextFalse = bottomEdge || nextCond.next[1];
+                                } else {
+                                    nextTrue = bottomEdge || nextCond.next[0];
+                                    nextFalse = rightEdge || nextCond.next[1];
+                                }
+                                if (nextTrue === nextFalse) nextFalse = nextCond.next.find(e => e !== nextTrue);
+                            } else if (nextTrue && !nextFalse) {
+                                nextFalse = nextCond.next.find(e => e !== nextTrue);
+                            } else if (!nextTrue && nextFalse) {
+                                nextTrue = nextCond.next.find(e => e !== nextFalse);
+                            }
+
+                            const nextClean = nextCond.value.replace(/^(?:WHILE|IF)\s+/i, '').trim();
+                            const nextEq = nextClean.match(/^([a-zA-Z_]\w*)\s*(?:===|==|=)\s*(.+)$/);
+                            if (nextEq && nextEq[1] === switchVar) {
+                                chainCondIds.push(nextCond.id);
+                                cases.push({ condNodeId: nextCond.id, val: nextEq[2].trim(), target: nextTrue?.target });
+                                lastFalse = nextFalse?.target;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if (cases.length >= 2) {
+                            isSwitch = true;
+                            chainCondIds.forEach(id => visited.add(id));
+
+                            let switchMerge = null;
+                            const validTargets = cases.map(c => c.target).filter(Boolean);
+                            if (validTargets.length >= 2) {
+                                switchMerge = findConvergence(validTargets[0], validTargets[1]);
+                                for (let k = 2; k < validTargets.length; k++) {
+                                    if (switchMerge) {
+                                        switchMerge = findConvergence(switchMerge, validTargets[k]);
+                                    }
+                                }
+                            }
+
+                            const hasDefault = lastFalse && lastFalse !== switchMerge && nodes[lastFalse] && nodes[lastFalse].type !== 'END';
+                            if (hasDefault && switchMerge) {
+                                switchMerge = findConvergence(switchMerge, lastFalse) || switchMerge;
+                            }
+
+                            appendLine(`${indent}SWITCH ${switchVar}`, node.id);
+                            cases.forEach(c => {
+                                appendLine(`${indent}CASE ${c.val}:`, c.condNodeId);
+                                if (c.target && c.target !== switchMerge) {
+                                    traverse(c.target, indent + "    ", new Set(inPath), switchMerge || stopId, currentScope, [...currentLoopStack], currentLoopStack.length);
+                                }
+                            });
+
+                            if (hasDefault) {
+                                appendLine(`${indent}DEFAULT:`);
+                                traverse(lastFalse, indent + "    ", new Set(inPath), switchMerge || stopId, currentScope, [...currentLoopStack], currentLoopStack.length);
+                            }
+
+                            appendLine(`${indent}ENDSWITCH`, node.id);
+
+                            if (switchMerge && switchMerge !== stopId && !inPath.has(switchMerge)) {
+                                traverse(switchMerge, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], minLoopDepth);
+                            }
+                        }
                     }
-                    appendLine(`${indent}ENDIF`);
-                    
-                    if (mergeNodeId && mergeNodeId !== stopId) {
-                        traverse(mergeNodeId, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack]);
+
+                    if (!isSwitch) {
+                        let mergeNodeId = findConvergence(tTarget, fTarget);
+                        const branchMinDepth = currentLoopStack.length;
+                        
+                        appendLine(`${indent}IF ${cleanCond} THEN`, node.id);
+                        if (tTarget && tTarget !== mergeNodeId) traverse(tTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope, [...currentLoopStack], branchMinDepth);
+                        
+                        if (fTarget && fTarget !== mergeNodeId && nodes[fTarget] && nodes[fTarget].type !== 'END') {
+                            appendLine(`${indent}ELSE`);
+                            traverse(fTarget, indent + "    ", new Set(inPath), mergeNodeId || stopId, currentScope, [...currentLoopStack], branchMinDepth);
+                        }
+                        appendLine(`${indent}ENDIF`);
+                        
+                        if (mergeNodeId && mergeNodeId !== stopId) {
+                            traverse(mergeNodeId, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], minLoopDepth);
+                        } else if (!stopId) {
+                            while (currentLoopStack.length > minLoopDepth) {
+                                const l = currentLoopStack.pop();
+                                indent = closeLoop(l, indent, currentScope);
+                            }
+                        }
                     }
                 }
             }
@@ -722,6 +909,7 @@ export const parseDrawioToPseudocode = (xml) => {
             inPath.delete(nodeId);
         };
 
+        const startLineIdx = codeLines.length;
         traverse(start.id);
 
         if (endNodeId) {
@@ -733,22 +921,56 @@ export const parseDrawioToPseudocode = (xml) => {
         
         printCommentsBeforeY(Infinity, "");
 
+        if (/^fragment_\d+$/i.test(start.value || '')) {
+            const funcLines = codeLines.slice(startLineIdx);
+            const bodyLines = funcLines.slice(1, funcLines.length - 1).filter(l => l && !l.trim().startsWith('#'));
+            if (bodyLines.length === 0) {
+                codeLines.splice(startLineIdx, funcLines.length);
+                codeNodeIds.splice(startLineIdx, funcLines.length);
+                return;
+            }
+        }
+
         if (index < startNodes.length - 1) {
             appendLine('');
         }
     });
 
+    let fragIndex = 1;
+    const fragMap = new Map();
+    codeLines.forEach((line, i) => {
+        const m = line.match(/^(\s*(?:FUNCTION|CLASS)\s+)fragment_(\d+)(\(\s*\))/i);
+        if (m) {
+            const oldNum = m[2];
+            if (!fragMap.has(oldNum)) {
+                fragMap.set(oldNum, fragIndex++);
+            }
+            codeLines[i] = `${m[1]}fragment_${fragMap.get(oldNum)}${m[3]}`;
+        }
+    });
+
+    while (codeLines.length > 0 && !codeLines[codeLines.length - 1].trim()) {
+        codeLines.pop();
+        codeNodeIds.pop();
+    }
+    while (codeLines.length > 0 && !codeLines[0].trim()) {
+        codeLines.shift();
+        codeNodeIds.shift();
+    }
+
     nodeLineMap = {};
     codeNodeIds.forEach((id, idx) => {
         if (id) {
+            const line = (codeLines[idx] || '').trim().toUpperCase();
+            if (line.startsWith('END')) return;
             if (!nodeLineMap[id]) nodeLineMap[id] = [];
             nodeLineMap[id].push(idx);
         }
     });
 
-    let code = codeLines.join('\n').trim();
-    return { code, errors, nodeLineMap };
+    let code = codeLines.join('\n');
+    return { code, errors, nodeLineMap, codeNodeIds };
   } catch (err) {
-    return { code: "", errors: ["Kritická chyba parseru: " + err.message], nodeLineMap: {} };
+    return { code: "", errors: ["Kritická chyba parseru: " + err.message], nodeLineMap: {}, codeNodeIds: [] };
   }
 };

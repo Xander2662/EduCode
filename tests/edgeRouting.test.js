@@ -126,4 +126,121 @@ describe('SVG Edge Routing - Vyhýbání se překážkám s A-oblouky', () => {
         
         expect(updated).toEqual([]); // obě staré hrany byly nahrazeny
     });
+
+    it('Zachová více vstupních hran pouze pro větvení IF, ENDFUNCTION a loopback cyklu, jinak smaže', () => {
+        const nodes = [
+            { id: 'start', type: 'START_END', position: { x: 400, y: 40 }, data: { mode: 'start' } },
+            { id: 'if1', type: 'CONDITION', position: { x: 400, y: 140 } },
+            { id: 'actTrue', type: 'ACTION', position: { x: 400, y: 250 } },
+            { id: 'actFalse', type: 'ACTION', position: { x: 600, y: 250 } },
+            { id: 'joinAct', type: 'ACTION', position: { x: 400, y: 380 } },
+            { id: 'end1', type: 'START_END', position: { x: 400, y: 500 }, data: { mode: 'end' } },
+            { id: 'other', type: 'ACTION', position: { x: 200, y: 250 } }
+        ];
+
+        const getNode = (id) => nodes.find(n => n.id === id);
+
+        const filterOnConnect = (eds, params) => {
+            const sourceNode = getNode(params.source);
+            const targetNode = getNode(params.target);
+
+            return eds.filter(e => {
+                if (sourceNode && sourceNode.type !== 'CONDITION' && e.source === params.source) return false;
+                if (sourceNode && sourceNode.type === 'CONDITION' && e.source === params.source && e.sourceHandle === params.sourceHandle) return false;
+
+                const isSameTargetHandle = e.target === params.target && (e.targetHandle || null) === (params.targetHandle || null);
+                if (isSameTargetHandle) {
+                    if (targetNode?.type === 'START_END' && targetNode.data?.mode === 'end') return true;
+                    if (targetNode?.type === 'MERGE') return true;
+
+                    const existingSourceNode = getNode(e.source);
+
+                    if (targetNode?.type === 'CONDITION') {
+                        const isDownstream = (startId, targetId, visited = new Set()) => {
+                            if (startId === targetId) return true;
+                            if (visited.has(startId)) return false;
+                            visited.add(startId);
+                            return eds.filter(ed => ed.source === startId).some(ed => isDownstream(ed.target, targetId, visited));
+                        };
+                        const isNewLoopback = isDownstream(targetNode.id, params.source) || (sourceNode && sourceNode.position.y > targetNode.position.y);
+                        const isExistingLoopback = isDownstream(targetNode.id, e.source) || (existingSourceNode && existingSourceNode.position.y > targetNode.position.y);
+                        if (isNewLoopback || isExistingLoopback) return true;
+                    }
+
+                    const getConditionBranches = (startNodeId, startHandle = null) => {
+                        const result = new Map();
+                        const queue = [{ id: startNodeId, handle: startHandle }];
+                        const visited = new Set();
+                        while (queue.length > 0) {
+                            const curr = queue.shift();
+                            const key = `${curr.id}_${curr.handle || ''}`;
+                            if (visited.has(key)) continue;
+                            visited.add(key);
+
+                            const n = getNode(curr.id);
+                            if (n && n.type === 'CONDITION' && curr.handle) {
+                                if (!result.has(n.id)) result.set(n.id, new Set());
+                                result.get(n.id).add(curr.handle);
+                            }
+
+                            eds.filter(ed => ed.target === curr.id).forEach(ed => {
+                                queue.push({ id: ed.source, handle: ed.sourceHandle });
+                            });
+                        }
+                        return result;
+                    };
+
+                    const newBranches = getConditionBranches(params.source, sourceNode?.type === 'CONDITION' ? params.sourceHandle : null);
+                    const existingBranches = getConditionBranches(e.source, existingSourceNode?.type === 'CONDITION' ? e.sourceHandle : null);
+
+                    let isIfBranchConvergence = false;
+                    for (const [condId, newSet] of newBranches.entries()) {
+                        if (existingBranches.has(condId)) {
+                            const existingSet = existingBranches.get(condId);
+                            const hasDifferentBranch = Array.from(newSet).some(h => !existingSet.has(h)) ||
+                                                       Array.from(existingSet).some(h => !newSet.has(h));
+                            if (hasDifferentBranch) {
+                                isIfBranchConvergence = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (isIfBranchConvergence) return true;
+
+                    return false;
+                }
+
+                return true;
+            });
+        };
+
+        // Test 1: Běžná sekvence nahradí staré spojení (other -> joinAct nahradí actTrue -> joinAct pokud to není větev IF)
+        const edsLinear = [{ id: 'e1', source: 'other', target: 'joinAct', targetHandle: 't-top' }];
+        const resLinear = filterOnConnect(edsLinear, { source: 'start', target: 'joinAct', targetHandle: 't-top' });
+        expect(resLinear).toHaveLength(0); // e1 smazána, nahrazena novým spojením
+
+        // Test 2: Konvergence větví IF do joinAct zachová obě větve
+        const edsBranches = [
+            { id: 'e_if_t', source: 'if1', sourceHandle: 's-bottom', target: 'actTrue' },
+            { id: 'e_if_f', source: 'if1', sourceHandle: 's-right', target: 'actFalse' },
+            { id: 'e_t_join', source: 'actTrue', sourceHandle: 's-bottom', target: 'joinAct', targetHandle: 't-top' }
+        ];
+        const resBranches = filterOnConnect(edsBranches, { source: 'actFalse', sourceHandle: 's-bottom', target: 'joinAct', targetHandle: 't-top' });
+        expect(resBranches).toContainEqual(expect.objectContaining({ id: 'e_t_join' })); // e_t_join NENÍ smazána!
+
+        // Test 3: Spojení obou větví do ENDFUNCTION zachová obě
+        const edsEnd = [
+            { id: 'e_t_end', source: 'actTrue', sourceHandle: 's-bottom', target: 'end1', targetHandle: 't-top' }
+        ];
+        const resEnd = filterOnConnect(edsEnd, { source: 'actFalse', sourceHandle: 's-bottom', target: 'end1', targetHandle: 't-top' });
+        expect(resEnd).toContainEqual(expect.objectContaining({ id: 'e_t_end' })); // zachováno pro ENDFUNCTION
+
+        // Test 4: Loopback do CONDITION zachová vstupní hranu
+        const edsLoop = [
+            { id: 'e_start_if', source: 'start', sourceHandle: 's-bottom', target: 'if1', targetHandle: 't-top' },
+            { id: 'e_if_body', source: 'if1', sourceHandle: 's-bottom', target: 'actTrue', targetHandle: 't-top' }
+        ];
+        const resLoop = filterOnConnect(edsLoop, { source: 'actTrue', sourceHandle: 's-bottom', target: 'if1', targetHandle: 't-top' });
+        expect(resLoop).toContainEqual(expect.objectContaining({ id: 'e_start_if' })); // vstupní hrana z start NENÍ smazána!
+    });
 });

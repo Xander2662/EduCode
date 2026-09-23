@@ -79,4 +79,59 @@ describe('Roundtrip Parser Tests (XML -> Pseudo -> XML)', () => {
             expect(Math.abs(originalSemantics.edgesCount - newSemantics.edgesCount)).toBeLessThanOrEqual(3);
         });
     });
+
+    it('zachová vertikální odstup mezi více fragmenty při roundbacku', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="f1_a" value="f1_step = 1" type="ACTION" vertex="1" parent="1"><mxGeometry x="360" y="100" width="120" height="50"/></mxCell>
+            <mxCell id="f2_a" value="f2_step = 2" type="ACTION" vertex="1" parent="1"><mxGeometry x="360" y="600" width="120" height="50"/></mxCell>
+        </root></mxGraphModel>`;
+
+        const pseudoResult = parseDrawioToPseudocode(xml);
+        expect(pseudoResult.code).toContain('f1_step = 1');
+        expect(pseudoResult.code).toContain('f2_step = 2');
+
+        const xmlResult = parsePseudocodeToDrawio(pseudoResult.code, xml, 'true-false', 'hexagon', 'advanced');
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlResult.xml, "text/xml");
+
+        const cellF1 = Array.from(doc.querySelectorAll('mxCell[vertex="1"]')).find(c => c.getAttribute('value') === 'f1_step = 1');
+        const cellF2 = Array.from(doc.querySelectorAll('mxCell[vertex="1"]')).find(c => c.getAttribute('value') === 'f2_step = 2');
+
+        expect(cellF1).toBeTruthy();
+        expect(cellF2).toBeTruthy();
+
+        const y1 = parseFloat(cellF1.querySelector('mxGeometry')?.getAttribute('y') || 0);
+        const y2 = parseFloat(cellF2.querySelector('mxGeometry')?.getAttribute('y') || 0);
+
+        // f2_step musí mít Y větší než f1_step (nemohou se překrývat na stejné Y)
+        expect(y2 - y1).toBeGreaterThanOrEqual(200);
+    });
+
+    it('správně zachová jedinou připojenou větev (Ne) podmínky při roundbacku', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="start" value="main" type="START_END" mode="start" vertex="1" parent="1"><mxGeometry x="360" y="40" width="100" height="40"/></mxCell>
+            <mxCell id="cond" value="x &gt; 0" type="CONDITION" style="rhombus;" vertex="1" parent="1"><mxGeometry x="360" y="140" width="160" height="80"/></mxCell>
+            <mxCell id="act" value="b = 2" type="ACTION" vertex="1" parent="1"><mxGeometry x="360" y="300" width="120" height="50"/></mxCell>
+            <mxCell id="e1" source="start" target="cond" edge="1" parent="1"/>
+            <mxCell id="e2" source="cond" target="act" value="Ne" style="sourceHandle=s-right;" edge="1" parent="1"/>
+        </root></mxGraphModel>`;
+
+        const pseudoResult = parseDrawioToPseudocode(xml);
+        expect(pseudoResult.code).toContain('IF x > 0 THEN');
+        expect(pseudoResult.code).toContain('ELSE');
+        expect(pseudoResult.code).toContain('b = 2');
+        expect(pseudoResult.code).toContain('ENDIF');
+
+        const xmlResult = parsePseudocodeToDrawio(pseudoResult.code, xml, 'ano-ne', 'diamond', 'advanced');
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlResult.xml, "text/xml");
+
+        const condCell = Array.from(doc.querySelectorAll('mxCell[vertex="1"]')).find(c => c.getAttribute('value') === 'x > 0');
+        const actCell = Array.from(doc.querySelectorAll('mxCell[vertex="1"]')).find(c => c.getAttribute('value') === 'b = 2');
+        const edgeCell = Array.from(doc.querySelectorAll('mxCell[edge="1"]')).find(c => c.getAttribute('source') === condCell.getAttribute('id') && c.getAttribute('target') === actCell.getAttribute('id'));
+
+        expect(edgeCell).toBeTruthy();
+        expect(edgeCell.getAttribute('value')).toBe('Ne');
+        expect(edgeCell.getAttribute('style')).toContain('sourceHandle=s-right');
+    });
 });

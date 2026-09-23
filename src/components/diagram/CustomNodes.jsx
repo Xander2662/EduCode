@@ -303,44 +303,12 @@ export const ConditionNode = ({ id, data, selected }) => {
   }
   
   const pref = edgeLabels[data.edgeStyle || 'true-false'];
-  const tChar = pref.t.charAt(0).toUpperCase();
-  const fChar = pref.f.charAt(0).toUpperCase();
-
-  const bottomEdge = edges.find(e => e.source === id && e.sourceHandle === 's-bottom');
-  const rightEdge = edges.find(e => e.source === id && e.sourceHandle === 's-right');
-  const { setEdges } = useReactFlow();
-
-  let bIsT = true;
-  if (bottomEdge && bottomEdge.data?.label) {
-      bIsT = ['True', 'Ano', '+', 'Yes', pref.t].includes(bottomEdge.data.label);
-  } else if (rightEdge && rightEdge.data?.label) {
-      bIsT = !(['True', 'Ano', '+', 'Yes', pref.t].includes(rightEdge.data.label));
-  }
+  const tChar = pref?.t ? pref.t[0] : 'T';
+  const fChar = pref?.f ? pref.f[0] : 'F';
   
-  const expectedBottomLabel = bIsT ? pref.t : pref.f;
-  const expectedRightLabel = bIsT ? pref.f : pref.t;
+  const isBottomTrue = !data.isSwapped;
+  const isRightTrue = data.isSwapped;
   
-  const isBottomTrue = bIsT;
-  const isRightTrue = !bIsT;
-
-  React.useEffect(() => {
-      if (data.readOnly) return;
-      let needsUpdate = false;
-      if (bottomEdge && bottomEdge.data?.label !== expectedBottomLabel) needsUpdate = true;
-      if (rightEdge && rightEdge.data?.label !== expectedRightLabel) needsUpdate = true;
-      
-      if (needsUpdate) {
-          // Push to end of event loop to avoid React warning about updating state during render
-          setTimeout(() => {
-              setEdges(eds => eds.map(e => {
-                  if (bottomEdge && e.id === bottomEdge.id) return { ...e, data: { ...e.data, label: expectedBottomLabel } };
-                  if (rightEdge && e.id === rightEdge.id) return { ...e, data: { ...e.data, label: expectedRightLabel } };
-                  return e;
-              }));
-          }, 0);
-      }
-  }, [bottomEdge, rightEdge, expectedBottomLabel, expectedRightLabel, data.readOnly, setEdges]);
-
   const bottomChar = isBottomTrue ? tChar : fChar;
   const rightChar = isRightTrue ? tChar : fChar;
   
@@ -412,6 +380,9 @@ export const MergeNode = () => (
 export const LoopContainerNode = ({ id, data, selected, dragging }) => {
   const isGray = data.colorMode === false;
   const borderColor = (selected || data.isRuntimeActive) ? 'border-indigo-500' : (isGray ? 'border-gray-400 dark:border-gray-600' : 'border-purple-400 dark:border-purple-600');
+  const tagBorder = data.isBreakpoint 
+    ? 'border-red-500 ring-2 ring-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' 
+    : (data.isRuntimeActive ? 'border-red-500 ring-2 ring-red-400' : borderColor);
   const bgColor = isGray ? 'bg-gray-50/50 dark:bg-gray-900/50' : 'bg-purple-50/30 dark:bg-purple-900/10';
   
   const isDoWhile = data.doWhile === true;
@@ -436,7 +407,15 @@ export const LoopContainerNode = ({ id, data, selected, dragging }) => {
   return (
     <div ref={containerRef} className={`relative w-full h-full rounded-lg border-2 border-dashed ${borderColor} ${bgColor} flex flex-col overflow-visible ${selected ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-blue-50/50' : ''}`}>
       {/* Hlavička cyklu - Zde přidáme custom-drag-handle pro React Flow */}
-      <div className={`custom-drag-handle absolute -top-4 left-4 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing`}>
+      <div className={`custom-drag-handle absolute -top-4 left-4 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${tagBorder} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing`}>
+        {data.showDebugger && (
+            <button 
+                onDoubleClick={e => e.stopPropagation()} 
+                onMouseDown={(e) => e.preventDefault()} 
+                onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} 
+                className={breakpointButtonClass(data.isBreakpoint, "-left-[42px]")} 
+            />
+        )}
         <RefreshCcw size={12} className="text-purple-500" />
         <span className="text-purple-700 dark:text-purple-300">WHILE</span>
         
@@ -488,6 +467,9 @@ export const LoopContainerNode = ({ id, data, selected, dragging }) => {
 export const ForContainerNode = ({ id, data, selected, dragging }) => {
   const isGray = data.colorMode === false;
   const borderColor = (selected || data.isRuntimeActive) ? 'border-indigo-500' : (isGray ? 'border-gray-400 dark:border-gray-600' : 'border-indigo-300 dark:border-indigo-700/50');
+  const tagBorder = data.isBreakpoint 
+    ? 'border-red-500 ring-2 ring-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' 
+    : (data.isRuntimeActive ? 'border-red-500 ring-2 ring-red-400' : borderColor);
   const bgColor = isGray ? 'bg-gray-50/50 dark:bg-gray-900/50' : 'bg-indigo-50/30 dark:bg-indigo-900/10';
   
   const {
@@ -509,7 +491,15 @@ export const ForContainerNode = ({ id, data, selected, dragging }) => {
 
   return (
     <div ref={containerRef} className={`relative w-full h-full rounded-lg border-2 border-dashed ${borderColor} ${bgColor} flex flex-col overflow-visible ${selected ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-indigo-50/50' : ''}`}>
-      <div className={`custom-drag-handle absolute -top-4 left-4 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing`}>
+      <div className={`custom-drag-handle absolute -top-4 left-4 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${tagBorder} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing`}>
+        {data.showDebugger && (
+            <button 
+                onDoubleClick={e => e.stopPropagation()} 
+                onMouseDown={(e) => e.preventDefault()} 
+                onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} 
+                className={breakpointButtonClass(data.isBreakpoint, "-left-[42px]")} 
+            />
+        )}
         <RefreshCcw size={12} className="text-indigo-500" />
         <span className="text-indigo-700 dark:text-indigo-300">FOR</span>
         
@@ -567,6 +557,9 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
   const { setNodes, getNodes } = useReactFlow();
   const isGray = data.colorMode === false;
   const borderColor = (selected || data.isRuntimeActive) ? 'border-rose-500' : (isGray ? 'border-gray-400 dark:border-gray-600' : 'border-rose-400 dark:border-rose-600');
+  const tagBorder = data.isBreakpoint 
+    ? 'border-red-500 ring-2 ring-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' 
+    : (data.isRuntimeActive ? 'border-red-500 ring-2 ring-red-400' : borderColor);
   const bgColor = isGray ? 'bg-gray-50/50 dark:bg-gray-900/50' : 'bg-rose-50/20 dark:bg-rose-900/10';
 
   const [cases, setCases] = React.useState([]);
@@ -843,7 +836,15 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
       </Handle>
       
       {/* Moved the tag to left-8 to reduce gap to the top node */}
-      <div className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing z-20`}>
+      <div className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${tagBorder} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing z-20`}>
+        {data.showDebugger && (
+            <button 
+                onDoubleClick={e => e.stopPropagation()} 
+                onMouseDown={(e) => e.preventDefault()} 
+                onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} 
+                className={breakpointButtonClass(data.isBreakpoint, "-left-[58px]")} 
+            />
+        )}
         <Columns size={12} className="text-rose-500" />
         <span className="text-rose-700 dark:text-rose-300">SWITCH</span>
         <input 
@@ -893,6 +894,9 @@ export const CaseContainerNode = ({ id, data, selected, dragging }) => {
   const { setNodes } = useReactFlow();
   const isGray = data.colorMode === false;
   const borderColor = (selected || data.isRuntimeActive) ? 'border-rose-400' : (isGray ? 'border-gray-300 dark:border-gray-700' : 'border-rose-300 dark:border-rose-700/50');
+  const tagBorder = data.isBreakpoint 
+    ? 'border-red-500 ring-2 ring-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' 
+    : (data.isRuntimeActive ? 'border-red-500 ring-2 ring-red-400' : borderColor);
   const bgColor = isGray ? 'bg-white dark:bg-gray-800' : 'bg-rose-50/50 dark:bg-rose-950/30';
   
   const {
@@ -914,7 +918,15 @@ export const CaseContainerNode = ({ id, data, selected, dragging }) => {
       <Handle type="source" position={Position.Bottom} id="s-top" className={caseHandleClass} style={{ left: '8px', right: 'auto', top: '0', transform: 'translate(0, -50%)' }} />
       
       {/* Floating tag just like LoopContainer and SwitchContainer */}
-      <div className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${borderColor} flex items-center gap-1.5 pointer-events-auto cursor-pointer z-20`}>
+      <div className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${tagBorder} flex items-center gap-1.5 pointer-events-auto cursor-pointer z-20`}>
+          {data.showDebugger && (
+              <button 
+                  onDoubleClick={e => e.stopPropagation()} 
+                  onMouseDown={(e) => e.preventDefault()} 
+                  onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} 
+                  className={breakpointButtonClass(data.isBreakpoint, "-left-[58px]")} 
+              />
+          )}
           {/* Hollow Colon Icon */}
           <div className="flex flex-col gap-[2.5px] text-rose-500">
               <div className="w-[4px] h-[4px] rounded-full border-[1.5px] border-current"></div>

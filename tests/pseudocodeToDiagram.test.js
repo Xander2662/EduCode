@@ -33,4 +33,40 @@ describe('Pseudocode to Diagram Parser - Dynamic Y Auto-Layout', () => {
         expect(result.xml).toContain('shape=parallelogram');
         expect(result.xml).toContain('ioType=output');
     });
+
+    it('Měl by v simple módu namapovat LOOP_CONTAINER do nodeLineMap na odpovídající WHILE řádek', () => {
+        const code = `FUNCTION main()\n  WHILE x > 0 DO\n    x = x - 1\n  ENDWHILE\nENDFUNCTION`;
+        const result = parsePseudocodeToDrawio(code, null, 'true-false', 'hexagon', 'simple');
+        expect(result.nodeLineMap).toBeDefined();
+        
+        // Najdeme buňku pro LOOP_CONTAINER
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(result.xml, "text/xml");
+        const loopCell = doc.querySelector('mxCell[style*="LOOP_CONTAINER"]');
+        expect(loopCell).not.toBeNull();
+        const loopId = loopCell.getAttribute('id');
+        expect(result.nodeLineMap[loopId]).toBe(1); // řádek 1 je WHILE x > 0 DO
+    });
+
+    it('Měl by zajistit, že LOOP_CONTAINER nepřekrývá blok START FUNCTION nad ním', () => {
+        const code = `FUNCTION fragment_1()\n  WHILE x > 0 DO\n    x = x - 1\n  ENDWHILE\nENDFUNCTION`;
+        const result = parsePseudocodeToDrawio(code, null, 'true-false', 'hexagon', 'simple');
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(result.xml, "text/xml");
+        const startCell = doc.querySelector('mxCell[style*="ellipse"]');
+        const loopCell = doc.querySelector('mxCell[style*="LOOP_CONTAINER"]');
+        
+        expect(startCell).not.toBeNull();
+        expect(loopCell).not.toBeNull();
+        
+        const startGeo = startCell.querySelector('mxGeometry');
+        const loopGeo = loopCell.querySelector('mxGeometry');
+        
+        const startBottom = parseFloat(startGeo.getAttribute('y')) + parseFloat(startGeo.getAttribute('height') || '50');
+        const loopTop = parseFloat(loopGeo.getAttribute('y'));
+        
+        // Mezi spodkem START a vrškem kontejneru musí být minimálně 35 px odstup
+        expect(loopTop).toBeGreaterThanOrEqual(startBottom + 35);
+    });
 });

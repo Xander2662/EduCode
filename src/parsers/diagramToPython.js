@@ -59,9 +59,10 @@ export const parseDrawioToPython = (xml) => {
         else if (style.includes('shape=parallelogram') || cellTypeAttr === 'IO' || cellTypeAttr === 'io') {
             type = 'IO';
         }
-        else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellTypeAttr === 'LOOP_CONTAINER' || style.includes('SWITCH_CONTAINER') || style.includes('CASE_CONTAINER')) {
-            if (style.includes('SWITCH_CONTAINER')) type = 'SWITCH_CONTAINER';
-            else if (style.includes('CASE_CONTAINER')) type = 'CASE_CONTAINER';
+        else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellTypeAttr === 'LOOP_CONTAINER' || style.includes('FOR_CONTAINER') || cellTypeAttr === 'FOR_CONTAINER' || style.includes('forInit=') || cell.getAttribute('forInit') || style.includes('SWITCH_CONTAINER') || cellTypeAttr === 'SWITCH_CONTAINER' || style.includes('CASE_CONTAINER') || cellTypeAttr === 'CASE_CONTAINER') {
+            if (style.includes('SWITCH_CONTAINER') || cellTypeAttr === 'SWITCH_CONTAINER') type = 'SWITCH_CONTAINER';
+            else if (style.includes('CASE_CONTAINER') || cellTypeAttr === 'CASE_CONTAINER') type = 'CASE_CONTAINER';
+            else if (style.includes('FOR_CONTAINER') || cellTypeAttr === 'FOR_CONTAINER' || style.includes('forInit=') || cell.getAttribute('forInit') || value.toUpperCase().startsWith('FOR ')) type = 'FOR_CONTAINER';
             else type = 'LOOP_CONTAINER';
             
             try {
@@ -71,16 +72,27 @@ export const parseDrawioToPython = (xml) => {
                 }
             } catch {
             }
-            if (style.includes('forInit=')) {
-                type = 'FOR_CONTAINER';
+            if (type === 'FOR_CONTAINER') {
                 const initMatch = style.match(/forInit=([^;]+)/);
-                if (initMatch) forInit = decodeURIComponent(initMatch[1]);
+                forInit = initMatch ? decodeURIComponent(initMatch[1]) : (cell.getAttribute('forInit') ? decodeURIComponent(cell.getAttribute('forInit')) : '');
                 
                 const limitMatch = style.match(/forLimit=([^;]+)/);
-                if (limitMatch) forLimit = decodeURIComponent(limitMatch[1]);
+                forLimit = limitMatch ? decodeURIComponent(limitMatch[1]) : (cell.getAttribute('forLimit') ? decodeURIComponent(cell.getAttribute('forLimit')) : '');
                 
                 const stepMatch = style.match(/forStep=([^;]+)/);
-                if (stepMatch) forStep = decodeURIComponent(stepMatch[1]);
+                forStep = stepMatch ? decodeURIComponent(stepMatch[1]) : (cell.getAttribute('forStep') ? decodeURIComponent(cell.getAttribute('forStep')) : '');
+
+                if (!forInit && value.toUpperCase().startsWith('FOR ')) {
+                    const forMatch = value.match(/^FOR\s+([a-zA-Z_]\w*)\s*(?:=|<-)\s*(.*?)\s+TO\s+(.*?)(?:\s+STEP\s+(.*?))?(?:\s+DO)?$/i);
+                    if (forMatch) {
+                        forInit = `${forMatch[1]} = ${forMatch[2].trim()}`;
+                        forLimit = forMatch[3].trim();
+                        forStep = forMatch[4] ? forMatch[4].trim() : '1';
+                    }
+                }
+                if (!forInit) forInit = 'i = 0';
+                if (!forLimit) forLimit = '10';
+                if (!forStep) forStep = '1';
             }
             if (style.includes('switchVar=')) {
                 const svMatch = style.match(/switchVar=([^;]+)/);
@@ -96,6 +108,12 @@ export const parseDrawioToPython = (xml) => {
             }
         }
         
+        let isSwapped = false;
+        if (style.includes('isSwapped=')) {
+            const swMatch = style.match(/isSwapped=([^;]+)/);
+            if (swMatch) isSwapped = swMatch[1] === 'true';
+        }
+        
         const entityMatch = style.match(/entityType=([^;]+)/);
         const entityType = entityMatch ? entityMatch[1] : 'FUNCTION';
         
@@ -106,13 +124,16 @@ export const parseDrawioToPython = (xml) => {
         const height = geo ? parseFloat(geo.getAttribute('height') || 0) : 0;
         const parentId = cell.getAttribute('parent');
 
-        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep, switchVar, caseVal, isDefault, parentId };
+        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep, switchVar, caseVal, isDefault, isSwapped, parentId };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
         const target = cell.getAttribute('target');
         const value = cleanTextWithLines(cell.getAttribute('value')).toLowerCase().replace('\n', ' ');
-        if (source && target) edges.push({ source, target, value });
+        const style = cell.getAttribute('style') || '';
+        const shMatch = style.match(/sourceHandle=([^;]+)/);
+        const sourceHandle = shMatch ? shMatch[1] : undefined;
+        if (source && target) edges.push({ source, target, value, sourceHandle });
       }
     });
 
@@ -235,7 +256,48 @@ export const parseDrawioToPython = (xml) => {
     const startNodes = Object.values(nodes).filter(n => n.type === 'START');
     startNodes.sort((a, b) => a.x - b.x || a.y - b.y);
 
-    let clusterId = 1;
+    if (startNodes.length === 1 && (!startNodes[0].value || startNodes[0].value === 'Start/End')) {
+        startNodes[0].value = 'main';
+    }
+
+    const usedFuncNames = new Set();
+    let maxFragNum = 0;
+    startNodes.forEach(sn => {
+        const val = (sn.value || '').trim();
+        const m = val.match(/^fragment_(\d+)$/i);
+        if (m) {
+            const num = parseInt(m[1], 10);
+            if (num > maxFragNum) maxFragNum = num;
+        }
+        if (val && !usedFuncNames.has(val)) {
+            usedFuncNames.add(val);
+        } else if (val && usedFuncNames.has(val)) {
+            maxFragNum++;
+            while (usedFuncNames.has(`fragment_${maxFragNum}`)) {
+                maxFragNum++;
+            }
+            sn.value = `fragment_${maxFragNum}`;
+            usedFuncNames.add(sn.value);
+        }
+    });
+
+    startNodes.forEach(sn => {
+        let val = (sn.value || '').trim();
+        if (!val || val === 'Start/End') {
+            if (startNodes.length === 1 && !usedFuncNames.has('main')) {
+                sn.value = 'main';
+            } else {
+                maxFragNum++;
+                while (usedFuncNames.has(`fragment_${maxFragNum}`)) {
+                    maxFragNum++;
+                }
+                sn.value = `fragment_${maxFragNum}`;
+            }
+            usedFuncNames.add(sn.value);
+        }
+    });
+
+    let clusterId = maxFragNum + 1;
     let assigned = new Set();
     
     const markCluster = (startId) => {
@@ -274,8 +336,13 @@ export const parseDrawioToPython = (xml) => {
     let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type));
     
     roots.forEach(r => {
+        while (usedFuncNames.has(`fragment_${clusterId}`)) {
+            clusterId++;
+        }
+        const fragName = `fragment_${clusterId}`;
+        usedFuncNames.add(fragName);
         const ghostId = `ghost_start_${clusterId}`;
-        nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: r.x, y: r.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
+        nodes[ghostId] = { id: ghostId, value: fragName, type: 'START', x: r.x, y: r.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
         edges.push({ source: ghostId, target: r.id, value: '' });
         nodes[ghostId].next.push({ target: r.id, value: '' });
         r.prev.push({ source: ghostId, value: '' });
@@ -287,8 +354,13 @@ export const parseDrawioToPython = (xml) => {
 
     Object.values(nodes).forEach(n => {
         if (!assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type)) {
+            while (usedFuncNames.has(`fragment_${clusterId}`)) {
+                clusterId++;
+            }
+            const fragName = `fragment_${clusterId}`;
+            usedFuncNames.add(fragName);
             const ghostId = `ghost_start_${clusterId}`;
-            nodes[ghostId] = { id: ghostId, value: `fragment_${clusterId}`, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
+            nodes[ghostId] = { id: ghostId, value: fragName, type: 'START', x: n.x, y: n.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
             edges.push({ source: ghostId, target: n.id, value: '' });
             nodes[ghostId].next.push({ target: n.id, value: '' });
             n.prev.push({ source: ghostId, value: '' });
@@ -395,9 +467,7 @@ export const parseDrawioToPython = (xml) => {
     };
 
     const findConvergence = (tId, fId) => {
-        if (!tId && !fId) return null;
-        if (!tId) return fId;
-        if (!fId) return tId;
+        if (!tId || !fId) return null;
         
         const pathT = [];
         let curr = tId;
@@ -478,13 +548,23 @@ export const parseDrawioToPython = (xml) => {
             else if (node.type === 'CONDITION') {
                 printCommentsBeforeY(node.y, indent);
 
-                let trueEdge = node.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes(e.value?.toLowerCase().trim()));
-                let falseEdge = node.next.find(e => ['ne', 'no', 'false', '0', 'n', '-'].includes(e.value?.toLowerCase().trim()));
+                let trueEdge = node.next.find(e => ['ano', 'yes', 'true', '1', 'y', '+'].includes((e.value || '').toLowerCase().trim()));
+                let falseEdge = node.next.find(e => ['ne', 'no', 'false', '0', 'n', '-'].includes((e.value || '').toLowerCase().trim()));
 
                 if (node.next.length === 2) {
                     if (!trueEdge && !falseEdge) {
-                        trueEdge = node.next[0];
-                        falseEdge = node.next[1];
+                        const bottomEdge = node.next.find(e => e.sourceHandle === 's-bottom');
+                        const rightEdge = node.next.find(e => e.sourceHandle === 's-right');
+                        if (node.isSwapped) {
+                            trueEdge = rightEdge || node.next[0];
+                            falseEdge = bottomEdge || node.next[1];
+                        } else {
+                            trueEdge = bottomEdge || node.next[0];
+                            falseEdge = rightEdge || node.next[1];
+                        }
+                        if (trueEdge === falseEdge) {
+                            falseEdge = node.next.find(e => e !== trueEdge);
+                        }
                         const err = `Podmínka '${node.value}' nemá označené větve (Ano/Ne). Výsledek může být nepřesný.`;
                         if (!errors.includes(err)) errors.push(err);
                     } else if (trueEdge && !falseEdge) {
@@ -494,9 +574,21 @@ export const parseDrawioToPython = (xml) => {
                     } else if (trueEdge === falseEdge) {
                         falseEdge = node.next.find(e => e !== trueEdge);
                     }
-                } else {
-                    trueEdge = trueEdge || node.next[0];
-                    falseEdge = falseEdge || node.next[1];
+                } else if (node.next.length === 1) {
+                    if (!trueEdge && !falseEdge) {
+                        const h = node.next[0].sourceHandle;
+                        const isRight = h === 's-right';
+                        const isBottom = h === 's-bottom';
+                        if (isRight) {
+                            if (node.isSwapped) trueEdge = node.next[0];
+                            else falseEdge = node.next[0];
+                        } else if (isBottom) {
+                            if (node.isSwapped) falseEdge = node.next[0];
+                            else trueEdge = node.next[0];
+                        } else {
+                            trueEdge = node.next[0];
+                        }
+                    }
                 }
                 
                 const tTarget = trueEdge?.target;
@@ -636,6 +728,7 @@ export const parseDrawioToPython = (xml) => {
             inPath.delete(nodeId);
         };
 
+        const startLineIdx = codeLines.length;
         traverse(start.id);
         
         if (endNodeId) {
@@ -644,8 +737,31 @@ export const parseDrawioToPython = (xml) => {
         
         printCommentsBeforeY(Infinity, "");
 
+        if (/^fragment_\d+$/i.test(start.value || '')) {
+            const funcLines = codeLines.slice(startLineIdx);
+            const bodyLines = funcLines.slice(1).filter(l => l && !l.trim().startsWith('#') && l.trim() !== 'pass');
+            if (bodyLines.length === 0) {
+                codeLines.splice(startLineIdx, funcLines.length);
+                codeNodeIds.splice(startLineIdx, funcLines.length);
+                return;
+            }
+        }
+
         if (index < startNodes.length - 1) {
             appendLine('');
+        }
+    });
+
+    let fragIndex = 1;
+    const fragMap = new Map();
+    codeLines.forEach((line, i) => {
+        const m = line.match(/^(\s*def\s+)fragment_(\d+)(\(\s*\):)/i);
+        if (m) {
+            const oldNum = m[2];
+            if (!fragMap.has(oldNum)) {
+                fragMap.set(oldNum, fragIndex++);
+            }
+            codeLines[i] = `${m[1]}fragment_${fragMap.get(oldNum)}${m[3]}`;
         }
     });
 

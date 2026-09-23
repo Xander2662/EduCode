@@ -1,31 +1,60 @@
 import React from 'react';
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useReactFlow, Position, MarkerType } from '@xyflow/react';
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useReactFlow, useNodes, useEdges, Position, MarkerType } from '@xyflow/react';
 import { RefreshCcw, ChevronRight } from 'lucide-react';
 import { edgeLabels } from './constants';
 
-export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data, selected }) => {
-  const { setEdges, getNodes, getEdges } = useReactFlow();
-  const nodes = getNodes();
-  const edges = getEdges();
-  const isCondition = nodes.find(n => n.id === source)?.type === 'CONDITION';
+export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, sourceHandle, sourceHandleId, style, markerEnd, data, selected }) => {
+  const { setEdges } = useReactFlow();
+  const nodes = useNodes();
+  const edges = useEdges();
+  const isCondition = data?.isCondition || nodes.find(n => n.id === source)?.type === 'CONDITION' || ['ano', 'ne', 'yes', 'no', 'true', 'false', '+', '-'].includes((data?.label || '').toLowerCase().trim());
   const isTargetMerge = nodes.find(n => n.id === target)?.type === 'MERGE';
 
   const loopNodes = nodes.filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
   
+  const getContainerSize = (loop) => {
+      const sw = loop.style?.width ? (typeof loop.style.width === 'number' ? loop.style.width : parseInt(loop.style.width)) : null;
+      const sh = loop.style?.height ? (typeof loop.style.height === 'number' ? loop.style.height : parseInt(loop.style.height)) : null;
+      const w = sw || loop.measured?.width || loop.width || (loop.type === 'FOR_CONTAINER' ? 350 : 350);
+      const h = sh || loop.measured?.height || loop.height || (loop.type === 'FOR_CONTAINER' ? 200 : 200);
+      return { w, h };
+  };
+
+  const getNodeSize = (n) => {
+      const sw = n.style?.width ? (typeof n.style.width === 'number' ? n.style.width : parseInt(n.style.width)) : null;
+      const sh = n.style?.height ? (typeof n.style.height === 'number' ? n.style.height : parseInt(n.style.height)) : null;
+      const w = sw || n.measured?.width || n.width || (n.type === 'CONDITION' ? 160 : 120);
+      const h = sh || n.measured?.height || n.height || (n.type === 'CONDITION' ? 80 : 50);
+      return { w, h };
+  };
+
+  const getContainerBounds = (loop) => {
+      let x = loop.position.x;
+      let y = loop.position.y;
+      if (loop.parentId && loop.parentId !== '0' && loop.parentId !== '1') {
+          const p = nodes.find(n => n.id === loop.parentId);
+          if (p) { x += p.position.x; y += p.position.y; }
+      }
+      const { w, h } = getContainerSize(loop);
+      return { x, y, w, h };
+  };
+
   const isInside = (nodeId, loop) => {
       const n = nodes.find(x => x.id === nodeId);
       if (!n) return false;
-      const nX = n.position.x;
-      const nY = n.position.y;
-      const nW = n.measured?.width || n.width || 100;
-      const nH = n.measured?.height || n.height || 50;
+      let nX = n.position.x;
+      let nY = n.position.y;
+      if (n.parentId && n.parentId !== '0' && n.parentId !== '1') {
+          const p = nodes.find(x => x.id === n.parentId);
+          if (p) { nX += p.position.x; nY += p.position.y; }
+      }
+      const { w: nW, h: nH } = getNodeSize(n);
       const coreW = nW * 0.5, coreH = nH * 0.5;
       const coreX = nX + (nW - coreW) / 2, coreY = nY + (nH - coreH) / 2;
       
-      const loopW = loop.measured?.width || loop.width || (loop.type === 'FOR_CONTAINER' ? 350 : 300);
-      const loopH = loop.measured?.height || loop.height || (loop.type === 'FOR_CONTAINER' ? 200 : 150);
+      const { x: loopX, y: loopY, w: loopW, h: loopH } = getContainerBounds(loop);
       
-      return (coreX < loop.position.x + loopW && coreX + coreW > loop.position.x && coreY < loop.position.y + loopH && coreY + coreH > loop.position.y);
+      return (coreX < loopX + loopW && coreX + coreW > loopX && coreY < loopY + loopH && coreY + coreH > loopY);
   };
 
   const [edgePath, labelX, labelY, segments] = (() => {
@@ -70,8 +99,8 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
             
             if (n.position.y >= targetY - 30 && n.position.y <= sourceY + 30) {
                 const nodeX = n.position.x;
-                const defaultW = n.type === 'FOR_CONTAINER' ? 350 : (n.type === 'LOOP_CONTAINER' ? 300 : 150);
-                const nodeMaxX = nodeX + (n.measured?.width || n.width || defaultW);
+                const { w: nodeW } = isLoop ? getContainerSize(n) : getNodeSize(n);
+                const nodeMaxX = nodeX + nodeW;
                 if (nodeMaxX > maxX) maxX = nodeMaxX;
                 if (nodeX < minX) minX = nodeX;
             }
@@ -87,7 +116,8 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
             routeLeft = false;
         } else {
             const loopNode = nodes.find(n => n.id === target);
-            const loopCenterX = loopNode ? loopNode.position.x + (loopNode.measured?.width || loopNode.width || 120) / 2 : targetX;
+            const { w: loopW } = loopNode ? getContainerSize(loopNode) : { w: 120 };
+            const loopCenterX = loopNode ? loopNode.position.x + loopW / 2 : targetX;
             routeLeft = sourceX < loopCenterX;
         }
         
@@ -99,9 +129,8 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
         let bottomY = Math.max(sourceY + 10, targetY + 10); 
         
         loopNodes.forEach(loop => {
-            const loopH = loop.measured?.height || loop.height || 150;
-            const lTop = loop.position.y;
-            const lBottom = loop.position.y + loopH;
+            const { y: lTop, h: loopH } = getContainerBounds(loop);
+            const lBottom = lTop + loopH;
             const sInside = isInside(source, loop);
             const tInside = isInside(target, loop);
             
@@ -244,10 +273,8 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
             finalLabelX = (sourceX + targetX) / 2;
             finalLabelY = midY;
         } else if (enteringLoop && sourceY + 10 < enteringLoop.position.y + 30) {
-            const loopW = enteringLoop.measured?.width || enteringLoop.width || 300;
-            const lTop = enteringLoop.position.y;
-            const lLeft = enteringLoop.position.x;
-            const lRight = enteringLoop.position.x + loopW;
+            const { x: lLeft, y: lTop, w: loopW } = getContainerBounds(enteringLoop);
+            const lRight = lLeft + loopW;
             
             const routeLeft = sourceX < (lLeft + loopW / 2);
             const sideX = routeLeft ? Math.min(lLeft - 40, sourceX) : Math.max(lRight + 40, sourceX);
@@ -316,7 +343,13 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
             }
         } else {
             if (sourcePosition === Position.Bottom && targetPosition === Position.Top && targetY >= sourceY - 1) {
-                const midY = sourceY + (targetY - sourceY) / 2;
+                let midY = sourceY + (targetY - sourceY) / 2;
+                if (enteringLoop) {
+                    const { y: lTop } = getContainerBounds(enteringLoop);
+                    if (sourceY < lTop) {
+                        midY = Math.max(sourceY + 10, Math.min(lTop - 15, sourceY + (lTop - sourceY) / 2));
+                    }
+                }
                 if (Math.abs(targetX - sourceX) <= 1) {
                     path = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
                     finalLabelX = sourceX;
@@ -364,10 +397,7 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
 
   const catchers = [];
   loopNodes.forEach(loop => {
-      const loopX = loop.position.x;
-      const loopY = loop.position.y;
-      const loopW = loop.measured?.width || loop.width || (loop.type === 'FOR_CONTAINER' ? 350 : 300);
-      const loopH = loop.measured?.height || loop.height || (loop.type === 'FOR_CONTAINER' ? 200 : 150);
+      const { x: loopX, y: loopY, w: loopW, h: loopH } = getContainerBounds(loop);
       
       const sInside = isInside(source, loop);
       const tInside = isInside(target, loop);
@@ -429,25 +459,42 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
   const onSwap = (e) => {
     e.stopPropagation();
     if (data?.readOnly) return;
+    if (data?.takeSnapshot) data.takeSnapshot();
+    if (data?.handleInteract) data.handleInteract();
     
+    const srcNode = nodes.find(n => n.id === source);
+    if (srcNode?.data?.onUpdateData) {
+      srcNode.data.onUpdateData({ isSwapped: !srcNode.data.isSwapped });
+    }
+
     setEdges(eds => {
       const sibling = eds.find(edge => edge.source === source && edge.id !== id);
-      const pref = edgeLabels[data.edgeStyle || 'true-false'];
+      const pref = edgeLabels[data?.edgeStyle || 'true-false'];
       const toggleLabel = (l) => (l === pref.t || l === 'Ano' || l === '+' || l === 'Yes' || l === 'True') ? pref.f : pref.t;
       
-      if (!sibling) return eds.map(edge => edge.id === id ? { ...edge, data: { ...edge.data, label: toggleLabel(edge.data.label) } } : edge);
+      if (!sibling) return eds.map(edge => edge.id === id ? { ...edge, data: { ...edge.data, label: toggleLabel(edge.data?.label || labelText || '') } } : edge);
       
       return eds.map(edge => {
-        if (edge.id === id) return { ...edge, data: { ...edge.data, label: toggleLabel(edge.data.label) } };
-        if (edge.id === sibling.id) return { ...edge, data: { ...edge.data, label: toggleLabel(sibling.data.label) } };
+        if (edge.id === id) return { ...edge, data: { ...edge.data, label: toggleLabel(edge.data?.label || labelText || '') } };
+        if (edge.id === sibling.id) return { ...edge, data: { ...edge.data, label: toggleLabel(sibling.data?.label || '') } };
         return edge;
       });
     });
   };
 
-  const labelText = data?.label;
-  const isPos = ['+', 'Ano', 'Yes', 'True'].includes(labelText);
-  const isNeg = ['-', 'Ne', 'No', 'False'].includes(labelText);
+  const pref = edgeLabels[data?.edgeStyle || 'true-false'] || { t: 'True', f: 'False' };
+  const handle = sourceHandleId || sourceHandle || data?.sourceHandle;
+  const srcNode = nodes.find(n => n.id === source);
+  const isSwapped = srcNode?.data?.isSwapped === true;
+  const labelText = data?.label || (isCondition ? (handle === 's-right' ? (isSwapped ? pref.t : pref.f) : (isSwapped ? pref.f : pref.t)) : '');
+  const resolvedIsCondition = Boolean(
+    isCondition ||
+    srcNode?.type === 'CONDITION' ||
+    ['ano', 'ne', 'yes', 'no', 'true', 'false', '+', '-', pref.t.toLowerCase(), pref.f.toLowerCase()].includes((data?.label || '').toLowerCase().trim()) ||
+    ['ano', 'ne', 'yes', 'no', 'true', 'false', '+', '-', pref.t.toLowerCase(), pref.f.toLowerCase()].includes((labelText || '').toLowerCase().trim())
+  );
+  const isPos = ['+', 'Ano', 'Yes', 'True', pref.t].includes(labelText);
+  const isNeg = ['-', 'Ne', 'No', 'False', pref.f].includes(labelText);
   const colorClass = isPos ? 'text-emerald-700 dark:text-emerald-300' : (isNeg ? 'text-rose-700 dark:text-rose-300' : 'text-gray-700 dark:text-gray-300');
   const bgClass = isPos 
     ? 'bg-emerald-50 dark:bg-emerald-950/80 border-emerald-300 dark:border-emerald-700' 
@@ -455,11 +502,9 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
         ? 'bg-rose-50 dark:bg-rose-950/80 border-rose-300 dark:border-rose-700' 
         : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700');
 
-  const showRefresh = data?.edgeStyle === 'while-do';
-
   return (
     <>
-      <BaseEdge path={edgePath} markerEnd={isTargetMerge ? undefined : markerEnd} style={{ ...style, strokeWidth: selected ? 3 : 2, stroke: selected ? '#6366f1' : (isCondition ? (isPos ? '#10b981' : '#f43f5e') : (style?.stroke || '#94a3b8')) }} />
+      <BaseEdge path={edgePath} markerEnd={isTargetMerge ? undefined : markerEnd} style={{ ...style, strokeWidth: selected ? 3 : 2, stroke: selected ? '#6366f1' : (resolvedIsCondition ? (isPos ? '#10b981' : '#f43f5e') : (style?.stroke || '#94a3b8')) }} />
       {catcher && <g className="pointer-events-none">{catcher}</g>}
       {labelText && (
         <EdgeLabelRenderer>
@@ -472,21 +517,19 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
             <div 
               onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
               onMouseDown={(e) => e.stopPropagation()}
-              className={`px-2 py-0.5 rounded text-[10px] font-bold border shadow-sm flex items-center gap-1.5 cursor-pointer transition-transform hover:scale-105 ${bgClass} ${colorClass}`}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold border shadow-sm flex items-center gap-1 cursor-pointer transition-transform hover:scale-110 ${bgClass} ${colorClass}`}
             >
-              {showRefresh && <RefreshCcw size={10} className="text-orange-500" />}
               <span>{labelText}</span>
-              {!data?.readOnly && isCondition && (
-                  <button 
-                    type="button"
+              {!data?.readOnly && resolvedIsCondition && (
+                  <div 
                     onClick={onSwap} 
                     onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 p-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+                    className="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400"
                     title="Prohodit větve (Ano / Ne)"
                   >
                     <RefreshCcw size={10} />
-                  </button>
+                  </div>
               )}
             </div>
           </div>

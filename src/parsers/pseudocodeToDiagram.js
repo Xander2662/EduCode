@@ -1,3 +1,5 @@
+import { parseDrawioToPseudocode } from './diagramToPseudocode.js';
+
 export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 'true-false', conditionShape = 'hexagon', editorMode = 'simple') => {
     const getNewId = () => 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 11);
 
@@ -13,6 +15,41 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
     let declaredFuncs = new Set();
     const nodeLineMap = {};
     let searchStartIdx = 0;
+
+    let originalCodeNodeIds = null;
+    let originalCodeLines = null;
+    if (existingXml && existingXml.includes('<mxGraphModel')) {
+        try {
+            const parsed = parseDrawioToPseudocode(existingXml);
+            if (parsed && parsed.codeNodeIds) {
+                originalCodeNodeIds = parsed.codeNodeIds;
+                originalCodeLines = parsed.code ? parsed.code.split('\n').map(l => l.trim()) : [];
+            }
+        } catch {
+            // ignore
+        }
+    }
+
+    const getOriginalIdForLine = (lineIdx, text) => {
+        if (!originalCodeNodeIds || !originalCodeLines) return null;
+        const norm = (t) => (t || '').replace(/\(\)$/, '').replace(/\s+/g, ' ').trim();
+        const normTarget = norm(text);
+
+        if (originalCodeLines[lineIdx] && norm(originalCodeLines[lineIdx]) === normTarget) {
+            return originalCodeNodeIds[lineIdx] || null;
+        }
+        for (let offset = 1; offset < 5; offset++) {
+            const up = lineIdx - offset;
+            if (up >= 0 && originalCodeLines[up] && norm(originalCodeLines[up]) === normTarget) {
+                return originalCodeNodeIds[up] || null;
+            }
+            const dn = lineIdx + offset;
+            if (dn < originalCodeLines.length && originalCodeLines[dn] && norm(originalCodeLines[dn]) === normTarget) {
+                return originalCodeNodeIds[dn] || null;
+            }
+        }
+        return null;
+    };
 
     const lines = code.split('\n').map(l => l.trim());
     const blocks = [];
@@ -77,7 +114,10 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 else if (style.includes('shape=parallelogram') || cellType === 'IO') type = 'IO';
                 else if (style.includes('shape=note') || cellType === 'COMMENT') type = 'COMMENT';
                 else if (style.includes('swimlane') || style.includes('LOOP_CONTAINER') || cellType === 'LOOP_CONTAINER') type = 'LOOP_CONTAINER';
-                existingNodes.push({ id: cell.getAttribute('id'), val, type, x: parseFloat(geo.getAttribute('x')), y: parseFloat(geo.getAttribute('y')), used: false });
+                const isSwapped = style.includes('isSwapped=true');
+                const w = parseFloat(geo.getAttribute('width'));
+                const h = parseFloat(geo.getAttribute('height'));
+                existingNodes.push({ id: cell.getAttribute('id'), val, type, x: parseFloat(geo.getAttribute('x')), y: parseFloat(geo.getAttribute('y')), w: !isNaN(w) ? w : undefined, h: !isNaN(h) ? h : undefined, isSwapped, used: false });
             }
         });
 
@@ -92,15 +132,89 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         });
     }
 
-    const getPos = (text, type, defX, currentY) => {
+    let currentBlockStartIndex = 0;
+
+    const getPos = (text, type, defX, currentY, originalId = null, isOutsideContainer = false) => {
         const normalize = (t) => t.replace(/\(\)$/g, '').replace(/\s+/g, ' ').trim();
         const normalizedTarget = normalize(text);
 
-        const match = existingNodes.find(n => !n.used && n.type === type && normalize(n.val) === normalizedTarget);
-        if (match) {
-            match.used = true;
-            return { x: match.x, y: currentY, matched: true, oldId: match.id };
+        if (originalId) {
+            const idMatch = existingNodes.find(n => !n.used && n.id === originalId);
+            if (idMatch) {
+                const isCrossFromContainer = (type === 'CONDITION' && (idMatch.type === 'LOOP_CONTAINER' || idMatch.type === 'FOR_CONTAINER'));
+                const isCrossFromCond = ((type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER') && idMatch.type === 'CONDITION');
+                if (idMatch.type === type || isCrossFromContainer || isCrossFromCond) {
+                    idMatch.used = true;
+                    const x = (isCrossFromContainer || (editorMode === 'simple' && isOutsideContainer && Math.abs(idMatch.x - defX) > 40)) ? defX : idMatch.x;
+                    const lastNode = outNodes.length > currentBlockStartIndex ? outNodes[outNodes.length - 1] : null;
+                    const lastH = lastNode ? (lastNode.type === 'CONDITION' ? (lastNode.h && lastNode.h <= 100 ? lastNode.h : 80) : (lastNode.h || 50)) : 0;
+                    const lastBottom = lastNode ? lastNode.y + lastH : 0;
+                    const y = (isCrossFromContainer || (lastNode && idMatch.y < lastBottom + 20))
+                        ? Math.max(lastBottom + 30, (typeof idMatch.y === 'number' && !isNaN(idMatch.y)) ? idMatch.y : currentY)
+                        : ((typeof idMatch.y === 'number' && !isNaN(idMatch.y)) ? idMatch.y : currentY);
+                    return {
+                        x,
+                        y,
+                        matched: true,
+                        isFromCond: isCrossFromCond,
+                        oldId: isCrossFromContainer ? getNewId() : idMatch.id,
+                        isSwapped: idMatch.isSwapped,
+                        w: (isCrossFromContainer || isCrossFromCond) ? undefined : idMatch.w,
+                        h: (isCrossFromContainer || isCrossFromCond) ? undefined : idMatch.h
+                    };
+                }
+            }
         }
+
+        const candidates = existingNodes.filter(n => !n.used && n.type === type && normalize(n.val) === normalizedTarget);
+        if (candidates.length > 0) {
+            // Only consider candidates in the local proximity of defX (same fragment/column)
+            // to avoid stealing nodes from other distant fragments across the canvas
+            const localCandidates = candidates.filter(cand => Math.abs(cand.x - defX) <= 450);
+            if (localCandidates.length > 0) {
+                localCandidates.sort((a, b) => {
+                    const xDistA = Math.abs(a.x - defX);
+                    const xDistB = Math.abs(b.x - defX);
+                    if (Math.abs(xDistA - xDistB) > 200) {
+                        return xDistA - xDistB;
+                    }
+                    if (a.y !== b.y) return a.y - b.y;
+                    return xDistA - xDistB;
+                });
+                const match = localCandidates[0];
+                match.used = true;
+                const lastNode = outNodes.length > currentBlockStartIndex ? outNodes[outNodes.length - 1] : null;
+                const lastH = lastNode ? (lastNode.type === 'CONDITION' ? (lastNode.h && lastNode.h <= 100 ? lastNode.h : 80) : (lastNode.h || 50)) : 0;
+                const lastBottom = lastNode ? lastNode.y + lastH : 0;
+                const y = (lastNode && match.y < lastBottom + 20)
+                    ? Math.max(lastBottom + 30, (typeof match.y === 'number' && !isNaN(match.y)) ? match.y : currentY)
+                    : ((typeof match.y === 'number' && !isNaN(match.y)) ? match.y : currentY);
+                return { x: match.x, y, matched: true, oldId: match.id, isSwapped: match.isSwapped, w: match.w, h: match.h };
+            }
+        }
+
+        // Cross-mode conversion matching when switching between simple and advanced mode:
+        // 1. In advanced mode: CONDITION can inherit position from existing LOOP_CONTAINER / FOR_CONTAINER
+        if (type === 'CONDITION') {
+            const containerCand = existingNodes.find(n => !n.used && (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') && normalize(n.val) === normalizedTarget && Math.abs(n.x - defX) <= 450);
+            if (containerCand) {
+                containerCand.used = true;
+                const x = defX;
+                const y = (typeof containerCand.y === 'number' && !isNaN(containerCand.y)) ? Math.max(currentY, containerCand.y) : currentY;
+                return { x, y, matched: true, oldId: getNewId() };
+            }
+        }
+        // 2. In simple mode: LOOP_CONTAINER / FOR_CONTAINER can inherit position from existing CONDITION
+        if (type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER') {
+            const condCand = existingNodes.find(n => !n.used && n.type === 'CONDITION' && normalize(n.val) === normalizedTarget && Math.abs(n.x - defX) <= 450);
+            if (condCand) {
+                condCand.used = true;
+                const x = condCand.x - 95;
+                const y = (typeof condCand.y === 'number' && !isNaN(condCand.y)) ? Math.max(40, condCand.y - 40) : currentY;
+                return { x, y, matched: true, isFromCond: true, oldId: getNewId() };
+            }
+        }
+
         return { x: defX, y: currentY, matched: false, oldId: getNewId() };
     };
 
@@ -114,11 +228,23 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         const oldTrueEdge = existingEdges.find(e => e.source === nodeId && trueVals.includes(e.val));
         const oldFalseEdge = existingEdges.find(e => e.source === nodeId && falseVals.includes(e.val));
 
-        if (oldTrueEdge) tHandle = oldTrueEdge.sourceHandle;
-        if (oldFalseEdge) fHandle = oldFalseEdge.sourceHandle;
-
-        if (tHandle === fHandle) {
+        const matchedNode = existingNodes.find(n => n.id === nodeId) || outNodes.find(n => n.id === nodeId);
+        if (oldTrueEdge && !oldFalseEdge) {
+            tHandle = oldTrueEdge.sourceHandle;
             fHandle = tHandle === 's-bottom' ? 's-right' : 's-bottom';
+        } else if (!oldTrueEdge && oldFalseEdge) {
+            fHandle = oldFalseEdge.sourceHandle;
+            tHandle = fHandle === 's-bottom' ? 's-right' : 's-bottom';
+        } else if (oldTrueEdge && oldFalseEdge) {
+            tHandle = oldTrueEdge.sourceHandle;
+            fHandle = oldFalseEdge.sourceHandle;
+            if (tHandle === fHandle) {
+                fHandle = tHandle === 's-bottom' ? 's-right' : 's-bottom';
+            }
+        } else if (matchedNode?.isSwapped) {
+            let tempH = tHandle;
+            tHandle = fHandle;
+            fHandle = tempH;
         }
 
         let tText = EL.t;
@@ -150,10 +276,45 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             : "shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;size=0.15;fillColor=#ffe6cc;strokeColor=#d79b00;",
         COMMENT: "shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;strokeColor=#d6b656;",
         MERGE: "ellipse;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;resizable=0;movable=0;rotatable=0;",
+        LOOP_CONTAINER: "swimlane;whiteSpace=wrap;html=1;dashed=1;fillColor=none;LOOP_CONTAINER;",
+        FOR_CONTAINER: "swimlane;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#4f46e5;FOR_CONTAINER;",
         SWITCH_CONTAINER: "swimlane;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#f97316;SWITCH_CONTAINER;",
         CASE_CONTAINER: "swimlane;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#f97316;CASE_CONTAINER;",
         EDGE: "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;"
     };
+
+    const getNodeBounds = (n) => {
+        let w = Math.max(n.w || 0, n.type === 'CONDITION' ? 160 : (n.type === 'START_END' ? 180 : 160));
+        let h = Math.max(n.h || 0, n.type === 'CONDITION' ? 80 : 50);
+        if (n.type === 'COMMENT') { w = Math.max(w, 160); h = Math.max(h, 50); }
+        else if (n.type === 'MERGE') { w = 10; h = 10; }
+        else if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') { w = Math.max(w, 350); h = Math.max(h, 200); }
+        else if (n.type === 'SWITCH_CONTAINER') { w = Math.max(w, 450); h = Math.max(h, 250); }
+        else if (n.type === 'CASE_CONTAINER') { w = Math.max(w, 300); h = Math.max(h, 150); }
+        return {
+            left: n.x,
+            top: n.y,
+            right: n.x + w,
+            bottom: n.y + h,
+            w,
+            h
+        };
+    };
+
+    const checkOverlap = (nodeA, nodeB) => {
+        if (nodeA.parentId === nodeB.id || nodeB.parentId === nodeA.id) return false;
+        const b1 = getNodeBounds(nodeA);
+        const b2 = getNodeBounds(nodeB);
+        const margin = 20;
+        return !(
+            b1.right + margin <= b2.left ||
+            b1.left >= b2.right + margin ||
+            b1.bottom + margin <= b2.top ||
+            b1.top >= b2.bottom + margin
+        );
+    };
+
+    let lastBlockMaxY = 0;
 
     blocks.forEach(blockLines => {
         let funcName = "main";
@@ -172,6 +333,18 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         if (declaredFuncs.has(funcName)) errors.push(`Chyba: Duplicitní název funkce '${funcName}'`);
         declaredFuncs.add(funcName);
 
+        if (/^fragment_\d+$/i.test(funcName)) {
+            const hasRealStatements = blockLines.some(l => {
+                const trimmed = l.trim();
+                return trimmed && !trimmed.startsWith('#') && !trimmed.startsWith('//') &&
+                       trimmed.toUpperCase() !== 'ENDFUNCTION' && trimmed.toUpperCase() !== 'ENDCLASS' && trimmed.toUpperCase() !== 'KONEC';
+            });
+            if (!hasRealStatements) return;
+        }
+
+        const blockStartIndex = outNodes.length;
+        currentBlockStartIndex = blockStartIndex;
+
         let hasEnd = false;
         let endLineText = "Konec";
         let originalEndLine = null;
@@ -184,17 +357,34 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             }
         }
 
-        let yOffset = 40;
+        let yOffset = lastBlockMaxY > 0 ? lastBlockMaxY + 100 : 40;
         let effectiveStartDefX = globalGroupX;
         const normalize = (t) => t.replace(/\(\)$/g, '').replace(/\s+/g, ' ').trim();
-        const existingStart = existingNodes.find(n => !n.used && n.type === 'START_END' && normalize(n.val) === normalize(funcName || "main"));
-        if (!existingStart) {
-            const firstMatched = existingNodes.find(n => !n.used && n.type !== 'START_END');
-            if (firstMatched) {
+        let existingStart = existingNodes.find(n => !n.used && n.type === 'START_END' && normalize(n.val) === normalize(funcName || "main"));
+        if (!existingStart && /^fragment_\d+$/i.test(funcName)) {
+            const unusedFragStarts = existingNodes.filter(n => !n.used && n.type === 'START_END' && /^fragment(_\d+)?$/i.test(normalize(n.val)));
+            if (unusedFragStarts.length > 0) {
+                unusedFragStarts.sort((a, b) => a.x - b.x || a.y - b.y);
+                existingStart = unusedFragStarts[0];
+            }
+        }
+        if (existingStart) {
+            effectiveStartDefX = existingStart.x;
+            if (typeof existingStart.y === 'number' && !isNaN(existingStart.y)) {
+                yOffset = existingStart.y;
+            }
+        } else {
+            const unusedNonStart = existingNodes.filter(n => !n.used && n.type !== 'START_END');
+            if (unusedNonStart.length > 0) {
+                unusedNonStart.sort((a, b) => a.y - b.y);
+                const firstMatched = unusedNonStart[0];
                 if (firstMatched.type === 'LOOP_CONTAINER' || firstMatched.type === 'FOR_CONTAINER') {
                     effectiveStartDefX = firstMatched.x + 90;
                 } else {
                     effectiveStartDefX = firstMatched.x;
+                }
+                if (typeof firstMatched.y === 'number' && !isNaN(firstMatched.y)) {
+                    yOffset = Math.max(40, firstMatched.y - 100);
                 }
             }
         }
@@ -227,32 +417,49 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 }
             }
             if (extraProps.parentId) parentIdAttr = extraProps.parentId; // override
-            
-            const pos = getPos(text, type, defaultX, yOffset);
-            outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y, matched: pos.matched, parentId: parentIdAttr, ...extraProps });
-            yOffset = Math.max(yOffset, pos.y) + (type === 'CONDITION' ? 160 : 100);
-            
+
+            let matchedLineIdx = null;
             if (originalLineText !== null) {
                 for (let k = searchStartIdx; k < lines.length; k++) {
                     if (lines[k] === originalLineText) {
-                        nodeLineMap[pos.oldId] = k;
-                        searchStartIdx = k + 1;
+                        matchedLineIdx = k;
                         break;
                     }
                 }
+            }
+
+            const originalId = matchedLineIdx !== null ? getOriginalIdForLine(matchedLineIdx, originalLineText) : null;
+            const pos = getPos(text, type, defaultX, yOffset, originalId, stack.length === 0);
+            const isSwapped = extraProps.isSwapped !== undefined ? extraProps.isSwapped : pos.isSwapped;
+            const nodeW = extraProps.w !== undefined ? extraProps.w : pos.w;
+            const nodeH = extraProps.h !== undefined ? extraProps.h : pos.h;
+            outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y, matched: pos.matched, parentId: parentIdAttr, isSwapped, ...(nodeW ? { w: nodeW } : {}), ...(nodeH ? { h: nodeH } : {}), ...extraProps });
+            yOffset = Math.max(yOffset, pos.y) + (type === 'CONDITION' ? 160 : 100);
+            
+            if (matchedLineIdx !== null) {
+                nodeLineMap[pos.oldId] = matchedLineIdx;
+                searchStartIdx = matchedLineIdx + 1;
             }
             return pos.oldId;
         };
 
         const addEdge = (source, target, value = "", sourceHandle = "s-bottom", targetHandle = "t-top") => {
-            outEdges.push({ id: getNewId(), source, target, value, sourceHandle, targetHandle });
+            let finalVal = value;
+            const srcNode = outNodes.find(n => n.id === source);
+            if (srcNode && srcNode.type === 'CONDITION' && !finalVal) {
+                const ports = getConditionPorts(source, false);
+                finalVal = sourceHandle === ports.fHandle ? ports.fText : ports.tText;
+            }
+            outEdges.push({ id: getNewId(), source, target, value: finalVal, sourceHandle, targetHandle });
         };
 
         const getXPos = () => {
-            let x = globalGroupX;
+            let x = startPos.x;
             for (let i = 0; i < stack.length; i++) {
-                if (stack[i].type === 'LOOP' && !stack[i].isSimple) x += 240;
                 if (stack[i].type === 'IF' && stack[i].trueExits !== null) x += 240;
+                if (stack[i].type === 'SWITCH' && stack[i].currentCaseX !== undefined) {
+                    return stack[i].currentCaseX;
+                }
             }
             return x;
         };
@@ -312,50 +519,118 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
             else if (upper.startsWith('SWITCH ')) {
                 let switchVar = line.substring(7).trim();
-                let switchId = addNode(switchVar, 'SWITCH_CONTAINER', getXPos(), { switchVar, parentId: '1' }, line);
-                pendingExits.forEach(exit => addEdge(exit.id, switchId, exit.text, exit.handle, "t-left"));
-                stack.push({ type: 'SWITCH', id: switchId, cases: [], switchVar, startY: yOffset, currentCaseExits: null, maxCaseY: yOffset });
-                pendingExits = []; // Nothing flows straight out of switch, it flows into cases
+                if (editorMode === 'simple') {
+                    let switchX = getXPos() - 20;
+                    let switchId = addNode(switchVar, 'SWITCH_CONTAINER', switchX, { switchVar, parentId: '1' }, line);
+                    pendingExits.forEach(exit => addEdge(exit.id, switchId, exit.text, exit.handle, "t-left"));
+                    stack.push({ type: 'SWITCH', id: switchId, isSimple: true, cases: [], switchVar, startX: switchX, startY: yOffset, currentCaseExits: null, maxCaseY: yOffset, caseCount: 0 });
+                    pendingExits = []; // Nothing flows straight out of switch, it flows into cases
+                } else {
+                    let switchX = getXPos();
+                    stack.push({
+                        type: 'SWITCH',
+                        isSimple: false,
+                        switchVar,
+                        entryExits: [...pendingExits],
+                        prevFalseExit: null,
+                        allExits: [],
+                        caseIndex: 0,
+                        startX: switchX,
+                        startY: yOffset,
+                        maxCaseY: yOffset
+                    });
+                    pendingExits = [];
+                }
             }
             else if (upper.startsWith('CASE ') || upper === 'DEFAULT:') {
                 let currentSwitch = stack[stack.length - 1];
                 if (currentSwitch.type === 'SWITCH') {
-                    // Save previous case exits
-                    if (currentSwitch.currentCaseExits) {
-                        currentSwitch.cases.push([...currentSwitch.currentCaseExits, ...pendingExits]);
-                        currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
-                    }
-                    
-                    let caseVal = '';
-                    let isDefault = false;
-                    if (upper === 'DEFAULT:') {
-                        isDefault = true;
+                    let isDefault = (upper === 'DEFAULT:');
+                    let caseVal = isDefault ? '' : line.substring(5, line.lastIndexOf(':')).trim();
+
+                    if (currentSwitch.isSimple) {
+                        // Save previous case exits
+                        if (currentSwitch.currentCaseExits) {
+                            currentSwitch.cases.push([...currentSwitch.currentCaseExits, ...pendingExits]);
+                            currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
+                        }
+                        
+                        const caseX = currentSwitch.startX + 20 + currentSwitch.caseCount * 270;
+                        const caseY = currentSwitch.startY + 50;
+                        let caseId = addNode(`Case ${isDefault ? 'default' : caseVal}`, 'CASE_CONTAINER', caseX, { caseVal, isDefault, switchId: currentSwitch.id, parentId: currentSwitch.id, w: 250, h: 150 }, line);
+                        
+                        yOffset = caseY + 60; // Start inside case container
+                        pendingExits = [{ id: caseId, text: "", handle: "s-bottom" }];
+                        currentSwitch.currentCaseExits = [];
+                        currentSwitch.currentCaseId = caseId;
+                        currentSwitch.currentCaseX = caseX + 45;
+                        currentSwitch.caseCount++;
                     } else {
-                        caseVal = line.substring(5, line.lastIndexOf(':')).trim();
+                        // Advanced mode: chained CONDITION blocks
+                        if (currentSwitch.caseIndex > 0) {
+                            currentSwitch.allExits.push(...pendingExits);
+                            currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
+                        }
+
+                        const caseX = currentSwitch.startX + currentSwitch.caseIndex * 240;
+                        currentSwitch.currentCaseX = caseX;
+                        yOffset = currentSwitch.startY;
+
+                        if (isDefault) {
+                            // Default case: no condition block, fed directly by previous False exit
+                            pendingExits = currentSwitch.prevFalseExit ? [currentSwitch.prevFalseExit] : [];
+                            currentSwitch.prevFalseExit = null;
+                            yOffset += 40;
+                        } else {
+                            let condText;
+                            if (/^(?:==|===|!=|<=|>=|<|>)\s*/.test(caseVal)) {
+                                condText = `${currentSwitch.switchVar} ${caseVal}`;
+                            } else {
+                                condText = `${currentSwitch.switchVar} == ${caseVal}`;
+                            }
+
+                            const condId = addNode(condText, 'CONDITION', caseX, {}, line);
+
+                            if (currentSwitch.caseIndex === 0) {
+                                currentSwitch.entryExits.forEach(exit => addEdge(exit.id, condId, exit.text, exit.handle, "t-top"));
+                            } else if (currentSwitch.prevFalseExit) {
+                                addEdge(currentSwitch.prevFalseExit.id, condId, currentSwitch.prevFalseExit.text, currentSwitch.prevFalseExit.handle, "t-top");
+                            }
+
+                            const ports = getConditionPorts(condId, false);
+                            pendingExits = [{ id: condId, text: ports.tText, handle: ports.tHandle }];
+                            currentSwitch.prevFalseExit = { id: condId, text: ports.fText, handle: ports.fHandle };
+                        }
+                        currentSwitch.caseIndex++;
                     }
-                    
-                    let caseId = addNode(`Case ${isDefault ? 'default' : caseVal}`, 'CASE_CONTAINER', getXPos(), { caseVal, isDefault, switchId: currentSwitch.id, parentId: currentSwitch.id }, line);
-                    
-                    yOffset = currentSwitch.startY + 60; // Start inside case container
-                    pendingExits = [{ id: caseId, text: "", handle: "s-bottom" }];
-                    currentSwitch.currentCaseExits = [];
-                    currentSwitch.currentCaseId = caseId;
                 }
             }
             else if (upper === 'ENDSWITCH') {
                 const currentSwitch = stack.pop();
-                if (currentSwitch.currentCaseExits) {
-                    currentSwitch.cases.push([...currentSwitch.currentCaseExits, ...pendingExits]);
+                if (currentSwitch.isSimple) {
+                    if (currentSwitch.currentCaseExits) {
+                        currentSwitch.cases.push([...currentSwitch.currentCaseExits, ...pendingExits]);
+                        currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
+                    }
+                    pendingExits = currentSwitch.cases.flat();
+                    yOffset = currentSwitch.maxCaseY + 60; // Padding after switch
+                    
+                    // Adjust SWITCH_CONTAINER and CASE_CONTAINER sizes
+                    const swNode = outNodes.find(n => n.id === currentSwitch.id);
+                    if (swNode) {
+                        swNode.h = Math.max(230, currentSwitch.maxCaseY - currentSwitch.startY + 60);
+                        swNode.w = Math.max(350, 40 + currentSwitch.caseCount * 270);
+                    }
+                } else {
+                    currentSwitch.allExits.push(...pendingExits);
                     currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
-                }
-                pendingExits = currentSwitch.cases.flat();
-                yOffset = currentSwitch.maxCaseY + 60; // Padding after switch
-                
-                // Adjust SWITCH_CONTAINER size
-                const swNode = outNodes.find(n => n.id === currentSwitch.id);
-                if (swNode) {
-                    swNode.h = Math.max(150, currentSwitch.maxCaseY - currentSwitch.startY + 100);
-                    swNode.w = Math.max(300, currentSwitch.cases.length * 250);
+
+                    if (currentSwitch.prevFalseExit) {
+                        currentSwitch.allExits.push(currentSwitch.prevFalseExit);
+                    }
+
+                    pendingExits = [...currentSwitch.allExits];
+                    yOffset = currentSwitch.maxCaseY + 60;
                 }
             }
             else if (upper.startsWith('WHILE ') || upper.startsWith('FOR ')) {
@@ -368,11 +643,12 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 let forInit = '';
                 let forLimit = '';
                 if (isFor) {
-                    const forMatch = condText.match(/^FOR\s+([a-zA-Z_]\w*)\s*(?:=|<-)\s*(.*?)\s+TO\s+(.*)$/i);
+                    const forMatch = condText.match(/^FOR\s+([a-zA-Z_]\w*)\s*(?:=|<-)\s*(.*?)\s+TO\s+(.*?)(?:\s+STEP\s+(.*))?$/i);
                     if (forMatch) {
                         forVar = forMatch[1];
                         const initVal = forMatch[2];
                         const toVal = forMatch[3];
+                        if (forMatch[4]) forStep = forMatch[4].trim();
                         
                         forInit = `${forVar} = ${initVal}`;
                         forLimit = toVal;
@@ -397,13 +673,35 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
                 if (editorMode === 'simple') {
                     yOffset += 60;
-                    stack.push({ type: 'LOOP', id: getNewId(), isSimple: true, condText: (isFor ? upper : condText), startY: yOffset, entryExits: [...pendingExits], doWhile: false, outNodesStartIndex: outNodes.length, isFor, forVar, forStep, forInit, forLimit });
+                    let matchedLineIdx = null;
+                    for (let k = searchStartIdx; k < lines.length; k++) {
+                        if (lines[k] === line) {
+                            matchedLineIdx = k;
+                            break;
+                        }
+                    }
+                    if (matchedLineIdx !== null) {
+                        searchStartIdx = matchedLineIdx + 1;
+                    }
+                    stack.push({ type: 'LOOP', id: getNewId(), matchedLineIdx, isSimple: true, condText: (isFor ? upper : condText), startY: yOffset, entryExits: [...pendingExits], doWhile: false, outNodesStartIndex: outNodes.length, isFor, forVar, forStep, forInit, forLimit });
                 } else {
                     const loopId = addNode(condText, 'CONDITION', getXPos(), {}, isFor ? null : line);
 
                     pendingExits.forEach(exit => addEdge(exit.id, loopId, exit.text, exit.handle, "t-top"));
                     const ports = getConditionPorts(loopId, isNot);
-                    stack.push({ type: 'LOOP', id: loopId, mergeId: null, isNot, isFor, forVar, forStep, isSimple: false, doWhile: false });
+                    stack.push({
+                        type: 'LOOP',
+                        id: loopId,
+                        mergeId: null,
+                        isNot,
+                        isFor,
+                        forVar,
+                        forStep,
+                        isSimple: false,
+                        doWhile: false,
+                        condNodeIndex: outNodes.length - 1,
+                        bodyStartIndex: outNodes.length
+                    });
                     pendingExits = [{ id: loopId, text: ports.tText, handle: ports.tHandle }];
                 }
             }
@@ -436,20 +734,38 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                                 
                                 outEdges = outEdges.filter(e => !removedNodeIds.has(e.source) && !removedNodeIds.has(e.target));
                                 outNodes.splice(preLoopStartIdx, k);
+                                currentLoop.outNodesStartIndex -= k;
                                 
-                                // Add 60px padding so the container doesn't overlap the block above it
-                                const shiftAmount = preLoopNodes[0].y - currentLoop.startY + 60;
-                                currentLoop.startY = currentLoop.startY + shiftAmount;
-                                yOffset += shiftAmount;
-                                
+                                // Calculate container top and determine if any downward shift is required
+                                // to prevent the container from overlapping the block above it
+                                let minBodyY = Infinity, maxBodyY = -Infinity;
+                                for (let i = 0; i < k; i++) {
+                                    const ny = preLoopNodes[i].y;
+                                    const nh = preLoopNodes[i].h || (preLoopNodes[i].type === 'CONDITION' ? 80 : 50);
+                                    if (ny < minBodyY) minBodyY = ny;
+                                    if (ny + nh > maxBodyY) maxBodyY = ny + nh;
+                                }
+                                const childContentH = maxBodyY - minBodyY;
+                                const estimatedH = Math.max(200, childContentH + 45 + 70);
+                                const extraSpace = Math.max(0, estimatedH - (childContentH + 45 + 70));
+                                const estimatedContainerY = Math.round(minBodyY - 45 - 35 - extraSpace / 2);
+
+                                const prevNode = preLoopStartIdx > 0 ? outNodes[preLoopStartIdx - 1] : null;
+                                const prevBottom = prevNode ? prevNode.y + (prevNode.h || (prevNode.type === 'CONDITION' ? 80 : 50)) : 0;
+                                const minAllowedTop = prevNode ? prevBottom + 30 : 40;
+                                const shiftAmount = estimatedContainerY < minAllowedTop ? (minAllowedTop - estimatedContainerY) : 0;
+
+                                currentLoop.startY = estimatedContainerY + shiftAmount;
 
                                 for (let i = 0; i < k; i++) {
-                                    if (!loopBodyNodes[i].matched && preLoopNodes[i].matched) {
-                                        loopBodyNodes[i].x = preLoopNodes[i].x;
+                                    loopBodyNodes[i].x = preLoopNodes[i].x;
+                                    loopBodyNodes[i].y = preLoopNodes[i].y + shiftAmount;
+                                    if (preLoopNodes[i].matched) {
+                                        loopBodyNodes[i].matched = true;
                                     }
                                 }
 
-                                for (let i = preLoopStartIdx; i < outNodes.length; i++) {
+                                for (let i = preLoopStartIdx + k; i < outNodes.length; i++) {
                                     outNodes[i].y += shiftAmount;
                                 }
                             }
@@ -457,11 +773,76 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                     }
 
                     const h = Math.max(150, yOffset - currentLoop.startY + 50);
-                    const id = currentLoop.id;
                     const memPos = getPos(currentLoop.condText, currentLoop.isFor ? 'FOR_CONTAINER' : 'LOOP_CONTAINER', getXPos() - 90, currentLoop.startY - 50);
-                    outNodes.push({ id, text: currentLoop.condText, type: currentLoop.isFor ? 'FOR_CONTAINER' : 'LOOP_CONTAINER', x: memPos.x, y: memPos.y, w: 300, h, doWhile: currentLoop.doWhile, forInit: currentLoop.forInit, forLimit: currentLoop.forLimit, forStep: currentLoop.forStep });
+                    const id = (memPos.matched && !memPos.isFromCond && memPos.oldId) ? memPos.oldId : currentLoop.id;
+                    if (currentLoop.matchedLineIdx !== null) {
+                        nodeLineMap[id] = currentLoop.matchedLineIdx;
+                        if (id !== currentLoop.id) {
+                            nodeLineMap[currentLoop.id] = currentLoop.matchedLineIdx;
+                        }
+                    }
+
+                    const currentLoopBodyNodes = outNodes.slice(currentLoop.outNodesStartIndex);
+                    let containerX = memPos.x;
+                    let containerY = memPos.y;
+                    let containerW = Math.max(350, memPos.w || 350);
+                    let containerH = Math.max(200, memPos.h || h);
+
+                    if (currentLoopBodyNodes.length > 0) {
+                        let minX = Infinity, maxX = -Infinity;
+                        let minY = Infinity, maxY = -Infinity;
+                        currentLoopBodyNodes.forEach(n => {
+                            const nw = n.w || (n.type === 'CONDITION' ? 160 : (n.type === 'START_END' ? 180 : 160));
+                            const nh = n.h || (n.type === 'CONDITION' ? 80 : 50);
+                            if (n.x < minX) minX = n.x;
+                            if (n.x + nw > maxX) maxX = n.x + nw;
+                            if (n.y < minY) minY = n.y;
+                            if (n.y + nh > maxY) maxY = n.y + nh;
+                        });
+
+                        if (!memPos.matched || memPos.isFromCond) {
+                            const childCenterX = (minX + maxX) / 2;
+                            containerW = Math.max(350, (maxX - minX) + 80);
+                            containerX = childCenterX - containerW / 2;
+
+                            const pad = 35;
+                            const childContentH = maxY - minY;
+                            containerH = Math.max(200, childContentH + 45 + pad * 2);
+                            const extraSpace = Math.max(0, containerH - (childContentH + 45 + pad * 2));
+                            containerY = Math.round(minY - 45 - pad - extraSpace / 2);
+                        } else {
+                            if (minX < containerX + 20) containerX = minX - 40;
+                            if (maxX > containerX + containerW - 20) containerW = (maxX - containerX) + 40;
+                            containerW = Math.max(350, containerW);
+
+                            const pad = 35;
+                            const childContentH = maxY - minY;
+                            if (minY < containerY + 45 + 10 || maxY > containerY + containerH - 20) {
+                                containerH = Math.max(containerH, childContentH + 45 + pad * 2);
+                                if (minY < containerY + 45 + 10) {
+                                    containerY = minY - 45 - pad;
+                                }
+                            }
+                        }
+
+                        // Prevent container from overlapping previous node above it
+                        const prevNode = currentLoop.outNodesStartIndex > 0 ? outNodes[currentLoop.outNodesStartIndex - 1] : null;
+                        const prevBottom = prevNode ? prevNode.y + (prevNode.h || (prevNode.type === 'CONDITION' ? 80 : (prevNode.type === 'START_END' ? 50 : 50))) : 0;
+                        const minAllowedTop = prevNode ? prevBottom + 35 : 40;
+                        if (containerY < minAllowedTop) {
+                            const shiftAmount = minAllowedTop - containerY;
+                            containerY += shiftAmount;
+                            currentLoopBodyNodes.forEach(n => {
+                                n.y += shiftAmount;
+                            });
+                        }
+
+                        containerH = Math.max(200, containerH);
+                    }
+
+                    outNodes.push({ id, text: currentLoop.condText, type: currentLoop.isFor ? 'FOR_CONTAINER' : 'LOOP_CONTAINER', x: containerX, y: containerY, w: containerW, h: containerH, doWhile: currentLoop.doWhile, forInit: currentLoop.forInit, forLimit: currentLoop.forLimit, forStep: currentLoop.forStep });
                     // pendingExits just flows sequentially to the next block, no back edges.
-                    yOffset += 50;
+                    yOffset = Math.max(yOffset + 50, containerY + containerH + 30);
                 } else if (currentLoop.isFor && currentLoop.forVar) {
                     const incId = addNode(`${currentLoop.forVar} = ${currentLoop.forVar} + ${currentLoop.forStep}`, 'ACTION', getXPos(), {}, line);
                     pendingExits.forEach(exit => {
@@ -469,20 +850,83 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                         addEdge(exit.id, incId, exit.text, returnHandle, "t-top");
                     });
                     addEdge(incId, currentLoop.id, "", "s-bottom", "t-top");
-                } else {
-                    const ports = getConditionPorts(currentLoop.id, currentLoop.isNot);
-                    let trueTargetHandle = "t-top";
-                    if (currentLoop.mergeId) trueTargetHandle = "t-top"; 
-
-                    pendingExits.forEach(exit => {
-                        let returnHandle = exit.id === currentLoop.id ? ports.tHandle : exit.handle;
-                        addEdge(exit.id, currentLoop.mergeId || currentLoop.id, exit.text, returnHandle, trueTargetHandle);
-                    });
-                }
-                
-                if (!currentLoop.isSimple) {
                     const ports = getConditionPorts(currentLoop.id, currentLoop.isNot);
                     pendingExits = [{ id: currentLoop.id, text: ports.fText, handle: ports.fHandle }];
+                } else {
+                    const loopBodyNodes = outNodes.slice(currentLoop.bodyStartIndex);
+                    const k = loopBodyNodes.length;
+                    const condIdx = currentLoop.condNodeIndex;
+                    let isDoWhile = false;
+
+                    if (!currentLoop.isFor && k > 0 && condIdx >= k) {
+                        const preLoopStartIdx = condIdx - k;
+                        const preLoopNodes = outNodes.slice(preLoopStartIdx, condIdx);
+                        let match = true;
+                        for (let i = 0; i < k; i++) {
+                            if (preLoopNodes[i].text !== loopBodyNodes[i].text || preLoopNodes[i].type !== loopBodyNodes[i].type) {
+                                match = false;
+                                break;
+                            }
+                        }
+                        if (match) {
+                            isDoWhile = true;
+                            const removedNodeIds = new Set(loopBodyNodes.map(n => n.id));
+
+                            // Remove duplicate loopBodyNodes
+                            outNodes.splice(currentLoop.bodyStartIndex, k);
+
+                            // Remove edges involving duplicate body nodes
+                            outEdges = outEdges.filter(e => !removedNodeIds.has(e.source) && !removedNodeIds.has(e.target));
+
+                            // Shift preLoopNodes up if there is an excessive gap created by removing a container
+                            const prevNode = preLoopStartIdx > 0 ? outNodes[preLoopStartIdx - 1] : null;
+                            if (prevNode) {
+                                const prevH = prevNode.type === 'CONDITION' ? (prevNode.h || 80) : (prevNode.h || 50);
+                                const prevBottom = prevNode.y + prevH;
+                                if (preLoopNodes[0].y > prevBottom + 40) {
+                                    const shift = preLoopNodes[0].y - (prevBottom + 30);
+                                    for (let i = 0; i < k; i++) {
+                                        preLoopNodes[i].y -= shift;
+                                    }
+                                }
+                            }
+
+                            // Position the CONDITION node cleanly below the last body node
+                            const lastBodyNode = preLoopNodes[k - 1];
+                            const lastBodyH = lastBodyNode.h || 50;
+                            const condNode = outNodes.find(n => n.id === currentLoop.id);
+                            if (condNode) {
+                                condNode.x = lastBodyNode.x;
+                                condNode.y = lastBodyNode.y + lastBodyH + 40;
+                                condNode.w = condNode.w && condNode.w <= 160 ? condNode.w : 160;
+                                condNode.h = condNode.h && condNode.h <= 80 ? condNode.h : 80;
+                                condNode.isSwapped = !currentLoop.isNot;
+                                yOffset = condNode.y + condNode.h + 30;
+                            }
+
+                            // Wire condition edges:
+                            // In DO-WHILE advanced mode, the loopback edge leaves from s-right and the exit edge leaves from s-bottom.
+                            // With isSwapped = !currentLoop.isNot, s-right matches True ('T') and s-bottom matches False ('F').
+                            const isSwapped = condNode ? condNode.isSwapped : !currentLoop.isNot;
+                            const loopbackText = isSwapped ? EL.t : EL.f;
+                            const exitText = isSwapped ? EL.f : EL.t;
+
+                            addEdge(currentLoop.id, preLoopNodes[0].id, loopbackText, "s-right", "t-top");
+                            pendingExits = [{ id: currentLoop.id, text: exitText, handle: "s-bottom" }];
+                        }
+                    }
+
+                    if (!isDoWhile) {
+                        const ports = getConditionPorts(currentLoop.id, currentLoop.isNot);
+                        let trueTargetHandle = "t-top";
+                        if (currentLoop.mergeId) trueTargetHandle = "t-top"; 
+
+                        pendingExits.forEach(exit => {
+                            let returnHandle = exit.id === currentLoop.id ? ports.tHandle : exit.handle;
+                            addEdge(exit.id, currentLoop.mergeId || currentLoop.id, exit.text, returnHandle, trueTargetHandle);
+                        });
+                        pendingExits = [{ id: currentLoop.id, text: ports.fText, handle: ports.fHandle }];
+                    }
                 }
             }
             else {
@@ -561,26 +1005,55 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             pendingExits = [];
         }
 
-        globalGroupX += 600;
+        const currentFragmentNodes = outNodes.slice(blockStartIndex);
+        const previousNodes = outNodes.slice(0, blockStartIndex);
+
+        const hardcodedMargin = 60;
+        if (previousNodes.length > 0 && currentFragmentNodes.length > 0) {
+            const hasOverlap = currentFragmentNodes.some(curr =>
+                previousNodes.some(prev => checkOverlap(curr, prev))
+            );
+
+            if (hasOverlap) {
+                const maxPrevRight = Math.max(...previousNodes.map(n => getNodeBounds(n).right));
+                const minCurrLeft = Math.min(...currentFragmentNodes.map(n => getNodeBounds(n).left));
+                const targetLeft = maxPrevRight + hardcodedMargin;
+                const shiftX = targetLeft - minCurrLeft;
+                if (shiftX > 0) {
+                    currentFragmentNodes.forEach(n => {
+                        n.x += shiftX;
+                    });
+                }
+            }
+        }
+
+        const currentMaxRight = currentFragmentNodes.length > 0
+            ? Math.max(...currentFragmentNodes.map(n => getNodeBounds(n).right))
+            : globalGroupX;
+        const currentMaxBottom = currentFragmentNodes.length > 0
+            ? Math.max(...currentFragmentNodes.map(n => getNodeBounds(n).bottom))
+            : yOffset;
+        globalGroupX = Math.max(globalGroupX, currentMaxRight + hardcodedMargin);
+        lastBlockMaxY = Math.max(lastBlockMaxY, currentMaxBottom, yOffset);
     });
 
     let xml = `<mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">\n  <root>\n    <mxCell id="0" />\n    <mxCell id="1" parent="0" />\n`;
 
 
     outNodes.forEach(n => {
-        let w = n.w || 120;
-        let h = n.h || 50;
-        if (!n.w) {
-            if (n.type === 'CONDITION') { w = 160; h = 80; }
-            if (n.type === 'START_END') { w = 100; h = 40; }
-            if (n.type === 'COMMENT') { w = 160; h = 40; }
-            if (n.type === 'MERGE') { w = 10; h = 10; }
-        }
+        let w = n.w || (n.type === 'CONDITION' ? 160 : (n.type === 'START_END' ? 180 : 160));
+        let h = n.h || (n.type === 'CONDITION' ? 80 : 50);
+        if (n.type === 'COMMENT') { w = n.w || 160; h = n.h || 50; }
+        if (n.type === 'MERGE') { w = 10; h = 10; }
 
         let style = STYLES[n.type] || n.type;
         if (n.mode) style += `mode=${n.mode};`;
         if (n.entityType) style += `entityType=${n.entityType};`;
         if (n.ioType) style += `ioType=${n.ioType};`; 
+        if (n.isSwapped !== undefined) style += `isSwapped=${n.isSwapped};`; 
+        if (n.type === 'FOR_CONTAINER') {
+            style += `forInit=${encodeURIComponent(n.forInit || 'i = 0')};forLimit=${encodeURIComponent(n.forLimit || '10')};forStep=${encodeURIComponent(n.forStep || '1')};`;
+        }
 
         let extraAttrs = "";
         if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER') {
@@ -614,6 +1087,10 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
     outEdges.forEach(e => {
         let style = STYLES.EDGE + `sourceHandle=${e.sourceHandle};targetHandle=${e.targetHandle};`;
+        const srcNode = outNodes.find(n => n.id === e.source);
+        if (srcNode && srcNode.type === 'CONDITION') {
+            style += 'isCondition=true;';
+        }
 
         if (e.targetHandle === 't-right') style += "entryX=1;entryY=0.5;entryDx=0;entryDy=0;";
         else if (e.targetHandle === 't-left') style += "entryX=0;entryY=0.5;entryDx=0;entryDy=0;";

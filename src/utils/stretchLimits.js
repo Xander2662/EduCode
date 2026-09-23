@@ -46,6 +46,7 @@ export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, 
     let totalNestedW = 0, totalNestedH = 0;
     let actionBlockCount = 0;
     let maxBlockW = 0, maxBlockH = 0;
+    let sumBlockH = 0;
 
     ownedNodes.forEach(n => {
         let { w, h, isContainer } = getNodeDimensions(n);
@@ -54,9 +55,11 @@ export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, 
         
         if (n.type === 'CONDITION' || n.type === 'IF') {
             hasIf = true;
-            w += 320; // The IF block statically demands +320px of layout space to its right
-            h += 50;  // Extra vertical space
         }
+
+        sumBlockH += h;
+        maxBlockW = Math.max(maxBlockW, w);
+        maxBlockH = Math.max(maxBlockH, h);
 
         // Track maxOwned bounds (includes dragging nodes) for anti-collapse logic
         maxOwnedX = Math.max(maxOwnedX, nx + w);
@@ -78,9 +81,6 @@ export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, 
             } else if (n.type === 'ACTION' || n.type === 'IO') {
                 actionBlockCount++;
             }
-            
-            maxBlockW = Math.max(maxBlockW, w);
-            maxBlockH = Math.max(maxBlockH, h);
         }
     });
 
@@ -101,29 +101,60 @@ export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, 
         EXTRA_H = 0;
     }
 
-    // 4. RESTORED BACK CATCH & ANTI-COLLAPSE LOGIC
-    const baseInchwormW = ownedNodes.length <= 1 ? 0 : EXTRA_W;
-    
-    // The inchworm "brick wall" MUST be anchored to the actual size of the contents (requiredWidth),
-    // otherwise it acts as a fixed wall at `baseWidth` and crushes the EXTRA_W gap to 0!
-    const hardMaxW = Math.max(baseWidth, requiredWidth + baseInchwormW + totalNestedW);
-    
-    // Y-axis stretching should allow just enough room to stack the next block vertically.
-    // A standard vertical drag margin of 120px below the currently stationary blocks is perfect.
-    const baseInchwormH = ownedNodes.length <= 1 ? 0 : 120;
-    const hardMaxH = Math.max(baseHeight, requiredHeight + baseInchwormH);
+    // 1. Natural base bounds (compact size required by structure)
+    let naturalW = baseWidth;
+    if (totalNestedW > 0) {
+        naturalW = Math.max(baseWidth, requiredWidth);
+    }
+    // Check if stationary nodes are placed in multiple side-by-side columns (overlapping in Y)
+    const hasSideBySideColumns = stationaryNodes.some((a, i) => {
+        const aY = a.positionAbsolute?.y || a.position.y;
+        const aH = a.measured?.height || a.height || 50;
+        return stationaryNodes.slice(i + 1).some(b => {
+            const bY = b.positionAbsolute?.y || b.position.y;
+            const bH = b.measured?.height || b.height || 50;
+            return (aY < bY + bH) && (aY + aH > bY);
+        });
+    });
+    if (hasSideBySideColumns) {
+        naturalW = Math.max(naturalW, requiredWidth);
+    }
 
-    // Temporary max stretch allows a wrapped block to be moved freely INWARD,
-    // but prevents stretching the container ANY FURTHER OUTWARD if it's beyond hard limits.
-    const maxAllowedW = Math.max(hardMaxW, currentContainerWidth);
-    const maxAllowedH = Math.max(hardMaxH, currentContainerHeight);
+    let naturalH = baseHeight;
+    const stackH = 60 + sumBlockH + ((ownedNodes.length - 1) * 60) + PADDING_BOTTOM;
+    if (ownedNodes.length > 1) {
+        naturalH = Math.max(baseHeight, Math.min(requiredHeight, stackH));
+    }
+    if (hasIf) {
+        naturalH += 60;
+    }
+    if (totalNestedH > 0) {
+        naturalH = Math.max(naturalH, requiredHeight);
+    }
 
-    // Runway uses requiredOwnedWidth so it DOES NOT automatically collapse when dragging starts
-    const runwayW = Math.max(baseWidth, requiredOwnedWidth + EXTRA_W);
-    const runwayH = Math.max(baseHeight, requiredOwnedHeight + EXTRA_H);
+    // 2. Maximum Stretch Limit (SSL ceiling):
+    // Allows container to stretch to overlap a block when dragged to the edge of natural bounds for the first time.
+    // Once reached or dropped, container holds that size as the temporary okay stretch, but stops overlapping any further.
+    const stretchAllowanceW = Math.max(maxBlockW + PADDING_SIDES * 2, 190);
+    const stretchAllowanceH = Math.max(maxBlockH + PADDING_BOTTOM * 2, 120);
 
-    const SSL_Width = Math.min(maxAllowedW, runwayW);
-    const SSL_Height = Math.min(maxAllowedH, runwayH);
+    const maxSSL_W = naturalW + (ownedNodes.length > 0 ? stretchAllowanceW : 0);
+    const maxSSL_H = naturalH + (ownedNodes.length > 0 ? stretchAllowanceH : 0);
+
+    const anyDragging = ownedNodes.some(n => n.dragging);
+
+    let SSL_Width;
+    let SSL_Height;
+
+    if (anyDragging) {
+        const targetW = Math.max(currentContainerWidth, requiredOwnedWidth);
+        const targetH = Math.max(currentContainerHeight, requiredOwnedHeight);
+        SSL_Width = Math.min(maxSSL_W, Math.max(naturalW, targetW));
+        SSL_Height = Math.min(maxSSL_H, Math.max(naturalH, targetH));
+    } else {
+        SSL_Width = Math.min(maxSSL_W, Math.max(naturalW, currentContainerWidth));
+        SSL_Height = Math.min(maxSSL_H, Math.max(naturalH, currentContainerHeight));
+    }
 
     return { SSL_Width, SSL_Height, ASL_Width: SSL_Width, ASL_Height: SSL_Height };
 }

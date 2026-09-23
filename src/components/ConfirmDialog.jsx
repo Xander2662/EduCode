@@ -26,7 +26,8 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   confirmVariant = 'danger',
-  zIndex = 9999
+  zIndex = 9999,
+  maxWidth = 'max-w-sm'
 }) {
   const contentInfo = info || desc;
 
@@ -67,7 +68,7 @@ export function ConfirmDialog({
       onClick={() => onCancel?.()}
     >
       <div
-        className="bg-white dark:bg-gray-800 p-4 rounded shadow-lg border border-gray-200 dark:border-gray-700 max-w-sm w-full animate-in fade-in zoom-in-95 duration-100"
+        className={`bg-white dark:bg-gray-800 p-4 rounded shadow-lg border border-gray-200 dark:border-gray-700 ${maxWidth} w-full animate-in fade-in zoom-in-95 duration-100`}
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="font-bold mb-2 text-gray-900 dark:text-gray-100">{title}</h3>

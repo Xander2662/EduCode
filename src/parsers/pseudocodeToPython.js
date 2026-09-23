@@ -4,6 +4,7 @@ export const parsePseudocodeToPython = (code) => {
     
     const lines = code.split('\n');
     let expectedPass = false;
+    let inCase = false;
 
     const getIndent = (lvl) => '    '.repeat(Math.max(0, lvl));
 
@@ -26,7 +27,7 @@ export const parsePseudocodeToPython = (code) => {
         }
 
         // Logic check for empty blocks
-        const isEndMarker = /^(ENDIF|ENDWHILE|ENDFOR|ELSE|ENDFUNCTION|ENDCLASS|END)/i.test(line);
+        const isEndMarker = /^(ENDIF|ENDWHILE|ENDFOR|ENDSWITCH|CASE|DEFAULT|ELSE|ENDFUNCTION|ENDCLASS|END)/i.test(line);
         if (expectedPass && isEndMarker) {
             pythonLines.push(`${getIndent(indentLevel)}pass`);
         }
@@ -39,6 +40,46 @@ export const parsePseudocodeToPython = (code) => {
 
         if (/^ENDIF/i.test(line) || /^ENDWHILE/i.test(line) || /^ENDFOR/i.test(line)) {
             indentLevel = Math.max(0, indentLevel - 1);
+            continue;
+        }
+
+        if (/^ENDSWITCH/i.test(line)) {
+            if (inCase) {
+                indentLevel = Math.max(0, indentLevel - 1);
+                inCase = false;
+            }
+            indentLevel = Math.max(0, indentLevel - 1);
+            continue;
+        }
+
+        if (/^SWITCH\s+/i.test(line)) {
+            let switchVar = line.replace(/^SWITCH\s+/i, '').trim();
+            pythonLines.push(`${getIndent(indentLevel)}match ${switchVar}:`);
+            indentLevel++;
+            expectedPass = true;
+            continue;
+        }
+
+        if (/^CASE\s+/i.test(line)) {
+            if (inCase) {
+                indentLevel = Math.max(0, indentLevel - 1);
+            }
+            inCase = true;
+            let caseVal = line.replace(/^CASE\s+/i, '').replace(/:$/, '').trim();
+            pythonLines.push(`${getIndent(indentLevel)}case ${caseVal}:`);
+            indentLevel++;
+            expectedPass = true;
+            continue;
+        }
+
+        if (/^DEFAULT/i.test(line)) {
+            if (inCase) {
+                indentLevel = Math.max(0, indentLevel - 1);
+            }
+            inCase = true;
+            pythonLines.push(`${getIndent(indentLevel)}case _:`);
+            indentLevel++;
+            expectedPass = true;
             continue;
         }
 
