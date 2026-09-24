@@ -29,6 +29,9 @@ function getNodeDimensions(n) {
         const defH = n.type === 'FOR_CONTAINER' ? 200 : (n.type === 'SWITCH_CONTAINER' ? 230 : 150);
         w = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || defW);
         h = n.style?.height ? parseInt(n.style.height) : (n.measured?.height || defH);
+    } else if (n.type === 'CONDITION' || n.type === 'IF') {
+        w = n.measured?.width || 160;
+        h = n.measured?.height || 80;
     }
     
     return { w, h, isContainer };
@@ -42,6 +45,7 @@ export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, 
     let rightmostIsContainer = false;
     let bottommostIsContainer = false;
     let hasIf = false;
+    let maxIfX = 0;
     
     let totalNestedW = 0, totalNestedH = 0;
     let actionBlockCount = 0;
@@ -54,7 +58,7 @@ export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, 
         
         if (n.type === 'CONDITION' || n.type === 'IF') {
             hasIf = true;
-            w += 320; // The IF block statically demands +320px of layout space to its right
+            maxIfX = Math.max(maxIfX, nx + w);
             h += 50;  // Extra vertical space
         }
 
@@ -106,7 +110,14 @@ export function calculateStretchLimits(ownedNodes, stationaryNodes, containerX, 
     
     // The inchworm "brick wall" MUST be anchored to the actual size of the contents (requiredWidth),
     // otherwise it acts as a fixed wall at `baseWidth` and crushes the EXTRA_W gap to 0!
-    const hardMaxW = Math.max(baseWidth, requiredWidth + baseInchwormW + totalNestedW);
+    const maxWithoutAddition = Math.max(baseWidth, requiredWidth + baseInchwormW + totalNestedW);
+
+    // Condition blocks provide horizontal branch headroom (+320px) in hardMaxW without statically inflating resting runwayW.
+    // For anti-infinite stretch when dragging the IF block itself, the IF position and its addition are bounded by maxWithoutAddition.
+    const rawIfPos = maxIfX > 0 ? (maxIfX - containerX) + PADDING_SIDES : 0;
+    const ifPosition = maxIfX > 0 ? Math.min(rawIfPos, maxWithoutAddition) : 0;
+    const ifBranchLimit = maxIfX > 0 ? ifPosition + 320 : 0;
+    const hardMaxW = Math.max(maxWithoutAddition, ifBranchLimit);
     
     // Y-axis stretching should allow just enough room to stack the next block vertically.
     // A standard vertical drag margin of 120px below the currently stationary blocks is perfect.

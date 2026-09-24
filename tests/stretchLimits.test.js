@@ -221,7 +221,7 @@ describe('calculateStretchLimits', () => {
         expect(result.ASL_Height).toBe(255);
     });
 
-    it('should include condition block layout demand (+320px) in container width', () => {
+    it('should allow horizontal max stretch for condition branch without forcing resting margin', () => {
         const baseW = 350;
         const baseH = 200;
         const containerX = 593;
@@ -243,11 +243,33 @@ describe('calculateStretchLimits', () => {
         const ownedNodes = [condBlock, actionBlock];
         const stationaryNodes = [condBlock, actionBlock];
 
+        // 1. Resting width: condition block does NOT force +320px dead zone when stationary
         const result = calculateStretchLimits(ownedNodes, stationaryNodes, containerX, containerY, baseW, baseH, baseW, baseH);
+        expect(result.SSL_Width).toBe(350);
+        expect(result.ASL_Width).toBe(350);
 
-        // Condition block demands +320px: (613 + 160 + 320 - 593) + 35 = 535
-        expect(result.SSL_Width).toBe(535);
-        expect(result.ASL_Width).toBe(535);
+        // 2. Dragging block into condition branch: allows stretching up to branch capacity (535px)
+        const branchBlock = {
+            id: 'act1',
+            type: 'ACTION',
+            position: { x: 800, y: 505 },
+            measured: { width: 120, height: 50 },
+            dragging: true
+        };
+        const dragResult = calculateStretchLimits([condBlock, branchBlock], [condBlock], containerX, containerY, baseW, baseH, baseW, baseH);
+        // (800 + 120 - 593) + 35 = 362
+        expect(dragResult.SSL_Width).toBe(362);
+
+        // 3. Dragging past branch capacity caps at hardMaxW (535px)
+        const farBranchBlock = {
+            id: 'act1',
+            type: 'ACTION',
+            position: { x: 1200, y: 505 },
+            measured: { width: 120, height: 50 },
+            dragging: true
+        };
+        const farResult = calculateStretchLimits([condBlock, farBranchBlock], [condBlock], containerX, containerY, baseW, baseH, baseW, baseH);
+        expect(farResult.SSL_Width).toBe(535);
     });
 
     it('should constrain dragging block within maxAllowedW when single node is dragged', () => {
@@ -369,6 +391,37 @@ describe('calculateStretchLimits', () => {
         // It must NOT overlap any further. It stays capped at 540!
         expect(dragAgainResult.SSL_Width).toBe(540);
         expect(dragAgainResult.ASL_Width).toBe(540);
+    });
+
+    it('should cap stretch when dragging condition block itself to prevent infinite stretch', () => {
+        const baseW = 350;
+        const baseH = 200;
+        const containerX = 100;
+        const containerY = 100;
+
+        // Condition block dragged far to the right (x = 1200)
+        const farCondBlock = {
+            id: 'cond1',
+            type: 'CONDITION',
+            position: { x: 1200, y: 150 },
+            measured: { width: 160, height: 80 },
+            dragging: true
+        };
+
+        const result = calculateStretchLimits([farCondBlock], [], containerX, containerY, baseW, baseH, baseW, baseH);
+
+        // maxWithoutAddition is 350. ifPosition is capped at 350. ifBranchLimit is 350 + 320 = 670.
+        expect(result.SSL_Width).toBe(670);
+        expect(result.ASL_Width).toBe(670);
+
+        // Dragged even further to x = 2000, stays capped at 670
+        const evenFurtherCondBlock = {
+            ...farCondBlock,
+            position: { x: 2000, y: 150 }
+        };
+        const furtherResult = calculateStretchLimits([evenFurtherCondBlock], [], containerX, containerY, baseW, baseH, baseW, baseH);
+        expect(furtherResult.SSL_Width).toBe(670);
+        expect(furtherResult.ASL_Width).toBe(670);
     });
 });
 
