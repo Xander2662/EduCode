@@ -233,4 +233,117 @@ describe('diagramToPseudocode', () => {
         expect(endForIdx).toBeGreaterThan(-1);
         expect(endIfIdx).toBeLessThan(endForIdx);
     });
+
+    it('vytvoří automatický fragment pro prázdný WHILE kontejner', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="loop" value="x &gt; 0" type="LOOP_CONTAINER" style="LOOP_CONTAINER;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="300" height="200" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const { code, errors } = parseDrawioToPseudocode(xml);
+        expect(code).toContain('FUNCTION fragment_1()');
+        expect(code).toContain('WHILE x > 0 DO');
+        expect(code).toContain('ENDWHILE');
+        expect(code).toContain('ENDFUNCTION');
+        expect(errors).toContain('Diagram neobsahuje počáteční blok. Byly vytvořeny automatické fragmenty.');
+    });
+
+    it('vytvoří automatický fragment pro prázdný FOR kontejner', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="for1" value="" type="FOR_CONTAINER" style="FOR_CONTAINER;forInit=i%20%3D%200;forLimit=5;forStep=1;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="300" height="200" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const { code, errors } = parseDrawioToPseudocode(xml);
+        expect(code).toContain('FUNCTION fragment_1()');
+        expect(code).toContain('FOR i = 0 TO 5 DO');
+        expect(code).toContain('ENDFOR');
+        expect(code).toContain('ENDFUNCTION');
+        expect(errors).toContain('Diagram neobsahuje počáteční blok. Byly vytvořeny automatické fragmenty.');
+    });
+
+    it('vytvoří automatický fragment pro prázdný SWITCH kontejner s prázdnými casy', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="sw" value="x" type="SWITCH_CONTAINER" style="SWITCH_CONTAINER;switchVar=x;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="400" height="250" as="geometry"/>
+            </mxCell>
+            <mxCell id="c1" value="Case 1" type="CASE_CONTAINER" style="CASE_CONTAINER;caseVal=1;" vertex="1" parent="sw">
+                <mxGeometry x="20" y="50" width="150" height="150" as="geometry"/>
+            </mxCell>
+            <mxCell id="c2" value="Case default" type="CASE_CONTAINER" style="CASE_CONTAINER;isDefault=true;" vertex="1" parent="sw">
+                <mxGeometry x="200" y="50" width="150" height="150" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const { code, errors } = parseDrawioToPseudocode(xml);
+        expect(code).toContain('FUNCTION fragment_1()');
+        expect(code).toContain('SWITCH x');
+        expect(code).toContain('CASE 1:');
+        expect(code).toContain('DEFAULT:');
+        expect(code).toContain('ENDSWITCH');
+        expect(code).toContain('ENDFUNCTION');
+        expect(errors).toContain('Diagram neobsahuje počáteční blok. Byly vytvořeny automatické fragmenty.');
+    });
+
+    it('vytvoří automatický fragment pro plovoucí prázdnou skupinu vedle hlavní funkce', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="start" value="main" type="START_END" mode="start" vertex="1" parent="1"><mxGeometry x="100" y="100"/></mxCell>
+            <mxCell id="act" value="a = 1" type="ACTION" vertex="1" parent="1"><mxGeometry x="100" y="200"/></mxCell>
+            <mxCell id="end" value="ENDFUNCTION" type="START_END" mode="end" vertex="1" parent="1"><mxGeometry x="100" y="300"/></mxCell>
+            <mxCell id="e1" source="start" target="act" edge="1" parent="1"/>
+            <mxCell id="e2" source="act" target="end" edge="1" parent="1"/>
+            <mxCell id="loop" value="count &lt; 10" type="LOOP_CONTAINER" style="LOOP_CONTAINER;" vertex="1" parent="1">
+                <mxGeometry x="500" y="100" width="300" height="200" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const { code, errors } = parseDrawioToPseudocode(xml);
+        expect(code).toContain('FUNCTION main()');
+        expect(code).toContain('a = 1');
+        expect(code).toContain('FUNCTION fragment_1()');
+        expect(code).toContain('WHILE count < 10 DO');
+        expect(code).toContain('ENDWHILE');
+        expect(errors.length).toBe(0);
+    });
+
+    it('nevytvoří duplicitní fragmenty ani duplicitní hlavičky pro vnořenou skupinu', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="outer" value="x &gt; 0" type="LOOP_CONTAINER" style="LOOP_CONTAINER;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="400" height="300" as="geometry"/>
+            </mxCell>
+            <mxCell id="inner" value="" type="FOR_CONTAINER" style="FOR_CONTAINER;forInit=i%20%3D%200;forLimit=5;forStep=1;" vertex="1" parent="1">
+                <mxGeometry x="150" y="150" width="200" height="150" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const { code } = parseDrawioToPseudocode(xml);
+        expect(code).toContain('FUNCTION fragment_1()');
+        expect(code).not.toContain('fragment_2');
+        // Only one WHILE header
+        const whileMatches = code.match(/WHILE x > 0 DO/g);
+        expect(whileMatches?.length).toBe(1);
+        // Only one FOR header
+        const forMatches = code.match(/FOR i = 0 TO 5 DO/g);
+        expect(forMatches?.length).toBe(1);
+    });
+
+    it('nevytváří duplicitní hlavičky pro skupiny s bloky', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="for1" value="" type="FOR_CONTAINER" style="FOR_CONTAINER;forInit=i%20%3D%200;forLimit=10;forStep=1;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="300" height="200" as="geometry"/>
+            </mxCell>
+            <mxCell id="act" value="y = y + 1" type="ACTION" vertex="1" parent="1">
+                <mxGeometry x="150" y="150" width="120" height="50" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const { code } = parseDrawioToPseudocode(xml);
+        const forMatches = code.match(/FOR i = 0 TO 10 DO/g);
+        expect(forMatches?.length).toBe(1);
+        expect(code).toContain('y = y + 1');
+        const endForMatches = code.match(/ENDFOR/g);
+        expect(endForMatches?.length).toBe(1);
+    });
 });

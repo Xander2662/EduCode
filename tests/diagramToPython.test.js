@@ -56,4 +56,74 @@ describe('diagramToPython parser', () => {
         expect(res.code).toContain('    y = input()');
         expect(res.code).toContain('    print(z)');
     });
+
+    it('should generate automatic fragment for empty WHILE container in Python', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="loop" value="count &lt; 5" type="LOOP_CONTAINER" style="LOOP_CONTAINER;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="300" height="200" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const res = parseDrawioToPython(xml);
+        expect(res.code).toContain('def fragment_1():');
+        expect(res.code).toContain('while count < 5:');
+        expect(res.code).toContain('    pass');
+        expect(res.errors).toContain('Diagram neobsahuje počáteční blok. Byly vytvořeny automatické fragmenty.');
+    });
+
+    it('should generate automatic fragment for empty FOR container in Python', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="for1" value="" type="FOR_CONTAINER" style="FOR_CONTAINER;forInit=i%20%3D%200;forLimit=10;forStep=1;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="300" height="200" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const res = parseDrawioToPython(xml);
+        expect(res.code).toContain('def fragment_1():');
+        expect(res.code).toContain('for i in range(0, 11):');
+        expect(res.code).toContain('    pass');
+        expect(res.errors).toContain('Diagram neobsahuje počáteční blok. Byly vytvořeny automatické fragmenty.');
+    });
+
+    it('should generate automatic fragment for empty SWITCH container in Python', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="sw" value="opt" type="SWITCH_CONTAINER" style="SWITCH_CONTAINER;switchVar=opt;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="400" height="250" as="geometry"/>
+            </mxCell>
+            <mxCell id="c1" value="Case 1" type="CASE_CONTAINER" style="CASE_CONTAINER;caseVal=1;" vertex="1" parent="sw">
+                <mxGeometry x="20" y="50" width="150" height="150" as="geometry"/>
+            </mxCell>
+            <mxCell id="c2" value="Case default" type="CASE_CONTAINER" style="CASE_CONTAINER;isDefault=true;" vertex="1" parent="sw">
+                <mxGeometry x="200" y="50" width="150" height="150" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const res = parseDrawioToPython(xml);
+        expect(res.code).toContain('def fragment_1():');
+        expect(res.code).toContain('match opt:');
+        expect(res.code).toContain('    case 1:');
+        expect(res.code).toContain('    case _:');
+        expect(res.code).toContain('        pass');
+        expect(res.errors).toContain('Diagram neobsahuje počáteční blok. Byly vytvořeny automatické fragmenty.');
+    });
+
+    it('nevytvoří duplicitní fragmenty pro vnořenou skupinu v Pythonu', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="outer" value="x &gt; 0" type="LOOP_CONTAINER" style="LOOP_CONTAINER;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="400" height="300" as="geometry"/>
+            </mxCell>
+            <mxCell id="inner" value="" type="FOR_CONTAINER" style="FOR_CONTAINER;forInit=i%20%3D%200;forLimit=5;forStep=1;" vertex="1" parent="1">
+                <mxGeometry x="150" y="150" width="200" height="150" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const res = parseDrawioToPython(xml);
+        expect(res.code).toContain('def fragment_1():');
+        expect(res.code).not.toContain('fragment_2');
+        const whileMatches = res.code.match(/while x > 0:/g);
+        expect(whileMatches?.length).toBe(1);
+        const forMatches = res.code.match(/for i in range\(0, 6\):/g);
+        expect(forMatches?.length).toBe(1);
+    });
 });
+

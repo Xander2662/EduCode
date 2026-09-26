@@ -225,14 +225,17 @@ export const parseDrawioToPseudocode = (xml) => {
 
     const loopContainers = Object.values(nodes).filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
     const isInsideLoop = (node, loop) => {
-        if (!node || !loop) return false;
+        if (!node || !loop || node.id === loop.id) return false;
         if (node.type === 'START' || node.type === 'START_END' || node.type === 'END') return false;
         const nW = node.width || 100;
         const nH = node.height || 50;
-        const centerX = node.x + nW / 2;
-        const centerY = node.y + nH / 2;
         const loopW = loop.width || 300;
         const loopH = loop.height || 150;
+        if ((node.type === 'LOOP_CONTAINER' || node.type === 'FOR_CONTAINER' || node.type === 'SWITCH_CONTAINER') && (nW * nH >= loopW * loopH)) {
+            return false;
+        }
+        const centerX = node.x + nW / 2;
+        const centerY = node.y + nH / 2;
         const isInside = (centerX < loop.x + loopW && centerX > loop.x && centerY < loop.y + loopH && centerY > loop.y);
         return isInside;
     };
@@ -323,10 +326,36 @@ export const parseDrawioToPseudocode = (xml) => {
             let curr = q.shift();
             const node = nodes[curr];
             if (node) {
+                if (node.type === 'LOOP_CONTAINER' || node.type === 'FOR_CONTAINER') {
+                    Object.values(nodes).forEach(inNode => {
+                        if (inNode.id !== node.id && !assigned.has(inNode.id) && isInsideLoop(inNode, node)) {
+                            assigned.add(inNode.id);
+                            q.push(inNode.id);
+                        }
+                    });
+                }
+                if (node.type === 'SWITCH_CONTAINER') {
+                    Object.values(nodes).forEach(inNode => {
+                        if (inNode.parentId === node.id && !assigned.has(inNode.id)) {
+                            assigned.add(inNode.id);
+                            q.push(inNode.id);
+                        }
+                    });
+                }
+                if (node.type === 'CASE_CONTAINER') {
+                    Object.values(nodes).forEach(inNode => {
+                        if (inNode.parentId === node.id && !assigned.has(inNode.id)) {
+                            assigned.add(inNode.id);
+                            q.push(inNode.id);
+                        }
+                    });
+                }
+
                 const insideLoops = loopContainers.filter(l => isInsideLoop(node, l));
                 insideLoops.forEach(l => {
+                    assigned.add(l.id);
                     Object.values(nodes).forEach(inNode => {
-                        if (!assigned.has(inNode.id) && !isIgnoredRootType(inNode.type) && inNode.prev.length === 0 && isInsideLoop(inNode, l)) {
+                        if (inNode.id !== l.id && !assigned.has(inNode.id) && isInsideLoop(inNode, l)) {
                             assigned.add(inNode.id);
                             q.push(inNode.id);
                         }
@@ -349,11 +378,29 @@ export const parseDrawioToPseudocode = (xml) => {
 
     const realStartsCount = startNodes.length;
 
-    let roots = Object.values(nodes)
-        .filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type))
-        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    const isNestedContainer = (containerNode) => {
+        if (loopContainers.some(l => l.id !== containerNode.id && isInsideLoop(containerNode, l))) {
+            return true;
+        }
+        if (containerNode.parentId && containerNode.parentId !== '0' && containerNode.parentId !== '1') {
+            return true;
+        }
+        return false;
+    };
+
+    const unassignedTopContainers = Object.values(nodes).filter(n =>
+        !assigned.has(n.id) &&
+        !isNestedContainer(n) &&
+        (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER')
+    );
+
+    let candidateRoots = [
+        ...Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type) && !loopContainers.some(l => isInsideLoop(n, l))),
+        ...unassignedTopContainers
+    ].sort((a, b) => (a.y - b.y) || (a.x - b.x));
     
-    roots.forEach(r => {
+    candidateRoots.forEach(r => {
+        if (assigned.has(r.id)) return;
         while (usedFuncNames.has(`fragment_${clusterId}`)) {
             clusterId++;
         }
@@ -367,6 +414,11 @@ export const parseDrawioToPseudocode = (xml) => {
         startNodes.push(nodes[ghostId]);
         clusterId++;
         
+        assigned.add(r.id);
+        if (r.type === 'SWITCH_CONTAINER') {
+            const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && n.parentId === r.id);
+            cases.forEach(c => assigned.add(c.id));
+        }
         markCluster(r.id);
     });
 
@@ -593,7 +645,7 @@ export const parseDrawioToPseudocode = (xml) => {
             loopsToEnter.forEach(l => {
                 if (l.type === 'FOR_CONTAINER') {
                     const stepText = (l.forStep && l.forStep !== '1' && l.forStep !== '+1') ? ` STEP ${l.forStep}` : '';
-                    appendLine(`${indent}FOR ${l.forInit || ''} TO ${l.forLimit || ''}${stepText} DO`, l.id);
+                    appendLine(`${indent}FOR ${l.forInit || 'i = 0'} TO ${l.forLimit || '10'}${stepText} DO`, l.id);
                 } else if (l.doWhile) {
                     l.startLineIndex = codeLines.length;
                 } else {
@@ -667,6 +719,70 @@ export const parseDrawioToPseudocode = (xml) => {
 
                 if (mergeNode && !inPath.has(mergeNode)) {
                     traverse(mergeNode, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], minLoopDepth);
+                }
+            }
+            else if (node.type === 'LOOP_CONTAINER') {
+                printCommentsBeforeY(node.y, indent);
+                let cond = node.value !== undefined ? node.value : "x > 0";
+                appendLine(`${indent}WHILE ${cond} DO`, node.id);
+
+                currentLoopStack.push(node);
+
+                const directChildren = Object.values(nodes).filter(child => {
+                    if (child.id === node.id) return false;
+                    if (child.type === 'START' || child.type === 'START_END' || child.type === 'END' || child.type === 'COMMENT' || child.type === 'MERGE') return false;
+                    if (!isInsideLoop(child, node)) return false;
+                    const isInsideSub = loopContainers.some(sub => sub.id !== node.id && sub.id !== child.id && isInsideLoop(sub, node) && isInsideLoop(child, sub));
+                    if (isInsideSub) return false;
+                    return true;
+                });
+
+                if (directChildren.length > 0) {
+                    directChildren.sort((a, b) => a.y - b.y || a.x - b.x);
+                    directChildren.forEach(child => {
+                        if (!visited.has(child.id)) {
+                            traverse(child.id, indent + "    ", new Set(inPath), stopId, currentScope, [...currentLoopStack], currentLoopStack.length);
+                        }
+                    });
+                }
+
+                currentLoopStack.pop();
+
+                appendLine(`${indent}ENDWHILE`, node.id);
+                if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
+                    traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], minLoopDepth);
+                }
+            }
+            else if (node.type === 'FOR_CONTAINER') {
+                printCommentsBeforeY(node.y, indent);
+                const stepText = (node.forStep && node.forStep !== '1' && node.forStep !== '+1') ? ` STEP ${node.forStep}` : '';
+                appendLine(`${indent}FOR ${node.forInit || 'i = 0'} TO ${node.forLimit || '10'}${stepText} DO`, node.id);
+
+                currentLoopStack.push(node);
+
+                const directChildren = Object.values(nodes).filter(child => {
+                    if (child.id === node.id) return false;
+                    if (child.type === 'START' || child.type === 'START_END' || child.type === 'END' || child.type === 'COMMENT' || child.type === 'MERGE') return false;
+                    if (!isInsideLoop(child, node)) return false;
+                    const isInsideSub = loopContainers.some(sub => sub.id !== node.id && sub.id !== child.id && isInsideLoop(sub, node) && isInsideLoop(child, sub));
+                    if (isInsideSub) return false;
+                    return true;
+                });
+
+                if (directChildren.length > 0) {
+                    directChildren.sort((a, b) => a.y - b.y || a.x - b.x);
+                    directChildren.forEach(child => {
+                        if (!visited.has(child.id)) {
+                            traverse(child.id, indent + "    ", new Set(inPath), stopId, currentScope, [...currentLoopStack], currentLoopStack.length);
+                        }
+                    });
+                }
+
+                currentLoopStack.pop();
+
+                appendLine(`${indent}ENDFOR`, node.id);
+                if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
+                    traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], minLoopDepth);
                 }
             }
             else if (node.type === 'CONDITION') {

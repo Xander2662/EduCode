@@ -49,7 +49,7 @@ describe('Pseudocode to Diagram Parser - Dynamic Y Auto-Layout', () => {
     });
 
     it('Měl by zajistit, že LOOP_CONTAINER nepřekrývá blok START FUNCTION nad ním', () => {
-        const code = `FUNCTION fragment_1()\n  WHILE x > 0 DO\n    x = x - 1\n  ENDWHILE\nENDFUNCTION`;
+        const code = `FUNCTION main()\n  WHILE x > 0 DO\n    x = x - 1\n  ENDWHILE\nENDFUNCTION`;
         const result = parsePseudocodeToDrawio(code, null, 'true-false', 'hexagon', 'simple');
         
         const parser = new DOMParser();
@@ -68,5 +68,48 @@ describe('Pseudocode to Diagram Parser - Dynamic Y Auto-Layout', () => {
         
         // Mezi spodkem START a vrškem kontejneru musí být minimálně 35 px odstup
         expect(loopTop).toBeGreaterThanOrEqual(startBottom + 35);
+    });
+
+    it('pro samostatné smyčky (WHILE/FOR) v simple módu nespawnuje fragment start/end bloky', () => {
+        const code = `FUNCTION fragment_1()\n  WHILE x > 0 DO\n    x = x - 1\n  ENDWHILE\nENDFUNCTION`;
+        const result = parsePseudocodeToDrawio(code, null, 'true-false', 'hexagon', 'simple');
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(result.xml, "text/xml");
+        const startEndCells = Array.from(doc.querySelectorAll('mxCell[style*="ellipse"]'));
+        const loopCell = doc.querySelector('mxCell[style*="LOOP_CONTAINER"]');
+        
+        expect(loopCell).not.toBeNull();
+        expect(startEndCells.length).toBe(0);
+    });
+
+    it('pro samostatnou FOR smyčku v simple módu nespawnuje fragment start/end bloky', () => {
+        const code = `FUNCTION fragment_1()\n  FOR i = 0 TO 10 DO\n    PRINT(i)\n  ENDFOR\nENDFUNCTION`;
+        const result = parsePseudocodeToDrawio(code, null, 'true-false', 'hexagon', 'simple');
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(result.xml, "text/xml");
+        const startEndCells = Array.from(doc.querySelectorAll('mxCell[style*="ellipse"]'));
+        const forCell = doc.querySelector('mxCell[style*="FOR_CONTAINER"]');
+        
+        expect(forCell).not.toBeNull();
+        expect(startEndCells.length).toBe(0);
+    });
+
+    it('spawnuje fragment start/end bloky pro loop skupinu pouze když je připojen další připojitelný blok', () => {
+        const code = `FUNCTION fragment_1()\n  x = 10\n  WHILE x > 0 DO\n    x = x - 1\n  ENDWHILE\nENDFUNCTION`;
+        const result = parsePseudocodeToDrawio(code, null, 'true-false', 'hexagon', 'simple');
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(result.xml, "text/xml");
+        const startCell = doc.querySelector('mxCell[style*="mode=start"]');
+        const endCell = doc.querySelector('mxCell[style*="mode=end"]');
+        const loopCell = doc.querySelector('mxCell[style*="LOOP_CONTAINER"]');
+        const actCell = doc.querySelector('mxCell[value="x = 10"]');
+        
+        expect(startCell).not.toBeNull();
+        expect(endCell).not.toBeNull();
+        expect(loopCell).not.toBeNull();
+        expect(actCell).not.toBeNull();
     });
 });

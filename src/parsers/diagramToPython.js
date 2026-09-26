@@ -207,16 +207,19 @@ export const parseDrawioToPython = (xml) => {
 
     const loopContainers = Object.values(nodes).filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
     const isInsideLoop = (node, loop) => {
-        if (!node || !loop) return false;
+        if (!node || !loop || node.id === loop.id) return false;
         if (node.type === 'START' || node.type === 'START_END' || node.type === 'END') return false;
         const nW = node.width || 100;
         const nH = node.height || 50;
+        const loopW = loop.width || 300;
+        const loopH = loop.height || 150;
+        if ((node.type === 'LOOP_CONTAINER' || node.type === 'FOR_CONTAINER' || node.type === 'SWITCH_CONTAINER') && (nW * nH >= loopW * loopH)) {
+            return false;
+        }
         const coreW = nW * 0.5;
         const coreH = nH * 0.5;
         const coreX = node.x + (nW - coreW) / 2;
         const coreY = node.y + (nH - coreH) / 2;
-        const loopW = loop.width || 300;
-        const loopH = loop.height || 150;
         const isInside = (coreX < loop.x + loopW && coreX + coreW > loop.x && coreY < loop.y + loopH && coreY + coreH > loop.y);
         return isInside;
     };
@@ -307,10 +310,36 @@ export const parseDrawioToPython = (xml) => {
             let curr = q.shift();
             const node = nodes[curr];
             if (node) {
+                if (node.type === 'LOOP_CONTAINER' || node.type === 'FOR_CONTAINER') {
+                    Object.values(nodes).forEach(inNode => {
+                        if (inNode.id !== node.id && !assigned.has(inNode.id) && isInsideLoop(inNode, node)) {
+                            assigned.add(inNode.id);
+                            q.push(inNode.id);
+                        }
+                    });
+                }
+                if (node.type === 'SWITCH_CONTAINER') {
+                    Object.values(nodes).forEach(inNode => {
+                        if (inNode.parentId === node.id && !assigned.has(inNode.id)) {
+                            assigned.add(inNode.id);
+                            q.push(inNode.id);
+                        }
+                    });
+                }
+                if (node.type === 'CASE_CONTAINER') {
+                    Object.values(nodes).forEach(inNode => {
+                        if (inNode.parentId === node.id && !assigned.has(inNode.id)) {
+                            assigned.add(inNode.id);
+                            q.push(inNode.id);
+                        }
+                    });
+                }
+
                 const insideLoops = loopContainers.filter(l => isInsideLoop(node, l));
                 insideLoops.forEach(l => {
+                    assigned.add(l.id);
                     Object.values(nodes).forEach(inNode => {
-                        if (!assigned.has(inNode.id) && !isIgnoredRootType(inNode.type) && inNode.prev.length === 0 && isInsideLoop(inNode, l)) {
+                        if (inNode.id !== l.id && !assigned.has(inNode.id) && isInsideLoop(inNode, l)) {
                             assigned.add(inNode.id);
                             q.push(inNode.id);
                         }
@@ -333,9 +362,29 @@ export const parseDrawioToPython = (xml) => {
 
     const realStartsCount = startNodes.length;
 
-    let roots = Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type));
+    const isNestedContainer = (containerNode) => {
+        if (loopContainers.some(l => l.id !== containerNode.id && isInsideLoop(containerNode, l))) {
+            return true;
+        }
+        if (containerNode.parentId && containerNode.parentId !== '0' && containerNode.parentId !== '1') {
+            return true;
+        }
+        return false;
+    };
+
+    const unassignedTopContainers = Object.values(nodes).filter(n =>
+        !assigned.has(n.id) &&
+        !isNestedContainer(n) &&
+        (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER')
+    );
+
+    let candidateRoots = [
+        ...Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type) && !loopContainers.some(l => isInsideLoop(n, l))),
+        ...unassignedTopContainers
+    ].sort((a, b) => (a.y - b.y) || (a.x - b.x));
     
-    roots.forEach(r => {
+    candidateRoots.forEach(r => {
+        if (assigned.has(r.id)) return;
         while (usedFuncNames.has(`fragment_${clusterId}`)) {
             clusterId++;
         }
@@ -349,11 +398,20 @@ export const parseDrawioToPython = (xml) => {
         startNodes.push(nodes[ghostId]);
         clusterId++;
         
+        assigned.add(r.id);
+        if (r.type === 'SWITCH_CONTAINER') {
+            const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && n.parentId === r.id);
+            cases.forEach(c => assigned.add(c.id));
+        }
         markCluster(r.id);
     });
 
-    Object.values(nodes).forEach(n => {
-        if (!assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type)) {
+    const unassignedNodes = Object.values(nodes)
+        .filter(n => !assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type))
+        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+
+    unassignedNodes.forEach(n => {
+        if (!assigned.has(n.id)) {
             while (usedFuncNames.has(`fragment_${clusterId}`)) {
                 clusterId++;
             }
@@ -512,6 +570,7 @@ export const parseDrawioToPython = (xml) => {
                 printCommentsBeforeY(Infinity, indent + "    ");
             }
             else if (node.type === 'ACTION' || node.type === 'IO' || node.type === 'MERGE' || node.type === 'CASE_CONTAINER') {
+                const beforeCaseLines = codeLines.length;
                 if (node.type === 'CASE_CONTAINER') {
                     if (node.isDefault) appendLine(`${indent}case _:`, node.id);
                     else appendLine(`${indent}case ${node.caseVal || '1'}:`, node.id);
@@ -522,6 +581,9 @@ export const parseDrawioToPython = (xml) => {
                 
                 if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
                     traverse(node.next[0].target, indent, new Set(inPath), stopId);
+                }
+                if (node.type === 'CASE_CONTAINER' && codeLines.length === beforeCaseLines + 1) {
+                    appendLine(`${indent}pass`);
                 }
             }
             else if (node.type === 'SWITCH_CONTAINER') {
@@ -535,14 +597,99 @@ export const parseDrawioToPython = (xml) => {
                     mergeNode = node.next[0].target;
                 }
 
-                node.next.forEach(e => {
-                    if (!inPath.has(e.target)) {
-                        traverse(e.target, indent + "    ", new Set(inPath), mergeNode);
-                    }
-                });
+                if (node.next.length === 0) {
+                    appendLine(`${indent}    case _:`);
+                    appendLine(`${indent}        pass`);
+                } else {
+                    node.next.forEach(e => {
+                        if (!inPath.has(e.target)) {
+                            traverse(e.target, indent + "    ", new Set(inPath), mergeNode);
+                        }
+                    });
+                }
                 
                 if (mergeNode && !inPath.has(mergeNode)) {
                     traverse(mergeNode, indent, new Set(inPath), stopId);
+                }
+            }
+            else if (node.type === 'LOOP_CONTAINER') {
+                printCommentsBeforeY(node.y, indent);
+                let cond = (node.value || "").trim();
+                if (!cond) cond = "x > 0";
+                cond = formatCondition(cond);
+                appendLine(`${indent}while ${cond}:`, node.id);
+
+                const beforeBody = codeLines.length;
+                const directChildren = Object.values(nodes).filter(child => {
+                    if (child.id === node.id) return false;
+                    if (child.type === 'START' || child.type === 'START_END' || child.type === 'END' || child.type === 'COMMENT' || child.type === 'MERGE') return false;
+                    if (!isInsideLoop(child, node)) return false;
+                    const isInsideSub = loopContainers.some(sub => sub.id !== node.id && sub.id !== child.id && isInsideLoop(sub, node) && isInsideLoop(child, sub));
+                    if (isInsideSub) return false;
+                    return true;
+                });
+
+                if (directChildren.length > 0) {
+                    directChildren.sort((a, b) => a.y - b.y || a.x - b.x);
+                    directChildren.forEach(child => {
+                        if (!visited.has(child.id)) {
+                            traverse(child.id, indent + "    ", new Set(inPath), stopId);
+                        }
+                    });
+                }
+
+                if (codeLines.length === beforeBody) {
+                    appendLine(`${indent}    pass`);
+                }
+
+                if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
+                    traverse(node.next[0].target, indent, new Set(inPath), stopId);
+                }
+            }
+            else if (node.type === 'FOR_CONTAINER') {
+                printCommentsBeforeY(node.y, indent);
+                let loopVar = 'i';
+                let initVal = '0';
+                if (node.forInit) {
+                    const m = node.forInit.match(/^([a-zA-Z_]\w*)\s*(?:=|<-)\s*(.*)$/);
+                    if (m) {
+                        loopVar = m[1];
+                        initVal = m[2].trim();
+                    }
+                }
+                let toVal = (node.forLimit || '10').trim();
+                let rangeLimit = !isNaN(toVal) ? `${parseInt(toVal, 10) + 1}` : `${toVal} + 1`;
+                let stepArg = '';
+                if (node.forStep && node.forStep !== '1' && node.forStep !== '+1') {
+                    stepArg = `, ${node.forStep.trim()}`;
+                }
+                appendLine(`${indent}for ${loopVar} in range(${initVal}, ${rangeLimit}${stepArg}):`, node.id);
+
+                const beforeBody = codeLines.length;
+                const directChildren = Object.values(nodes).filter(child => {
+                    if (child.id === node.id) return false;
+                    if (child.type === 'START' || child.type === 'START_END' || child.type === 'END' || child.type === 'COMMENT' || child.type === 'MERGE') return false;
+                    if (!isInsideLoop(child, node)) return false;
+                    const isInsideSub = loopContainers.some(sub => sub.id !== node.id && sub.id !== child.id && isInsideLoop(sub, node) && isInsideLoop(child, sub));
+                    if (isInsideSub) return false;
+                    return true;
+                });
+
+                if (directChildren.length > 0) {
+                    directChildren.sort((a, b) => a.y - b.y || a.x - b.x);
+                    directChildren.forEach(child => {
+                        if (!visited.has(child.id)) {
+                            traverse(child.id, indent + "    ", new Set(inPath), stopId);
+                        }
+                    });
+                }
+
+                if (codeLines.length === beforeBody) {
+                    appendLine(`${indent}    pass`);
+                }
+
+                if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
+                    traverse(node.next[0].target, indent, new Set(inPath), stopId);
                 }
             }
             else if (node.type === 'CONDITION') {

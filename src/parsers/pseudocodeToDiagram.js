@@ -357,17 +357,53 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             }
         }
 
+        const isFragment = /^fragment_\d+$/i.test(funcName);
+
+        const isStandaloneLoopGroup = (lines) => {
+            if (lines.length === 0) return false;
+            const firstUpper = lines[0].toUpperCase();
+            if (!firstUpper.startsWith('WHILE ') && !firstUpper.startsWith('FOR ')) {
+                return false;
+            }
+            let depth = 0;
+            for (let idx = 0; idx < lines.length; idx++) {
+                const u = lines[idx].toUpperCase();
+                if (u.startsWith('WHILE ') || u.startsWith('FOR ')) {
+                    depth++;
+                } else if (u === 'ENDWHILE' || u === 'ENDFOR') {
+                    depth--;
+                    if (depth === 0) {
+                        return idx === lines.length - 1;
+                    }
+                }
+            }
+            return false;
+        };
+
+        const contentLines = blockLines.map(l => l.trim()).filter(l => 
+            l && !l.startsWith('#') && !l.startsWith('//') &&
+            l.toUpperCase() !== 'ENDFUNCTION' && l.toUpperCase() !== 'ENDCLASS' && l.toUpperCase() !== 'KONEC'
+        );
+
+        const isStandaloneLoop = editorMode === 'simple' && isFragment && isStandaloneLoopGroup(contentLines);
+
         let yOffset = lastBlockMaxY > 0 ? lastBlockMaxY + 100 : 40;
         let effectiveStartDefX = globalGroupX;
         const normalize = (t) => t.replace(/\(\)$/g, '').replace(/\s+/g, ' ').trim();
         let existingStart = existingNodes.find(n => !n.used && n.type === 'START_END' && normalize(n.val) === normalize(funcName || "main"));
-        if (!existingStart && /^fragment_\d+$/i.test(funcName)) {
+        if (!existingStart && isFragment && !isStandaloneLoop) {
             const unusedFragStarts = existingNodes.filter(n => !n.used && n.type === 'START_END' && /^fragment(_\d+)?$/i.test(normalize(n.val)));
             if (unusedFragStarts.length > 0) {
                 unusedFragStarts.sort((a, b) => a.x - b.x || a.y - b.y);
                 existingStart = unusedFragStarts[0];
             }
         }
+
+        let spawnStartEnd = true;
+        if (isStandaloneLoop && !existingStart) {
+            spawnStartEnd = false;
+        }
+
         if (existingStart) {
             effectiveStartDefX = existingStart.x;
             if (typeof existingStart.y === 'number' && !isNaN(existingStart.y)) {
@@ -384,28 +420,36 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                     effectiveStartDefX = firstMatched.x;
                 }
                 if (typeof firstMatched.y === 'number' && !isNaN(firstMatched.y)) {
-                    yOffset = Math.max(40, firstMatched.y - 100);
+                    yOffset = spawnStartEnd ? Math.max(40, firstMatched.y - 100) : firstMatched.y;
                 }
             }
         }
 
-        let startPos = getPos(funcName || "main", 'START_END', effectiveStartDefX, yOffset);
-        let startId = startPos.oldId;
-        outNodes.push({ id: startId, text: funcName || "main", type: 'START_END', x: startPos.x, y: startPos.y, mode: 'start', entityType });
-        
-        // Map the FUNCTION line to startId
-        for (let k = searchStartIdx; k < lines.length; k++) {
-            if (lines[k].toUpperCase().startsWith(firstUpper.startsWith('CLASS ') ? 'CLASS ' : 'FUNCTION ')) {
-                nodeLineMap[startId] = k;
-                searchStartIdx = k + 1;
-                break;
+        let startId = null;
+        let startPos = null;
+        if (spawnStartEnd) {
+            startPos = getPos(funcName || "main", 'START_END', effectiveStartDefX, yOffset);
+            startId = startPos.oldId;
+            outNodes.push({ id: startId, text: funcName || "main", type: 'START_END', x: startPos.x, y: startPos.y, mode: 'start', entityType });
+            
+            // Map the FUNCTION line to startId
+            for (let k = searchStartIdx; k < lines.length; k++) {
+                if (lines[k].toUpperCase().startsWith(firstUpper.startsWith('CLASS ') ? 'CLASS ' : 'FUNCTION ')) {
+                    nodeLineMap[startId] = k;
+                    searchStartIdx = k + 1;
+                    break;
+                }
+            }
+            yOffset = Math.max(140, startPos.y + 120);
+        } else {
+            if (typeof yOffset !== 'number' || isNaN(yOffset)) {
+                yOffset = lastBlockMaxY > 0 ? lastBlockMaxY + 100 : 40;
             }
         }
 
         let stack = [];
         let skipSet = new Set();
-        yOffset = Math.max(140, startPos.y + 120);
-        let pendingExits = [{ id: startId, text: "", handle: "s-bottom" }];
+        let pendingExits = spawnStartEnd ? [{ id: startId, text: "", handle: "s-bottom" }] : [];
 
         const addNode = (text, type, defaultX, extraProps = {}, originalLineText = null) => {
             // Find active case if any
@@ -454,7 +498,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         };
 
         const getXPos = () => {
-            let x = startPos.x;
+            let x = startPos ? startPos.x : effectiveStartDefX;
             for (let i = 0; i < stack.length; i++) {
                 if (stack[i].type === 'IF' && stack[i].trueExits !== null) x += 240;
                 if (stack[i].type === 'SWITCH' && stack[i].currentCaseX !== undefined) {
@@ -999,9 +1043,11 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             }
         }
 
-        if (hasEnd) {
+        if (hasEnd && spawnStartEnd) {
             const endId = addNode(endLineText, 'START_END', startPos.x, { mode: 'end' }, originalEndLine);
             pendingExits.forEach(exit => addEdge(exit.id, endId, exit.text, exit.handle, "t-top"));
+            pendingExits = [];
+        } else if (!spawnStartEnd) {
             pendingExits = [];
         }
 
