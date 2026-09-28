@@ -134,7 +134,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
     let currentBlockStartIndex = 0;
 
-    const getPos = (text, type, defX, currentY, originalId = null, isOutsideContainer = false) => {
+    const getPos = (text, type, defX, currentY, originalId = null, isOutsideContainer = false, isInsideSwitch = false) => {
         const normalize = (t) => t.replace(/\(\)$/g, '').replace(/\s+/g, ' ').trim();
         const normalizedTarget = normalize(text);
 
@@ -145,13 +145,19 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 const isCrossFromCond = ((type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER') && idMatch.type === 'CONDITION');
                 if (idMatch.type === type || isCrossFromContainer || isCrossFromCond) {
                     idMatch.used = true;
-                    const x = (isCrossFromContainer || (editorMode === 'simple' && isOutsideContainer && Math.abs(idMatch.x - defX) > 40)) ? defX : idMatch.x;
-                    const lastNode = outNodes.length > currentBlockStartIndex ? outNodes[outNodes.length - 1] : null;
-                    const lastH = lastNode ? (lastNode.type === 'CONDITION' ? (lastNode.h && lastNode.h <= 100 ? lastNode.h : 80) : (lastNode.h || 50)) : 0;
-                    const lastBottom = lastNode ? lastNode.y + lastH : 0;
-                    const y = (isCrossFromContainer || (lastNode && idMatch.y < lastBottom + 20))
-                        ? Math.max(lastBottom + 30, (typeof idMatch.y === 'number' && !isNaN(idMatch.y)) ? idMatch.y : currentY)
-                        : ((typeof idMatch.y === 'number' && !isNaN(idMatch.y)) ? idMatch.y : currentY);
+                    const x = (isCrossFromContainer || isInsideSwitch || (editorMode === 'simple' && isOutsideContainer && Math.abs(idMatch.x - defX) > 40)) ? defX : idMatch.x;
+                    let blockMaxBottom = 0;
+                    for (let bi = currentBlockStartIndex; bi < outNodes.length; bi++) {
+                        const bn = outNodes[bi];
+                        const bnh = bn.h || (bn.type === 'CONDITION' ? (bn.h && bn.h <= 100 ? bn.h : 80) : (bn.type === 'SWITCH_CONTAINER' ? 230 : (bn.type === 'LOOP_CONTAINER' || bn.type === 'FOR_CONTAINER' ? 200 : 50)));
+                        if (bn.y + bnh > blockMaxBottom) blockMaxBottom = bn.y + bnh;
+                    }
+                    const lastBottom = blockMaxBottom;
+                    const y = isInsideSwitch 
+                        ? currentY 
+                        : ((outNodes.length > currentBlockStartIndex && idMatch.y < lastBottom + 20)
+                            ? Math.max(lastBottom + 30, (typeof idMatch.y === 'number' && !isNaN(idMatch.y)) ? idMatch.y : currentY)
+                            : ((typeof idMatch.y === 'number' && !isNaN(idMatch.y)) ? idMatch.y : currentY));
                     return {
                         x,
                         y,
@@ -183,13 +189,20 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 });
                 const match = localCandidates[0];
                 match.used = true;
-                const lastNode = outNodes.length > currentBlockStartIndex ? outNodes[outNodes.length - 1] : null;
-                const lastH = lastNode ? (lastNode.type === 'CONDITION' ? (lastNode.h && lastNode.h <= 100 ? lastNode.h : 80) : (lastNode.h || 50)) : 0;
-                const lastBottom = lastNode ? lastNode.y + lastH : 0;
-                const y = (lastNode && match.y < lastBottom + 20)
-                    ? Math.max(lastBottom + 30, (typeof match.y === 'number' && !isNaN(match.y)) ? match.y : currentY)
-                    : ((typeof match.y === 'number' && !isNaN(match.y)) ? match.y : currentY);
-                return { x: match.x, y, matched: true, oldId: match.id, isSwapped: match.isSwapped, w: match.w, h: match.h };
+                const x = isInsideSwitch ? defX : match.x;
+                let blockMaxBottom = 0;
+                for (let bi = currentBlockStartIndex; bi < outNodes.length; bi++) {
+                    const bn = outNodes[bi];
+                    const bnh = bn.h || (bn.type === 'CONDITION' ? (bn.h && bn.h <= 100 ? bn.h : 80) : (bn.type === 'SWITCH_CONTAINER' ? 230 : (bn.type === 'LOOP_CONTAINER' || bn.type === 'FOR_CONTAINER' ? 200 : 50)));
+                    if (bn.y + bnh > blockMaxBottom) blockMaxBottom = bn.y + bnh;
+                }
+                const lastBottom = blockMaxBottom;
+                const y = isInsideSwitch 
+                    ? currentY 
+                    : ((outNodes.length > currentBlockStartIndex && match.y < lastBottom + 20)
+                        ? Math.max(lastBottom + 30, (typeof match.y === 'number' && !isNaN(match.y)) ? match.y : currentY)
+                        : ((typeof match.y === 'number' && !isNaN(match.y)) ? match.y : currentY));
+                return { x, y, matched: true, oldId: match.id, isSwapped: match.isSwapped, w: match.w, h: match.h };
             }
         }
 
@@ -211,6 +224,16 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 condCand.used = true;
                 const x = condCand.x - 95;
                 const y = (typeof condCand.y === 'number' && !isNaN(condCand.y)) ? Math.max(40, condCand.y - 40) : currentY;
+                return { x, y, matched: true, isFromCond: true, oldId: getNewId() };
+            }
+        }
+        // 3. In simple mode: SWITCH_CONTAINER can inherit position from existing switch CONDITION
+        if (type === 'SWITCH_CONTAINER') {
+            const condCand = existingNodes.find(n => !n.used && n.type === 'CONDITION' && (n.val?.startsWith(`${normalizedTarget} `) || n.val?.startsWith(`${normalizedTarget}==`) || n.val?.startsWith(`${normalizedTarget} =`)));
+            if (condCand) {
+                condCand.used = true;
+                const x = condCand.x;
+                const y = Math.max(40, condCand.y - 40);
                 return { x, y, matched: true, isFromCond: true, oldId: getNewId() };
             }
         }
@@ -362,15 +385,15 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         const isStandaloneLoopGroup = (lines) => {
             if (lines.length === 0) return false;
             const firstUpper = lines[0].toUpperCase();
-            if (!firstUpper.startsWith('WHILE ') && !firstUpper.startsWith('FOR ')) {
+            if (!firstUpper.startsWith('WHILE ') && !firstUpper.startsWith('FOR ') && !firstUpper.startsWith('SWITCH ')) {
                 return false;
             }
             let depth = 0;
             for (let idx = 0; idx < lines.length; idx++) {
                 const u = lines[idx].toUpperCase();
-                if (u.startsWith('WHILE ') || u.startsWith('FOR ')) {
+                if (u.startsWith('WHILE ') || u.startsWith('FOR ') || u.startsWith('SWITCH ')) {
                     depth++;
-                } else if (u === 'ENDWHILE' || u === 'ENDFOR') {
+                } else if (u === 'ENDWHILE' || u === 'ENDFOR' || u === 'ENDSWITCH') {
                     depth--;
                     if (depth === 0) {
                         return idx === lines.length - 1;
@@ -416,6 +439,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 const firstMatched = unusedNonStart[0];
                 if (firstMatched.type === 'LOOP_CONTAINER' || firstMatched.type === 'FOR_CONTAINER') {
                     effectiveStartDefX = firstMatched.x + 90;
+                } else if (firstMatched.type === 'SWITCH_CONTAINER') {
+                    effectiveStartDefX = firstMatched.x + 20;
                 } else {
                     effectiveStartDefX = firstMatched.x;
                 }
@@ -454,9 +479,13 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
         const addNode = (text, type, defaultX, extraProps = {}, originalLineText = null) => {
             // Find active case if any
             let parentIdAttr = '1';
+            let isInsideCase = false;
+            let currentCaseStartY = 0;
             for (let i = stack.length - 1; i >= 0; i--) {
                 if (stack[i].type === 'SWITCH' && stack[i].currentCaseId) {
                     parentIdAttr = stack[i].currentCaseId;
+                    isInsideCase = true;
+                    currentCaseStartY = stack[i].currentCaseStartY || 0;
                     break;
                 }
             }
@@ -473,11 +502,20 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             }
 
             const originalId = matchedLineIdx !== null ? getOriginalIdForLine(matchedLineIdx, originalLineText) : null;
-            const pos = getPos(text, type, defaultX, yOffset, originalId, stack.length === 0);
+            const isInsideSwitch = stack.some(s => s.type === 'SWITCH');
+            const pos = getPos(text, type, defaultX, yOffset, originalId, stack.length === 0, isInsideSwitch);
             const isSwapped = extraProps.isSwapped !== undefined ? extraProps.isSwapped : pos.isSwapped;
             const nodeW = extraProps.w !== undefined ? extraProps.w : pos.w;
             const nodeH = extraProps.h !== undefined ? extraProps.h : pos.h;
-            outNodes.push({ id: pos.oldId, text, type, x: pos.x, y: pos.y, matched: pos.matched, parentId: parentIdAttr, isSwapped, ...(nodeW ? { w: nodeW } : {}), ...(nodeH ? { h: nodeH } : {}), ...extraProps });
+
+            let finalX = pos.x;
+            let finalY = pos.y;
+            if (isInsideCase && type !== 'CASE_CONTAINER') {
+                finalX = (pos.matched && typeof pos.x === 'number' && pos.x >= 0 && pos.x <= 250) ? pos.x : 45;
+                finalY = (pos.matched && typeof pos.y === 'number' && pos.y >= 0 && pos.y <= 600) ? pos.y : Math.max(60, yOffset - currentCaseStartY);
+            }
+
+            outNodes.push({ id: pos.oldId, text, type, x: finalX, y: finalY, matched: pos.matched, parentId: parentIdAttr, isSwapped, ...(nodeW ? { w: nodeW } : {}), ...(nodeH ? { h: nodeH } : {}), ...extraProps });
             yOffset = Math.max(yOffset, pos.y) + (type === 'CONDITION' ? 160 : 100);
             
             if (matchedLineIdx !== null) {
@@ -566,11 +604,18 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 if (editorMode === 'simple') {
                     let switchX = getXPos() - 20;
                     let switchId = addNode(switchVar, 'SWITCH_CONTAINER', switchX, { switchVar, parentId: '1' }, line);
-                    pendingExits.forEach(exit => addEdge(exit.id, switchId, exit.text, exit.handle, "t-left"));
-                    stack.push({ type: 'SWITCH', id: switchId, isSimple: true, cases: [], switchVar, startX: switchX, startY: yOffset, currentCaseExits: null, maxCaseY: yOffset, caseCount: 0 });
+                    const swNode = outNodes.find(n => n.id === switchId);
+                    const actualSwitchX = swNode ? swNode.x : switchX;
+                    const actualSwitchY = swNode ? swNode.y : yOffset;
+                    pendingExits.forEach(exit => addEdge(exit.id, switchId, exit.text, exit.handle, "t-top"));
+                    stack.push({ type: 'SWITCH', id: switchId, isSimple: true, cases: [], switchVar, startX: actualSwitchX, startY: actualSwitchY, currentCaseExits: null, maxCaseY: actualSwitchY, caseCount: 0 });
                     pendingExits = []; // Nothing flows straight out of switch, it flows into cases
                 } else {
-                    let switchX = getXPos();
+                    const existingSwitch = existingNodes.find(n => !n.used && n.type === 'SWITCH_CONTAINER');
+                    let switchX = existingSwitch ? existingSwitch.x : getXPos();
+                    let switchY = existingSwitch ? existingSwitch.y : yOffset;
+                    if (existingSwitch) existingSwitch.used = true;
+
                     stack.push({
                         type: 'SWITCH',
                         isSimple: false,
@@ -580,8 +625,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                         allExits: [],
                         caseIndex: 0,
                         startX: switchX,
-                        startY: yOffset,
-                        maxCaseY: yOffset
+                        startY: switchY,
+                        maxCaseY: switchY
                     });
                     pendingExits = [];
                 }
@@ -593,21 +638,28 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                     let caseVal = isDefault ? '' : line.substring(5, line.lastIndexOf(':')).trim();
 
                     if (currentSwitch.isSimple) {
-                        // Save previous case exits
-                        if (currentSwitch.currentCaseExits) {
-                            currentSwitch.cases.push([...currentSwitch.currentCaseExits, ...pendingExits]);
-                            currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
+                        // Close previous case by wiring its pending exits to its case container t-bottom
+                        if (currentSwitch.currentCaseId && pendingExits.length > 0) {
+                            pendingExits.forEach(exit => addEdge(exit.id, currentSwitch.currentCaseId, exit.text, exit.handle, "t-bottom"));
                         }
+                        currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
                         
-                        const caseX = currentSwitch.startX + 20 + currentSwitch.caseCount * 270;
-                        const caseY = currentSwitch.startY + 50;
-                        let caseId = addNode(`Case ${isDefault ? 'default' : caseVal}`, 'CASE_CONTAINER', caseX, { caseVal, isDefault, switchId: currentSwitch.id, parentId: currentSwitch.id, w: 250, h: 150 }, line);
+                        const caseRelX = 15 + currentSwitch.caseCount * 265;
+                        const caseAbsX = currentSwitch.startX + caseRelX;
+                        const caseY = currentSwitch.startY + 44;
+                        currentSwitch.currentCaseStartY = caseY;
+                        yOffset = caseY;
+                        let caseId = addNode(`Case ${isDefault ? 'default' : caseVal}`, 'CASE_CONTAINER', caseRelX, { caseVal, isDefault, switchId: currentSwitch.id, parentId: currentSwitch.id, w: 250, h: 166 }, line);
                         
+                        const addedCase = outNodes.find(n => n.id === caseId);
+                        if (addedCase) {
+                            addedCase.y = 44;
+                        }
+
                         yOffset = caseY + 60; // Start inside case container
-                        pendingExits = [{ id: caseId, text: "", handle: "s-bottom" }];
-                        currentSwitch.currentCaseExits = [];
+                        pendingExits = [{ id: caseId, text: "", handle: "s-top" }];
                         currentSwitch.currentCaseId = caseId;
-                        currentSwitch.currentCaseX = caseX + 45;
+                        currentSwitch.currentCaseX = caseAbsX + 45;
                         currentSwitch.caseCount++;
                     } else {
                         // Advanced mode: chained CONDITION blocks
@@ -618,7 +670,8 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
 
                         const caseX = currentSwitch.startX + currentSwitch.caseIndex * 240;
                         currentSwitch.currentCaseX = caseX;
-                        yOffset = currentSwitch.startY;
+                        const caseY = currentSwitch.startY + currentSwitch.caseIndex * 80;
+                        yOffset = caseY;
 
                         if (isDefault) {
                             // Default case: no condition block, fed directly by previous False exit
@@ -652,18 +705,27 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
             else if (upper === 'ENDSWITCH') {
                 const currentSwitch = stack.pop();
                 if (currentSwitch.isSimple) {
-                    if (currentSwitch.currentCaseExits) {
-                        currentSwitch.cases.push([...currentSwitch.currentCaseExits, ...pendingExits]);
-                        currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
+                    if (currentSwitch.currentCaseId && pendingExits.length > 0) {
+                        pendingExits.forEach(exit => addEdge(exit.id, currentSwitch.currentCaseId, exit.text, exit.handle, "t-bottom"));
                     }
-                    pendingExits = currentSwitch.cases.flat();
+                    currentSwitch.maxCaseY = Math.max(currentSwitch.maxCaseY, yOffset);
+                    pendingExits = [{ id: currentSwitch.id, text: "", handle: "s-bottom" }];
                     yOffset = currentSwitch.maxCaseY + 60; // Padding after switch
                     
                     // Adjust SWITCH_CONTAINER and CASE_CONTAINER sizes
                     const swNode = outNodes.find(n => n.id === currentSwitch.id);
                     if (swNode) {
-                        swNode.h = Math.max(230, currentSwitch.maxCaseY - currentSwitch.startY + 60);
+                        const calculatedCaseH = Math.max(166, currentSwitch.maxCaseY - (currentSwitch.startY + 50) + 20);
+                        swNode.h = Math.max(230, calculatedCaseH + 64);
                         swNode.w = Math.max(350, 40 + currentSwitch.caseCount * 270);
+
+                        // Enforce uniform height across all cases fixed to switch container
+                        outNodes.filter(n => n.type === 'CASE_CONTAINER' && (n.parentId === currentSwitch.id || n.switchId === currentSwitch.id)).forEach(c => {
+                            c.h = swNode.h - 64;
+                        });
+
+                        // Ensure yOffset is always BELOW the switch container bottom so ENDFUNCTION cannot land inside the switch
+                        yOffset = Math.max(yOffset, currentSwitch.startY + swNode.h + 30);
                     }
                 } else {
                     currentSwitch.allExits.push(...pendingExits);
@@ -755,7 +817,7 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 if (currentLoop.isSimple) {
                     const loopBodyNodes = outNodes.slice(currentLoop.outNodesStartIndex);
                     const k = loopBodyNodes.length;
-                    if (k > 0 && outNodes.length >= currentLoop.outNodesStartIndex + k) {
+                    if (!currentLoop.isFor && k > 0 && outNodes.length >= currentLoop.outNodesStartIndex + k) {
                         const preLoopStartIdx = currentLoop.outNodesStartIndex - k;
                         if (preLoopStartIdx >= 0) {
                             const preLoopNodes = outNodes.slice(preLoopStartIdx, currentLoop.outNodesStartIndex);
@@ -1111,19 +1173,13 @@ export const parsePseudocodeToDrawio = (code, existingXml = null, edgeStyle = 't
                 extraAttrs += ` switchVar="${encodeURIComponent(n.switchVar || '')}"`;
             }
             if (n.type === 'CASE_CONTAINER') {
-                extraAttrs += ` caseVal="${encodeURIComponent(n.caseVal || '')}" isDefault="${n.isDefault ? 'true' : 'false'}"`;
+                extraAttrs += ` caseVal="${encodeURIComponent(n.caseVal || '')}" isDefault="${n.isDefault ? 'true' : 'false'}" switchId="${encodeURIComponent(n.switchId || '')}"`;
+                style += `caseVal=${encodeURIComponent(n.caseVal || '')};isDefault=${n.isDefault ? 'true' : 'false'};switchId=${encodeURIComponent(n.switchId || '')};`;
             }
         }
 
         let relX = n.x;
         let relY = n.y;
-        if (n.parentId && n.parentId !== '1') {
-            const parentNode = outNodes.find(p => p.id === n.parentId);
-            if (parentNode) {
-                relX -= parentNode.x;
-                relY -= parentNode.y;
-            }
-        }
 
         const safeText = (n.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         xml += `    <mxCell id="${n.id}" value="${safeText}" style="${style}"${extraAttrs} vertex="1" parent="${n.parentId || '1'}">\n`;

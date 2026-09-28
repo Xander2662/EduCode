@@ -504,7 +504,12 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
 
   return (
     <>
-      <BaseEdge path={edgePath} markerEnd={isTargetMerge ? undefined : markerEnd} style={{ ...style, strokeWidth: selected ? 3 : 2, stroke: selected ? '#6366f1' : (resolvedIsCondition ? (isPos ? '#10b981' : '#f43f5e') : (style?.stroke || '#94a3b8')) }} />
+      <BaseEdge 
+        path={edgePath} 
+        markerEnd={isTargetMerge ? undefined : markerEnd} 
+        interactionWidth={data?.isCaseAutoEdge ? 0 : undefined}
+        style={{ ...style, pointerEvents: data?.isCaseAutoEdge ? 'none' : undefined, strokeWidth: selected ? 3 : 2, stroke: selected ? '#6366f1' : (resolvedIsCondition ? (isPos ? '#10b981' : '#f43f5e') : (style?.stroke || '#94a3b8')) }} 
+      />
       {catcher && <g className="pointer-events-none">{catcher}</g>}
       {labelText && (
         <EdgeLabelRenderer>

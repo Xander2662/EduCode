@@ -79,9 +79,10 @@ export const drawioToReactFlow = (xml) => {
 
       if (type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER' || type === 'GROUP_BG' || type === 'SWITCH_CONTAINER') {
           nodeObj.zIndex = -1;
-      }
-      if (type === 'CASE_CONTAINER') {
-          nodeObj.zIndex = 5;
+      } else if (type === 'CASE_CONTAINER') {
+          nodeObj.zIndex = 1;
+      } else {
+          nodeObj.zIndex = 10;
       }
 
       if (type === 'LOOP_CONTAINER' || type === 'FOR_CONTAINER' || type === 'GROUP_BG' || type === 'SWITCH_CONTAINER' || type === 'CASE_CONTAINER') {

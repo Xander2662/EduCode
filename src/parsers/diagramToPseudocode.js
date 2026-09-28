@@ -63,6 +63,7 @@ export const parseDrawioToPseudocode = (xml) => {
         let switchVar = '';
         let caseVal = '';
         let isDefault = false;
+        let switchId = '';
         
         let type = 'ACTION';
         if (style.includes('shape=note') || style.includes('fillColor=#fff2cc') || value.startsWith('#') || value.startsWith('//')) type = 'COMMENT';
@@ -124,6 +125,12 @@ export const parseDrawioToPseudocode = (xml) => {
                 const defMatch = style.match(/isDefault=([^;]+)/);
                 if (defMatch) isDefault = defMatch[1] === 'true';
             }
+            if (style.includes('switchId=')) {
+                const sidMatch = style.match(/switchId=([^;]+)/);
+                if (sidMatch) switchId = decodeURIComponent(sidMatch[1]);
+            }
+            const sidAttr = cell.getAttribute('switchId');
+            if (sidAttr) switchId = decodeURIComponent(sidAttr);
         }
         
         let isSwapped = false;
@@ -142,7 +149,7 @@ export const parseDrawioToPseudocode = (xml) => {
         const height = geo ? parseFloat(geo.getAttribute('height') || 0) : 0;
         const parentId = cell.getAttribute('parent');
 
-        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep, switchVar, caseVal, isDefault, isSwapped, parentId };
+        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep, switchVar, caseVal, isDefault, isSwapped, parentId, switchId };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
@@ -162,14 +169,82 @@ export const parseDrawioToPseudocode = (xml) => {
       }
     });
 
+    const isIgnoredRootType = (t) => ['COMMENT', 'MERGE', 'END', 'GROUP_BG', 'LOOP_CONTAINER', 'FOR_CONTAINER', 'SWITCH_CONTAINER', 'CASE_CONTAINER'].includes(t);
+
+    const getNodeAbsPos = (node) => {
+        if (!node) return { x: 0, y: 0 };
+        let x = node.x || 0;
+        let y = node.y || 0;
+        let curr = node;
+        let depth = 0;
+        while ((curr.parentId || curr.switchId) && curr.parentId !== '0' && curr.parentId !== '1' && depth < 10) {
+            const pId = (curr.parentId && curr.parentId !== '0' && curr.parentId !== '1') ? curr.parentId : curr.switchId;
+            const parent = nodes[pId];
+            if (!parent) break;
+            x += parent.x || 0;
+            y += parent.y || 0;
+            curr = parent;
+            depth++;
+        }
+        return { x, y };
+    };
+
+    const isInsideCase = (child, caseContainer) => {
+        if (!child || !caseContainer || child.id === caseContainer.id) return false;
+        if (isIgnoredRootType(child.type)) return false;
+        if (child.parentId === caseContainer.id) return true;
+
+        // Also check if there is an edge directly between caseContainer and child
+        if (edges.some(e => (e.source === caseContainer.id && e.target === child.id) || (e.source === child.id && e.target === caseContainer.id))) {
+            return true;
+        }
+
+        const cPos = getNodeAbsPos(caseContainer);
+        const cX = cPos.x;
+        const cY = cPos.y;
+        const cW = caseContainer.width || 250;
+        const cH = caseContainer.height || 166;
+        const nPos = getNodeAbsPos(child);
+        const nW = child.width || 100;
+        const nH = child.height || 50;
+        const centerX = nPos.x + nW / 2;
+        const centerY = nPos.y + nH / 2;
+
+        const switchNode = caseContainer.parentId ? nodes[caseContainer.parentId] : (caseContainer.switchId ? nodes[caseContainer.switchId] : null);
+        const sPos = switchNode ? getNodeAbsPos(switchNode) : null;
+        const maxBottom = Math.max(
+            cY + cH + 30,
+            sPos ? sPos.y + (switchNode.height || 230) + 50 : cY + cH + 30
+        );
+
+        return centerX >= cX && centerX <= cX + cW && centerY >= cY && centerY <= maxBottom;
+    };
+
+    const isInsideSwitch = (child, switchNode) => {
+        if (!child || !switchNode || child.id === switchNode.id) return false;
+        if (child.parentId === switchNode.id || child.switchId === switchNode.id) return true;
+        const sPos = getNodeAbsPos(switchNode);
+        const sX = sPos.x;
+        const sY = sPos.y;
+        const sW = switchNode.width || 350;
+        const sH = switchNode.height || 230;
+        const nPos = getNodeAbsPos(child);
+        const nW = child.width || 250;
+        const nH = child.height || 166;
+        const centerX = nPos.x + nW / 2;
+        const centerY = nPos.y + nH / 2;
+        return centerX >= sX && centerX <= sX + sW && centerY >= sY && centerY <= sY + sH + 30;
+    };
+
     Object.values(nodes).filter(n => n.type === 'SWITCH_CONTAINER').forEach(switchNode => {
-        const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && n.parentId === switchNode.id);
+        const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && isInsideSwitch(n, switchNode));
         cases.sort((a, b) => {
             if (a.isDefault) return 1;
             if (b.isDefault) return -1;
-            return a.x - b.x;
+            return getNodeAbsPos(a).x - getNodeAbsPos(b).x;
         });
         const mergeEdges = [...switchNode.next];
+        switchNode.mergeTarget = mergeEdges.length > 0 ? mergeEdges[0].target : null;
         switchNode.next = [];
         
         cases.forEach(caseNode => {
@@ -177,10 +252,18 @@ export const parseDrawioToPseudocode = (xml) => {
             switchNode.next.push(edgeToCase);
             caseNode.prev.push(edgeToCase);
             
-            const blocksInside = Object.values(nodes).filter(n => n.id !== caseNode.id && n.parentId === caseNode.id);
+            // Clear any old edges on caseNode (e.g. from s-top handle)
+            caseNode.next = [];
+
+            const blocksInside = Object.values(nodes).filter(n => isInsideCase(n, caseNode));
             if (blocksInside.length > 0) {
-                blocksInside.sort((a, b) => a.y - b.y);
+                blocksInside.sort((a, b) => getNodeAbsPos(a).y - getNodeAbsPos(b).y);
                 
+                // Clear edges that point to caseNode from inside (e.g. t-bottom handle)
+                blocksInside.forEach(b => {
+                    b.next = b.next.filter(e => e.target !== caseNode.id);
+                });
+
                 for (let i = 0; i < blocksInside.length - 1; i++) {
                     const curr = blocksInside[i];
                     const nxt = blocksInside[i+1];
@@ -221,8 +304,6 @@ export const parseDrawioToPseudocode = (xml) => {
         });
     });
 
-    const isIgnoredRootType = (t) => ['COMMENT', 'MERGE', 'END', 'GROUP_BG', 'LOOP_CONTAINER', 'FOR_CONTAINER', 'SWITCH_CONTAINER', 'CASE_CONTAINER'].includes(t);
-
     const loopContainers = Object.values(nodes).filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
     const isInsideLoop = (node, loop) => {
         if (!node || !loop || node.id === loop.id) return false;
@@ -234,9 +315,11 @@ export const parseDrawioToPseudocode = (xml) => {
         if ((node.type === 'LOOP_CONTAINER' || node.type === 'FOR_CONTAINER' || node.type === 'SWITCH_CONTAINER') && (nW * nH >= loopW * loopH)) {
             return false;
         }
-        const centerX = node.x + nW / 2;
-        const centerY = node.y + nH / 2;
-        const isInside = (centerX < loop.x + loopW && centerX > loop.x && centerY < loop.y + loopH && centerY > loop.y);
+        const nPos = getNodeAbsPos(node);
+        const lPos = getNodeAbsPos(loop);
+        const centerX = nPos.x + nW / 2;
+        const centerY = nPos.y + nH / 2;
+        const isInside = (centerX < lPos.x + loopW && centerX > lPos.x && centerY < lPos.y + loopH && centerY > lPos.y);
         return isInside;
     };
 
@@ -336,7 +419,7 @@ export const parseDrawioToPseudocode = (xml) => {
                 }
                 if (node.type === 'SWITCH_CONTAINER') {
                     Object.values(nodes).forEach(inNode => {
-                        if (inNode.parentId === node.id && !assigned.has(inNode.id)) {
+                        if ((inNode.parentId === node.id || inNode.switchId === node.id || isInsideSwitch(inNode, node)) && !assigned.has(inNode.id)) {
                             assigned.add(inNode.id);
                             q.push(inNode.id);
                         }
@@ -344,12 +427,20 @@ export const parseDrawioToPseudocode = (xml) => {
                 }
                 if (node.type === 'CASE_CONTAINER') {
                     Object.values(nodes).forEach(inNode => {
-                        if (inNode.parentId === node.id && !assigned.has(inNode.id)) {
+                        if ((inNode.parentId === node.id || isInsideCase(inNode, node)) && !assigned.has(inNode.id)) {
                             assigned.add(inNode.id);
                             q.push(inNode.id);
                         }
                     });
                 }
+
+                const insideCases = Object.values(nodes).filter(c => c.type === 'CASE_CONTAINER' && isInsideCase(node, c));
+                insideCases.forEach(c => {
+                    if (!assigned.has(c.id)) {
+                        assigned.add(c.id);
+                        q.push(c.id);
+                    }
+                });
 
                 const insideLoops = loopContainers.filter(l => isInsideLoop(node, l));
                 insideLoops.forEach(l => {
@@ -395,7 +486,7 @@ export const parseDrawioToPseudocode = (xml) => {
     );
 
     let candidateRoots = [
-        ...Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type) && !loopContainers.some(l => isInsideLoop(n, l))),
+        ...Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type) && !loopContainers.some(l => isInsideLoop(n, l)) && !Object.values(nodes).filter(c => c.type === 'CASE_CONTAINER').some(c => isInsideCase(n, c))),
         ...unassignedTopContainers
     ].sort((a, b) => (a.y - b.y) || (a.x - b.x));
     
@@ -407,7 +498,10 @@ export const parseDrawioToPseudocode = (xml) => {
         const fragName = `fragment_${clusterId}`;
         usedFuncNames.add(fragName);
         const ghostId = `ghost_start_${clusterId}`;
-        nodes[ghostId] = { id: ghostId, value: fragName, type: 'START', x: r.x, y: r.y - 100, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
+        // Place ghost START node safely above the container root.
+        // SWITCH_CONTAINER has a tag protruding above y, so use a larger offset.
+        const ghostYOffset = r.type === 'SWITCH_CONTAINER' ? 160 : (r.type === 'LOOP_CONTAINER' || r.type === 'FOR_CONTAINER' ? 130 : 100);
+        nodes[ghostId] = { id: ghostId, value: fragName, type: 'START', x: r.x, y: r.y - ghostYOffset, next: [], prev: [], entityType: 'FUNCTION', ioType: 'input' };
         edges.push({ source: ghostId, target: r.id, value: '' });
         nodes[ghostId].next.push({ target: r.id, value: '' });
         r.prev.push({ source: ghostId, value: '' });
@@ -416,14 +510,18 @@ export const parseDrawioToPseudocode = (xml) => {
         
         assigned.add(r.id);
         if (r.type === 'SWITCH_CONTAINER') {
-            const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && n.parentId === r.id);
-            cases.forEach(c => assigned.add(c.id));
+            const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && isInsideSwitch(n, r));
+            cases.forEach(c => {
+                assigned.add(c.id);
+                const blocks = Object.values(nodes).filter(b => isInsideCase(b, c));
+                blocks.forEach(b => assigned.add(b.id));
+            });
         }
         markCluster(r.id);
     });
 
     const unassignedNodes = Object.values(nodes)
-        .filter(n => !assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type))
+        .filter(n => !assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type) && !Object.values(nodes).filter(c => c.type === 'CASE_CONTAINER').some(c => isInsideCase(n, c)))
         .sort((a, b) => (a.y - b.y) || (a.x - b.x));
 
     unassignedNodes.forEach(n => {
@@ -698,14 +796,17 @@ export const parseDrawioToPseudocode = (xml) => {
                 appendLine(`${indent}SWITCH ${node.switchVar || 'x'}`, node.id);
                 
                 // Find merge node
-                let mergeNode = null;
-                if (node.next.length > 1) {
-                    mergeNode = node.next.map(e => e.target).reduce((acc, target) => {
-                        if (acc === null) return null;
-                        return findConvergence(acc, target);
-                    });
-                } else if (node.next.length === 1) {
-                    mergeNode = node.next[0].target;
+                let mergeNode = node.mergeTarget || null;
+                if (!mergeNode) {
+                    if (node.next.length > 1) {
+                        mergeNode = node.next.map(e => e.target).reduce((acc, target) => {
+                            if (acc === null) return null;
+                            return findConvergence(acc, target);
+                        });
+                    }
+                }
+                if (mergeNode && nodes[mergeNode]?.type === 'CASE_CONTAINER') {
+                    mergeNode = null;
                 }
 
                 const switchMinDepth = currentLoopStack.length;
@@ -723,9 +824,10 @@ export const parseDrawioToPseudocode = (xml) => {
             }
             else if (node.type === 'LOOP_CONTAINER') {
                 printCommentsBeforeY(node.y, indent);
-                let cond = node.value !== undefined ? node.value : "x > 0";
+                let cond = (node.value !== undefined && node.value !== '') ? node.value : "x < 0";
                 appendLine(`${indent}WHILE ${cond} DO`, node.id);
 
+                indent += "    ";
                 currentLoopStack.push(node);
 
                 const directChildren = Object.values(nodes).filter(child => {
@@ -741,14 +843,21 @@ export const parseDrawioToPseudocode = (xml) => {
                     directChildren.sort((a, b) => a.y - b.y || a.x - b.x);
                     directChildren.forEach(child => {
                         if (!visited.has(child.id)) {
-                            traverse(child.id, indent + "    ", new Set(inPath), stopId, currentScope, [...currentLoopStack], currentLoopStack.length);
+                            traverse(child.id, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], currentLoopStack.length);
                         }
                     });
                 }
 
-                currentLoopStack.pop();
-
-                appendLine(`${indent}ENDWHILE`, node.id);
+                if (currentLoopStack.includes(node)) {
+                    while (currentLoopStack.length > 0 && currentLoopStack[currentLoopStack.length - 1] !== node) {
+                        const l = currentLoopStack.pop();
+                        indent = closeLoop(l, indent, currentScope);
+                    }
+                    if (currentLoopStack[currentLoopStack.length - 1] === node) {
+                        currentLoopStack.pop();
+                        indent = closeLoop(node, indent, currentScope);
+                    }
+                }
                 if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
                     traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], minLoopDepth);
                 }
@@ -758,6 +867,7 @@ export const parseDrawioToPseudocode = (xml) => {
                 const stepText = (node.forStep && node.forStep !== '1' && node.forStep !== '+1') ? ` STEP ${node.forStep}` : '';
                 appendLine(`${indent}FOR ${node.forInit || 'i = 0'} TO ${node.forLimit || '10'}${stepText} DO`, node.id);
 
+                indent += "    ";
                 currentLoopStack.push(node);
 
                 const directChildren = Object.values(nodes).filter(child => {
@@ -773,14 +883,21 @@ export const parseDrawioToPseudocode = (xml) => {
                     directChildren.sort((a, b) => a.y - b.y || a.x - b.x);
                     directChildren.forEach(child => {
                         if (!visited.has(child.id)) {
-                            traverse(child.id, indent + "    ", new Set(inPath), stopId, currentScope, [...currentLoopStack], currentLoopStack.length);
+                            traverse(child.id, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], currentLoopStack.length);
                         }
                     });
                 }
 
-                currentLoopStack.pop();
-
-                appendLine(`${indent}ENDFOR`, node.id);
+                if (currentLoopStack.includes(node)) {
+                    while (currentLoopStack.length > 0 && currentLoopStack[currentLoopStack.length - 1] !== node) {
+                        const l = currentLoopStack.pop();
+                        indent = closeLoop(l, indent, currentScope);
+                    }
+                    if (currentLoopStack[currentLoopStack.length - 1] === node) {
+                        currentLoopStack.pop();
+                        indent = closeLoop(node, indent, currentScope);
+                    }
+                }
                 if (node.next.length > 0 && !inPath.has(node.next[0].target)) {
                     traverse(node.next[0].target, indent, new Set(inPath), stopId, currentScope, [...currentLoopStack], minLoopDepth);
                 }

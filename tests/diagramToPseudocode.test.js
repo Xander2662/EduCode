@@ -346,4 +346,59 @@ describe('diagramToPseudocode', () => {
         const endForMatches = code.match(/ENDFOR/g);
         expect(endForMatches?.length).toBe(1);
     });
+
+    it('správně převede SWITCH ve fragmentu s CASE větvemi uvnitř SWITCH ... ENDSWITCH', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="sw" value="" type="SWITCH_CONTAINER" style="SWITCH_CONTAINER;switchVar=x;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="350" height="230" as="geometry"/>
+            </mxCell>
+            <mxCell id="case1" value="" type="CASE_CONTAINER" style="CASE_CONTAINER;caseVal=1;switchId=sw;" vertex="1" parent="sw">
+                <mxGeometry x="15" y="44" width="250" height="166" as="geometry"/>
+            </mxCell>
+        </root></mxGraphModel>`;
+
+        const { code } = parseDrawioToPseudocode(xml);
+        expect(code).toContain('SWITCH x');
+        expect(code).toContain('CASE 1:');
+        expect(code).toContain('ENDSWITCH');
+
+        // CASE 1: must appear BEFORE ENDSWITCH
+        const switchIdx = code.indexOf('SWITCH x');
+        const caseIdx = code.indexOf('CASE 1:');
+        const endswitchIdx = code.indexOf('ENDSWITCH');
+
+        expect(caseIdx).toBeGreaterThan(switchIdx);
+        expect(caseIdx).toBeLessThan(endswitchIdx);
+    });
+
+    it('správně přiřadí bloky uvnitř CASE větve a nevytváří z nich samostatné fragmenty', () => {
+        const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+            <mxCell id="sw" value="" type="SWITCH_CONTAINER" style="SWITCH_CONTAINER;switchVar=val;" vertex="1" parent="1">
+                <mxGeometry x="100" y="100" width="350" height="230" as="geometry"/>
+            </mxCell>
+            <mxCell id="c1" value="" type="CASE_CONTAINER" style="CASE_CONTAINER;caseVal=5;switchId=sw;" vertex="1" parent="sw">
+                <mxGeometry x="15" y="44" width="250" height="166" as="geometry"/>
+            </mxCell>
+            <mxCell id="act1" value="y = 50" type="ACTION" vertex="1" parent="1">
+                <mxGeometry x="130" y="180" width="100" height="50" as="geometry"/>
+            </mxCell>
+            <mxCell id="e_c1" source="c1" target="act1" edge="1" parent="1"/>
+        </root></mxGraphModel>`;
+
+        const { code } = parseDrawioToPseudocode(xml);
+        expect(code).toContain('SWITCH val');
+        expect(code).toContain('CASE 5:');
+        expect(code).toContain('y = 50');
+        expect(code).toContain('ENDSWITCH');
+
+        // Must not create fragment_2 for act1
+        expect(code).not.toContain('fragment_2');
+
+        const caseIdx = code.indexOf('CASE 5:');
+        const actIdx = code.indexOf('y = 50');
+        const endswitchIdx = code.indexOf('ENDSWITCH');
+
+        expect(actIdx).toBeGreaterThan(caseIdx);
+        expect(actIdx).toBeLessThan(endswitchIdx);
+    });
 });

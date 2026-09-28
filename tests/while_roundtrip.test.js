@@ -149,4 +149,32 @@ describe('While Group Roundtrip Tests (Pseudocode -> XML -> Pseudocode)', () => 
         expect(secondXml).toContain('value="x = x + 1"');
         expect(secondXml).toContain('type="LOOP_CONTAINER"');
     });
+
+    it('Měl by správně odsadit ENDWHILE na stejnou úroveň jako WHILE DO', () => {
+        const diagramXml = `<mxGraphModel>
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+    <mxCell id="loop" value="x &lt; 0" style="LOOP_CONTAINER" type="LOOP_CONTAINER" vertex="1" parent="1">
+      <mxGeometry x="270" y="130" width="300" height="150" as="geometry" />
+    </mxCell>
+  </root>
+</mxGraphModel>`;
+
+        const { code: pseudo } = parseDrawioToPseudocode(diagramXml);
+        // Musí mít "    WHILE x < 0 DO" a "    ENDWHILE"
+        expect(pseudo).toMatch(/FUNCTION fragment_1\(\)\r?\n    WHILE x < 0 DO\r?\n    ENDWHILE\r?\nENDFUNCTION/);
+    });
+
+    it('Měl by zachovat samostatný SWITCH_CONTAINER bez vytváření nepotřebného START_END', () => {
+        const pseudo = `FUNCTION fragment_1()
+    SWITCH x
+        CASE 1:
+    ENDSWITCH
+ENDFUNCTION`;
+        const { xml } = parsePseudocodeToDrawio(pseudo, '', null, null, 'simple');
+        expect(xml).toContain('type="SWITCH_CONTAINER"');
+        expect(xml).toContain('type="CASE_CONTAINER"');
+        expect(xml).not.toContain('style="mode=start;');
+    });
 });

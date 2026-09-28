@@ -60,7 +60,16 @@ export class DiagramRunner {
             }
         });
 
-        let startNode = this.nodes.find(n => n.type === 'START_END' && n.data?.mode === 'start');
+        this.callStack = [];
+        this.lastReturnValue = undefined;
+
+        let startNode = this.nodes.find(n => n.type === 'START_END' && n.data?.mode === 'start' && /^main(\(\))?$/i.test(this.cleanText(n.data?.label || '')));
+        if (!startNode) {
+            startNode = this.nodes.find(n => n.type === 'START_END' && n.data?.mode === 'start' && !this.edges.some(e => e.target === n.id));
+        }
+        if (!startNode) {
+            startNode = this.nodes.find(n => n.type === 'START_END' && n.data?.mode === 'start');
+        }
         if (!startNode) {
             startNode = this.nodes.find(n => n.type === 'START_END' && !this.edges.some(e => e.target === n.id)) || this.nodes.find(n => n.type === 'START_END');
         }
@@ -154,15 +163,119 @@ export class DiagramRunner {
         const outEdges = this.edges.filter(e => e.source === node.id);
 
         if (node.type === 'START_END') {
-            if (node.data?.mode === 'end' || this.cleanText(node.data?.label).toUpperCase().includes('END')) this.isFinished = true;
-            else if (outEdges.length > 0) nextNodeId = outEdges[0].target;
+            if (node.data?.mode === 'end' || this.cleanText(node.data?.label).toUpperCase().includes('END')) {
+                if (this.callStack.length > 0) {
+                    const frame = this.callStack.pop();
+                    if (frame.assignVar) {
+                        let retVal = this.lastReturnValue;
+                        if (retVal === undefined && frame.funcName && this.variables[frame.funcName] !== undefined) {
+                            retVal = this.variables[frame.funcName];
+                        } else if (retVal === undefined && this.variables['result'] !== undefined) {
+                            retVal = this.variables['result'];
+                        }
+                        if (retVal !== undefined) {
+                            this.variables[frame.assignVar] = retVal;
+                        }
+                    }
+                    this.events.push({
+                        type: 'insight',
+                        msg: `Návrat z funkce '${frame.funcName}' zpět do volajícího bloku`
+                    });
+                    nextNodeId = frame.returnNodeId;
+                    if (!nextNodeId) this.isFinished = true;
+                } else {
+                    this.isFinished = true;
+                }
+            } else if (outEdges.length > 0) {
+                nextNodeId = outEdges[0].target;
+            }
         } 
         else if (node.type === 'ACTION') {
             const lines = this.cleanText(node.data?.label || '').split('\n');
-            lines.forEach(line => {
+            let jumped = false;
+
+            // Map defined functions in the diagram
+            const funcMap = new Map();
+            this.nodes.forEach(n => {
+                if (n.type === 'START_END' && n.data?.mode === 'start') {
+                    const rawLabel = this.cleanText(n.data?.label || '').trim();
+                    const m = rawLabel.match(/^(?:FUNCTION\s+)?([a-zA-Z_]\w*)\s*(?:\((.*?)\))?$/i);
+                    if (m) {
+                        const fName = m[1].toLowerCase();
+                        const params = m[2] ? m[2].split(',').map(p => p.trim()).filter(Boolean) : [];
+                        funcMap.set(fName, { node: n, name: m[1], params });
+                    }
+                }
+            });
+
+            for (const line of lines) {
                 let text = line.trim();
-                if (!text) return;
-                
+                if (!text) continue;
+
+                // Check for RETURN
+                const returnMatch = text.match(/^RETURN(?:\s+(.*))?$/i);
+                if (returnMatch) {
+                    const expr = returnMatch[1]?.trim();
+                    if (expr) {
+                        this.lastReturnValue = this.evalExpr(expr);
+                    }
+                    if (this.callStack.length > 0) {
+                        const frame = this.callStack.pop();
+                        if (frame.assignVar && this.lastReturnValue !== undefined) {
+                            this.variables[frame.assignVar] = this.lastReturnValue;
+                        }
+                        this.events.push({
+                            type: 'insight',
+                            msg: `Návrat z funkce '${frame.funcName}' zpět do volajícího bloku`
+                        });
+                        nextNodeId = frame.returnNodeId;
+                        if (!nextNodeId) this.isFinished = true;
+                        jumped = true;
+                        break;
+                    }
+                }
+
+                // Check for function call: e.g. foo(), call foo(), x = foo(), x = foo(a, b), or foo
+                const callMatch = text.match(/^(?:(?:SET\s+)?([a-zA-Z_]\w*)\s*(?:=|:=|<-)\s*)?(?:call\s+)?([a-zA-Z_]\w*)\s*(?:\((.*?)\))?;?$/i);
+                if (callMatch) {
+                    const assignVar = callMatch[1] ? callMatch[1].trim() : null;
+                    const funcTargetName = callMatch[2].trim();
+                    const hasParens = callMatch[3] !== undefined;
+                    const argsStr = hasParens ? callMatch[3].trim() : null;
+
+                    const targetFunc = funcMap.get(funcTargetName.toLowerCase());
+                    const isKnownVar = funcTargetName in this.variables;
+                    const isExplicitCall = text.toLowerCase().startsWith('call ') || hasParens;
+                    const isFuncCall = targetFunc && (isExplicitCall || !isKnownVar || (targetFunc.node.id !== node.id && !assignVar));
+
+                    if (isFuncCall && targetFunc.node.id !== this.currentNodeId) {
+                        if (argsStr && targetFunc.params.length > 0) {
+                            const argExprs = argsStr.split(',').map(a => a.trim()).filter(Boolean);
+                            argExprs.forEach((argExpr, idx) => {
+                                if (idx < targetFunc.params.length) {
+                                    const val = this.evalExpr(argExpr);
+                                    if (val !== undefined) {
+                                        this.variables[targetFunc.params[idx]] = val;
+                                    }
+                                }
+                            });
+                        }
+                        this.callStack.push({
+                            callerId: node.id,
+                            returnNodeId: outEdges.length > 0 ? outEdges[0].target : null,
+                            assignVar,
+                            funcName: targetFunc.name
+                        });
+                        this.events.push({
+                            type: 'insight',
+                            msg: `Volání funkce '${targetFunc.name}'`
+                        });
+                        nextNodeId = targetFunc.node.id;
+                        jumped = true;
+                        break;
+                    }
+                }
+
                 const assignMatch = text.match(/^(?:SET\s+)?([a-zA-Z_]\w*)\s*(?:=|:=|<-)\s*(.*)$/i);
                 if (assignMatch) {
                     const varName = assignMatch[1].trim();
@@ -187,8 +300,8 @@ export class DiagramRunner {
                     this.output.push(inner);
                     this.events.push({ type: 'output', msg: inner });
                 }
-            });
-            if (outEdges.length > 0) nextNodeId = outEdges[0].target;
+            }
+            if (!jumped && outEdges.length > 0) nextNodeId = outEdges[0].target;
         } 
         else if (node.type === 'IO') {
             let text = this.cleanText(node.data?.label || '').trim();
@@ -259,16 +372,36 @@ export class DiagramRunner {
             const switchVar = this.cleanText(node.data?.switchVar || 'x');
             const switchVal = this.evalExpr(switchVar);
             
-            const cases = this.nodes.filter(n => n.type === 'CASE_CONTAINER' && n.data?.switchId === node.id);
+            const cases = this.nodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === node.id || n.parentId === node.id));
             let targetCase = cases.find(c => !c.data?.isDefault && String(this.evalExpr(this.cleanText(c.data?.caseVal || '1'))) === String(switchVal));
             if (!targetCase) targetCase = cases.find(c => c.data?.isDefault);
             
             if (targetCase) {
-                const caseEdge = this.edges.find(e => e.source === targetCase.id);
-                if (caseEdge) nextNodeId = caseEdge.target;
-                else if (outEdges.length > 0) nextNodeId = outEdges[0].target;
+                nextNodeId = targetCase.id;
             } else {
                 if (outEdges.length > 0) nextNodeId = outEdges[0].target;
+            }
+        }
+        else if (node.type === 'CASE_CONTAINER') {
+            const caseEdge = this.edges.find(e => e.source === node.id);
+            if (caseEdge) {
+                nextNodeId = caseEdge.target;
+            } else {
+                const switchId = node.data?.switchId || node.parentId;
+                const swOutEdge = this.edges.find(e => e.source === switchId);
+                if (swOutEdge) nextNodeId = swOutEdge.target;
+                else if (outEdges.length > 0) nextNodeId = outEdges[0].target;
+            }
+        }
+
+        // If nextNodeId points to a CASE_CONTAINER from an inner block, it means an inner block reached the bottom of the case (t-bottom)!
+        // Since the CASE tag was already visited before entering the case, route directly to switch exit!
+        if (node.type !== 'SWITCH_CONTAINER' && nextNodeId) {
+            const nextNodeObj = this.nodes.find(n => n.id === nextNodeId);
+            if (nextNodeObj && nextNodeObj.type === 'CASE_CONTAINER') {
+                const switchId = nextNodeObj.data?.switchId || nextNodeObj.parentId;
+                const swOutEdge = this.edges.find(e => e.source === switchId);
+                nextNodeId = swOutEdge ? swOutEdge.target : null;
             }
         }
 
@@ -368,6 +501,26 @@ export class DiagramRunner {
                     }
                 }
             }
+        }
+
+        if (!finalNextId && this.callStack.length > 0) {
+            const frame = this.callStack.pop();
+            if (frame.assignVar) {
+                let retVal = this.lastReturnValue;
+                if (retVal === undefined && frame.funcName && this.variables[frame.funcName] !== undefined) {
+                    retVal = this.variables[frame.funcName];
+                } else if (retVal === undefined && this.variables['result'] !== undefined) {
+                    retVal = this.variables['result'];
+                }
+                if (retVal !== undefined) {
+                    this.variables[frame.assignVar] = retVal;
+                }
+            }
+            this.events.push({
+                type: 'insight',
+                msg: `Návrat z funkce '${frame.funcName}' zpět do volajícího bloku`
+            });
+            finalNextId = frame.returnNodeId;
         }
 
         const prevNodeId = this.currentNodeId;

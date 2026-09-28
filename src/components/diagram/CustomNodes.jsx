@@ -1,5 +1,5 @@
 import React from 'react';
-import { Handle, Position, useReactFlow, useEdges, NodeResizeControl, useStoreApi } from '@xyflow/react';
+import { Handle, Position, useReactFlow, useEdges, useNodes, NodeResizeControl, useStoreApi } from '@xyflow/react';
 import { RefreshCcw, MousePointer2, Columns, Plus, ArrowDown, ArrowUp } from 'lucide-react';
 import { calculateStretchLimits } from '../../utils/stretchLimits';
 import { useContainerBounds } from './useContainerBounds';
@@ -421,12 +421,12 @@ export const LoopContainerNode = ({ id, data, selected, dragging }) => {
         
         <input 
             type="text" 
-            defaultValue={data.label} 
+            defaultValue={data.label || 'x < 0'} 
             onChange={data.onChange}
             onMouseDown={e => e.stopPropagation()}
             readOnly={data.readOnly}
             className={`outline-none bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 px-1 py-0.5 rounded text-xs font-mono w-24 border border-transparent focus:border-purple-300 ${data.readOnly ? 'cursor-default pointer-events-none' : 'cursor-text'}`}
-            placeholder="Podmínka"
+            placeholder="x < 0"
         />
 
         {/* Toggle přesunutý napravo od inputu */}
@@ -553,7 +553,7 @@ export const ForContainerNode = ({ id, data, selected, dragging }) => {
   );
 };
 
-export const SwitchContainerNode = ({ id, data, selected }) => {
+export const SwitchContainerNode = ({ id, data, selected, dragging }) => {
   const { setNodes, getNodes } = useReactFlow();
   const isGray = data.colorMode === false;
   const borderColor = (selected || data.isRuntimeActive) ? 'border-rose-500' : (isGray ? 'border-gray-400 dark:border-gray-600' : 'border-rose-400 dark:border-rose-600');
@@ -565,26 +565,28 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
   const [cases, setCases] = React.useState([]);
   const [containerHeight, setContainerHeight] = React.useState(250);
   const [containerWidth, setContainerWidth] = React.useState(350);
-  const [hasDefault, setHasDefault] = React.useState(false);
+  
+  const allNodes = useNodes();
+  const myCases = allNodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === id || n.parentId === id));
+  const hasDefault = myCases.some(c => c.data?.isDefault);
+
+  const draggingRef = React.useRef(dragging);
+  draggingRef.current = dragging;
 
   // Layout Engine Effect
   React.useEffect(() => {
     const layoutEngine = () => {
+        if (draggingRef.current) return;
         const nds = getNodes();
         const myNode = nds.find(n => n.id === id);
-        if (!myNode) return;
+        if (!myNode || myNode.dragging || nds.some(n => n.dragging) || Boolean(document.querySelector('.react-flow__node.dragging')) || Boolean(document.querySelector('.is-dragging-case'))) return;
 
-        const myCases = nds.filter(n => n.type === 'CASE_CONTAINER' && n.data?.switchId === id);
+        const myCases = nds.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === id || n.parentId === id));
+        if (myCases.some(c => c.dragging) || Boolean(document.querySelector('.is-dragging-case'))) return;
+
         myCases.sort((a, b) => {
-            if (a.data.isDefault) return -1;
-            if (b.data.isDefault) return 1;
             return a.position.x - b.position.x;
         });
-
-        const currentHasDefault = myCases.some(c => c.data.isDefault);
-        if (currentHasDefault !== hasDefault) {
-            setHasDefault(currentHasDefault);
-        }
 
         if (myCases.length === 0) {
             if (cases.length !== 0) setCases([]);
@@ -592,7 +594,7 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
             if (containerHeight !== 230) setContainerHeight(230);
             
             if (myNode.style?.width !== 350 || myNode.style?.height !== 230) {
-                setNodes(nodes => nodes.map(n => n.id === id ? { ...n, style: { ...n.style, width: 350, height: 230 }, zIndex: -1000 } : n));
+                setNodes(nodes => nodes.map(n => n.id === id ? { ...n, style: { ...n.style, width: 350, height: 230 }, zIndex: -2 } : n));
             }
             return;
         }
@@ -601,24 +603,76 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
         const PADDING_BOTTOM = 20;
         const GAP = 15;
         const CASE_MIN_WIDTH = 250;
+        const CASE_MIN_HEIGHT = 166;
         const ADD_BUTTON_WIDTH = 65;
-        
+
+        const getAbsPos = (node) => {
+            let x = node.position.x;
+            let y = node.position.y;
+            let curr = node;
+            let depth = 0;
+            while (curr.parentId && depth < 10) {
+                const parent = nds.find(p => p.id === curr.parentId);
+                if (!parent) break;
+                x += parent.position.x;
+                y += parent.position.y;
+                curr = parent;
+                depth++;
+            }
+            return { x, y };
+        };
+
+        const swAbs = getAbsPos(myNode);
+        const absSwitchX = swAbs.x;
+        const absSwitchY = swAbs.y;
+
+        // Global stretch check specifically for switch:
+        // Calculate the maximum bottom reach across ALL connectable blocks anywhere within any case of this switch
+        let maxInnerBottom = 0;
+        const CONNECTABLE = ['ACTION', 'IO', 'CONDITION', 'PROCESS'];
+
+        myCases.forEach(c => {
+            const cW = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
+            const cH = c.style?.height ? parseInt(c.style.height) : CASE_MIN_HEIGHT;
+            const cAbs = getAbsPos(c);
+            const caseAbsX = cAbs.x;
+            const caseAbsY = cAbs.y;
+
+            const innerBlocks = nds.filter(n => {
+                if (!CONNECTABLE.includes(n.type)) return false;
+                if (n.parentId === c.id) return true;
+                if (n.parentId && n.parentId !== id && n.parentId !== c.id) return false;
+                
+                const nAbs = getAbsPos(n);
+                const nW = n.measured?.width || n.width || 100;
+                const nH = n.measured?.height || n.height || 50;
+                const cx = nAbs.x + nW / 2;
+                const cy = nAbs.y + nH / 2;
+                return cx >= caseAbsX && cx <= caseAbsX + cW && cy >= caseAbsY && cy <= caseAbsY + cH + 30;
+            });
+
+            innerBlocks.forEach(n => {
+                const nAbs = getAbsPos(n);
+                const nH = n.measured?.height || n.height || 50;
+                const bottomRelCase = (nAbs.y + nH) - caseAbsY;
+                if (bottomRelCase > maxInnerBottom) {
+                    maxInnerBottom = bottomRelCase;
+                }
+            });
+        });
+
+        // Retracts to the lowest point where overlap of another block anywhere within the cases is happening
+        const maxHeight = Math.max(CASE_MIN_HEIGHT, Math.round(maxInnerBottom + 30));
         let currentX = GAP;
-        let maxHeight = 166; // 230 (min container height) - 44 (PADDING_TOP) - 20 (PADDING_BOTTOM)
         let changed = false;
 
         const caseData = [];
 
         myCases.forEach((c) => {
-            const h = c.style?.height ? parseInt(c.style.height) : 166;
-            if (h > maxHeight) maxHeight = h;
-        });
-
-        myCases.forEach((c) => {
             const w = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
             const targetX = Math.round(currentX);
             const targetY = Math.round(PADDING_TOP);
-            const currentH = c.style?.height ? parseInt(c.style.height) : 166;
+            const currentH = c.style?.height ? parseInt(c.style.height) : CASE_MIN_HEIGHT;
             
             if (!c.dragging) {
                 if (Math.round(c.position.x) !== targetX || Math.round(c.position.y) !== targetY || currentH !== maxHeight) {
@@ -664,12 +718,13 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
                     const cAbsY = absSwitchY + c.position.y;
                     
                     const innerNodes = nodes.filter(n => {
-                        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type) || n.parentId) return false;
+                        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER'].includes(n.type)) return false;
+                        if (n.parentId && n.parentId !== c.id) return false;
                         const nW = n.measured?.width || 100;
                         const nH = n.measured?.height || 50;
                         const cx = (n.positionAbsolute?.x || n.position.x) + nW/2;
                         const cy = (n.positionAbsolute?.y || n.position.y) + nH/2;
-                        return cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH;
+                        return n.parentId === c.id || (cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH + 30);
                     });
                     
                     if (innerNodes.length === 0) {
@@ -680,14 +735,16 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
                 deletedCases.forEach(dc => {
                     const dcAbsX = absSwitchX + dc.x;
                     const dcAbsY = absSwitchY + dc.y;
+                    const dcH = dc.h || 166;
                     
                     const innerNodes = nodes.filter(n => {
-                        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type) || n.parentId) return false;
+                        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER'].includes(n.type)) return false;
+                        if (n.parentId && n.parentId !== dc.id) return false;
                         const nW = n.measured?.width || 100;
                         const nH = n.measured?.height || 50;
                         const cx = (n.positionAbsolute?.x || n.position.x) + nW/2;
                         const cy = (n.positionAbsolute?.y || n.position.y) + nH/2;
-                        return cx >= dcAbsX && cx <= dcAbsX + dc.w && cy >= dcAbsY && cy <= dcAbsY + dc.h;
+                        return n.parentId === dc.id || (cx >= dcAbsX && cx <= dcAbsX + dc.w && cy >= dcAbsY && cy <= dcAbsY + dcH + 30);
                     });
                     
                     if (innerNodes.length > 0) {
@@ -719,17 +776,20 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
                         const cH = c.style?.height ? parseInt(c.style.height) : 150;
                         
                         const innerNodes = nodes.filter(n => {
-                            if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type) || n.parentId) return false;
+                            if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER'].includes(n.type)) return false;
+                            if (n.parentId && n.parentId !== c.id) return false;
                             const nW = n.measured?.width || 100;
                             const nH = n.measured?.height || 50;
-                            const cx = n.position.x + nW/2;
-                            const cy = n.position.y + nH/2;
-                            return cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH;
+                            const cx = (n.positionAbsolute?.x || n.position.x) + nW/2;
+                            const cy = (n.positionAbsolute?.y || n.position.y) + nH/2;
+                            return n.parentId === c.id || (cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY);
                         });
                         
                         innerNodes.forEach(n => {
-                            if (!nodeMoves.has(n.id)) {
-                                nodeMoves.set(n.id, { dx, dy });
+                            if (n.parentId !== c.id) {
+                                if (!nodeMoves.has(n.id)) {
+                                    nodeMoves.set(n.id, { dx, dy });
+                                }
                             }
                         });
                     }
@@ -742,7 +802,7 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
                 
                 return nextNodes.map(n => {
                     if (n.id === id) {
-                        return { ...n, style: { ...n.style, width: targetContainerWidth, height: targetContainerHeight }, zIndex: -10000 };
+                        return { ...n, style: { ...n.style, width: targetContainerWidth, height: targetContainerHeight }, zIndex: -2 };
                     }
                     const caseInfo = caseData.find(cd => cd.id === n.id);
                     if (caseInfo) {
@@ -766,59 +826,146 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
     };
     loop();
     return () => cancelAnimationFrame(animationFrameId);
-  }, [id, getNodes, setNodes, cases, containerWidth, containerHeight, hasDefault]);
+  }, [id, getNodes, setNodes, cases, containerWidth, containerHeight, dragging]);
+
+  const handleSelectAll = React.useCallback((e) => {
+    if (e && e.target && (e.target.tagName === 'INPUT' || e.target.closest('input') || e.target.closest('button'))) return;
+    setNodes(nds => {
+      const myNode = nds.find(n => n.id === id);
+      if (!myNode) return nds;
+      
+      const myCases = nds.filter(n => n.type === 'CASE_CONTAINER' && (n.parentId === id || n.data?.switchId === id));
+      const caseIds = new Set(myCases.map(c => c.id));
+      
+      const absSwitchX = myNode.position.x;
+      const absSwitchY = myNode.position.y;
+      const myW = myNode.style?.width ? parseInt(myNode.style.width) : 350;
+      const myH = myNode.style?.height ? parseInt(myNode.style.height) : 230;
+
+      return nds.map(n => {
+        if (n.id === id || caseIds.has(n.id)) return { ...n, selected: true };
+        if (['LOOP_CONTAINER', 'FOR_CONTAINER', 'GROUP_BG'].includes(n.type)) return n;
+        
+        const nW = n.measured?.width || n.width || 100;
+        const nH = n.measured?.height || n.height || 50;
+        const cx = n.position.x + nW / 2;
+        const cy = n.position.y + nH / 2;
+        
+        if (n.parentId === id || caseIds.has(n.parentId) || (cx >= absSwitchX && cx <= absSwitchX + myW && cy >= absSwitchY && cy <= absSwitchY + myH + 30)) {
+          return { ...n, selected: true };
+        }
+        return n;
+      });
+    });
+  }, [id, setNodes]);
 
   const addCase = () => {
       setNodes(nds => {
-          const myCases = nds.filter(n => n.type === 'CASE_CONTAINER' && n.data?.switchId === id && !n.data.isDefault);
+          const allMyCases = nds.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === id || n.parentId === id));
           let maxVal = 0;
           let maxX = 0;
-          myCases.forEach(c => {
-              const val = parseInt(c.data.caseVal);
+          allMyCases.forEach(c => {
+              const val = parseInt(c.data?.caseVal);
               if (!isNaN(val) && val > maxVal) maxVal = val;
               if (c.position.x > maxX) maxX = c.position.x;
           });
           const nextVal = (maxVal + 1).toString();
           
-          const newCaseId = `case_${Date.now()}`;
+          const currentCaseH = allMyCases.length > 0 ? (allMyCases[0].style?.height ? parseInt(allMyCases[0].style.height) : 166) : 166;
+          const newCaseId = 'case_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+
+          // If default case is currently the rightmost case, keep default on the most right and place new case before it
+          const defaultCase = allMyCases.find(c => c.data?.isDefault);
+          const isDefaultMostRight = defaultCase && allMyCases.every(c => c.id === defaultCase.id || c.position.x < defaultCase.position.x);
+
+          const newContainerWidth = Math.max(350, (allMyCases.length + 1) * 265 + 65);
+
+          if (isDefaultMostRight) {
+              const shift = 265;
+              const newCasePos = { x: defaultCase.position.x, y: 44 };
+              const newCase = {
+                  id: newCaseId,
+                  type: 'CASE_CONTAINER',
+                  position: newCasePos,
+                  parentId: id,
+                  data: { caseVal: nextVal, isDefault: false, colorMode: data.colorMode, switchId: id, onStartEdit: data.onStartEdit },
+                  style: { width: 250, height: currentCaseH },
+                  zIndex: 1,
+                  draggable: true,
+                  selectable: true
+              };
+
+              const defOldX = defaultCase.position.x;
+              const defW = defaultCase.style?.width ? parseInt(defaultCase.style.width) : 250;
+              const defCaseAbsX = (nds.find(p => p.id === id)?.position.x || 0) + defOldX;
+
+              const updatedNodes = nds.map(n => {
+                  if (n.id === id) {
+                      return { ...n, style: { ...n.style, width: newContainerWidth } };
+                  }
+                  if (n.id === defaultCase.id) {
+                      return { ...n, position: { ...n.position, x: n.position.x + shift } };
+                  }
+                  if (['ACTION', 'IO', 'CONDITION'].includes(n.type)) {
+                      const nX = n.position.x;
+                      if ((n.parentId === id && nX >= defOldX && nX <= defOldX + defW) ||
+                          (!n.parentId && nX >= defCaseAbsX && nX <= defCaseAbsX + defW)) {
+                          return { ...n, position: { ...n.position, x: n.position.x + shift } };
+                      }
+                  }
+                  return n;
+              });
+
+              return [...updatedNodes, newCase];
+          }
+
           const newCase = {
               id: newCaseId,
               type: 'CASE_CONTAINER',
-              position: { x: maxX + 100, y: 60 },
+              position: { x: (allMyCases.length > 0 ? maxX + 265 : 15), y: 44 },
               parentId: id,
               data: { caseVal: nextVal, isDefault: false, colorMode: data.colorMode, switchId: id, onStartEdit: data.onStartEdit },
-              style: { width: 250, height: 150 },
-              zIndex: -9999,
+              style: { width: 250, height: currentCaseH },
+              zIndex: 1,
               draggable: true,
               selectable: true
           };
-          return [...nds, newCase];
+          return nds.map(n => n.id === id ? { ...n, style: { ...n.style, width: newContainerWidth } } : n).concat(newCase);
       });
   };
 
   const toggleDefaultCase = () => {
-      if (hasDefault) {
-          // Remove default case
-          setNodes(nds => nds.filter(n => !(n.type === 'CASE_CONTAINER' && n.data?.switchId === id && n.data.isDefault)));
-      } else {
-          // Add default case
-          setNodes(nds => {
-              const myNode = nds.find(n => n.id === id);
-              const newCaseId = `case_def_${Date.now()}`;
+      setNodes(nds => {
+          const hasExistingDef = nds.some(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === id || n.parentId === id) && n.data?.isDefault);
+          const allMyCases = nds.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === id || n.parentId === id));
+          if (hasExistingDef) {
+              // Remove default case
+              const newContainerWidth = Math.max(350, Math.max(0, allMyCases.length - 1) * 265 + 65);
+              return nds.filter(n => !(n.type === 'CASE_CONTAINER' && (n.data?.switchId === id || n.parentId === id) && n.data?.isDefault))
+                        .map(n => n.id === id ? { ...n, style: { ...n.style, width: newContainerWidth } } : n);
+          } else {
+              // Add default case
+              let maxX = 0;
+              allMyCases.forEach(c => {
+                  if (c.position.x > maxX) maxX = c.position.x;
+              });
+              const currentCaseH = allMyCases.length > 0 ? (allMyCases[0].style?.height ? parseInt(allMyCases[0].style.height) : 166) : 166;
+              const newCaseId = 'case_def_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
               const newCase = {
                   id: newCaseId,
                   type: 'CASE_CONTAINER',
-                  position: { x: 20, y: 60 },
+                  position: { x: (allMyCases.length > 0 ? maxX + 265 : 15), y: 44 },
                   parentId: id,
                   data: { caseVal: 'default', isDefault: true, colorMode: data.colorMode, switchId: id, onStartEdit: data.onStartEdit },
-                  style: { width: 250, height: 150 },
-                  zIndex: -9999,
+                  style: { width: 250, height: currentCaseH },
+                  zIndex: 1,
                   draggable: true,
                   selectable: true
               };
-              return [...nds, newCase];
-          });
-      }
+              const newContainerWidth = Math.max(350, (allMyCases.length + 1) * 265 + 65);
+              return nds.map(n => n.id === id ? { ...n, style: { ...n.style, width: newContainerWidth } } : n).concat(newCase);
+          }
+      });
   };
 
   const updateField = (field, value) => {
@@ -826,17 +973,19 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
       else setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, [field]: value } } : n));
   };
 
-  const handleClass = `!w-[14px] !h-[14px] !min-w-[14px] !min-h-[14px] !bg-white dark:!bg-gray-800 !border-2 ${isGray ? '!border-gray-500' : '!border-rose-500'} !text-[10px] !font-bold flex items-center justify-center !rounded-sm z-20 cursor-crosshair p-0`;
   const switchHandleClass = `!w-[18px] !h-[18px] !min-w-[18px] !min-h-[18px] !bg-white dark:!bg-gray-800 !border-2 ${isGray ? '!border-gray-500' : '!border-rose-500'} flex items-center justify-center !rounded-full z-20 cursor-crosshair p-0`;
 
   return (
     <div className={`relative w-full h-full rounded-lg border-2 border-dashed ${borderColor} ${bgColor} flex flex-col overflow-visible ${selected ? 'ring-2 ring-rose-500 ring-offset-2 ring-offset-rose-50/50' : ''}`}>
       <Handle type="target" position={Position.Top} id="t-top" className={switchHandleClass} style={{ left: '16px', right: 'auto', transform: 'translate(-50%, -50%)' }}>
-          <ArrowDown size={12} className={isGray ? 'text-gray-500' : 'text-rose-500'} />
+        <ArrowDown size={10} className={isGray ? "text-gray-500" : "text-rose-500"} />
       </Handle>
       
       {/* Moved the tag to left-8 to reduce gap to the top node */}
-      <div className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${tagBorder} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing z-20`}>
+      <div 
+        onPointerDown={handleSelectAll}
+        className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${tagBorder} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing z-20`}
+      >
         {data.showDebugger && (
             <button 
                 onDoubleClick={e => e.stopPropagation()} 
@@ -869,9 +1018,10 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
         </div>
       </div>
       
+
       <div 
-          className={`absolute flex items-center justify-center z-10 pointer-events-auto ${cases.length === 0 ? 'inset-x-0' : 'right-0'}`}
-          style={{ top: '0', bottom: '0', width: cases.length === 0 ? 'auto' : '65px' }}
+          className={`absolute flex items-center justify-center z-10 pointer-events-auto ${myCases.length === 0 ? 'inset-x-0' : 'right-0'}`}
+          style={{ top: '0', bottom: '0', width: myCases.length === 0 ? 'auto' : '65px' }}
       >
           <button 
               onMouseDown={e => e.stopPropagation()} 
@@ -883,8 +1033,8 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
           </button>
       </div>
 
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className={switchHandleClass}>
-          <ArrowDown size={12} className={isGray ? 'text-gray-500' : 'text-rose-500'} />
+      <Handle type="source" position={Position.Bottom} id="s-bottom" className={switchHandleClass} style={{ left: '16px', right: 'auto', transform: 'translate(-50%, 50%)' }}>
+        <ArrowDown size={10} className={isGray ? "text-gray-500" : "text-rose-500"} />
       </Handle>
     </div>
   );
@@ -892,41 +1042,39 @@ export const SwitchContainerNode = ({ id, data, selected }) => {
 
 export const CaseContainerNode = ({ id, data, selected, dragging }) => {
   const { setNodes } = useReactFlow();
+  const edges = useEdges();
   const isGray = data.colorMode === false;
   const borderColor = (selected || data.isRuntimeActive) ? 'border-rose-400' : (isGray ? 'border-gray-300 dark:border-gray-700' : 'border-rose-300 dark:border-rose-700/50');
-  const tagBorder = data.isBreakpoint 
-    ? 'border-red-500 ring-2 ring-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' 
-    : (data.isRuntimeActive ? 'border-red-500 ring-2 ring-red-400' : borderColor);
+  const tagBorder = data.isRuntimeActive ? 'border-red-500 ring-2 ring-red-400' : borderColor;
   const bgColor = isGray ? 'bg-white dark:bg-gray-800' : 'bg-rose-50/50 dark:bg-rose-950/30';
-  
-  const {
-      containerRef
-  } = useContainerBounds(id, { ...data, isCaseContainer: true }, dragging, 250, 150);
+  const canMove = data.canMoveCase !== false;
 
   const updateField = (field, value) => {
       if (data.onUpdateData) data.onUpdateData({ [field]: value });
       else setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, [field]: value } } : n));
   };
 
-  const caseHandleClass = `${handleBaseClass} ${isGray ? '!bg-gray-400' : '!bg-rose-500'} !border-0`;
+  const hasTopEdge = edges.some(e => e.source === id && e.sourceHandle === 's-top');
+  const hasBottomEdge = edges.some(e => e.target === id && e.targetHandle === 't-bottom');
+
+  const switchColorBorder = isGray ? '!border-gray-500' : '!border-rose-500';
+  const hollowHandleClass = `!w-2 !h-2 !min-w-2 !min-h-2 !bg-white dark:!bg-gray-900 !border-2 ${switchColorBorder} !rounded-full pointer-events-none z-20 transition-opacity`;
 
   return (
     <div 
-      ref={containerRef} 
-      className={`nodrag relative w-full h-full rounded border border-solid ${borderColor} ${bgColor} flex flex-col z-10 shadow-sm ${selected ? 'ring-2 ring-rose-400' : ''}`}
+      className={`relative w-full h-full rounded border border-solid ${borderColor} ${bgColor} flex flex-col z-10 shadow-sm ${selected ? 'ring-2 ring-rose-400' : ''} ${canMove ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
     >
-      <Handle type="source" position={Position.Bottom} id="s-top" className={caseHandleClass} style={{ left: '8px', right: 'auto', top: '0', transform: 'translate(0, -50%)' }} />
+      <Handle 
+        type="source" 
+        position={Position.Bottom} 
+        id="s-top" 
+        isConnectable={false}
+        className={`${hollowHandleClass} ${hasTopEdge ? 'opacity-100' : 'opacity-0'}`} 
+        style={{ left: '16px', right: 'auto', top: 0, bottom: 'auto', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }} 
+      />
       
       {/* Floating tag just like LoopContainer and SwitchContainer */}
-      <div className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${tagBorder} flex items-center gap-1.5 pointer-events-auto cursor-pointer z-20`}>
-          {data.showDebugger && (
-              <button 
-                  onDoubleClick={e => e.stopPropagation()} 
-                  onMouseDown={(e) => e.preventDefault()} 
-                  onClick={(e) => { e.stopPropagation(); data.onBreakpointToggle && data.onBreakpointToggle(id); }} 
-                  className={breakpointButtonClass(data.isBreakpoint, "-left-[58px]")} 
-              />
-          )}
+      <div className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${tagBorder} flex items-center gap-1.5 pointer-events-auto ${canMove ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} z-20`}>
           {/* Hollow Colon Icon */}
           <div className="flex flex-col gap-[2.5px] text-rose-500">
               <div className="w-[4px] h-[4px] rounded-full border-[1.5px] border-current"></div>
@@ -947,8 +1095,17 @@ export const CaseContainerNode = ({ id, data, selected, dragging }) => {
               />
           )}
       </div>
+
+      <div className="w-full flex-1 pointer-events-auto" />
       
-      <Handle type="target" position={Position.Bottom} id="t-bottom" className={caseHandleClass} />
+      <Handle 
+        type="target" 
+        position={Position.Top} 
+        id="t-bottom" 
+        isConnectable={false}
+        className={`${hollowHandleClass} ${hasBottomEdge ? 'opacity-100' : 'opacity-0'}`} 
+        style={{ left: '50%', right: 'auto', top: '100%', bottom: 'auto', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }} 
+      />
     </div>
   );
 };

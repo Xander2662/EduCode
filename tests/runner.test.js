@@ -711,4 +711,117 @@ describe('DiagramRunner - In-Depth Tests for All Data Types', () => {
             expect(runner.output).toContain('123');
         });
     });
+
+    // 7. SWITCH STEP ORDER & FUNCTION CALLS
+    describe('Switch and Function Call Execution', () => {
+        it('Navštíví nejprve tag CASE_CONTAINER a teprve poté bloky uvnitř větve', () => {
+            const nodes = [
+                { id: 'start', type: 'START_END', data: { mode: 'start', label: 'main' } },
+                { id: 'set_x', type: 'ACTION', data: { label: 'x = 1' } },
+                { id: 'sw', type: 'SWITCH_CONTAINER', data: { switchVar: 'x' } },
+                { id: 'case1', type: 'CASE_CONTAINER', parentId: 'sw', data: { switchId: 'sw', caseVal: '1' } },
+                { id: 'act1', type: 'ACTION', data: { label: 'msg = "in_case_1"' } },
+                { id: 'after_sw', type: 'ACTION', data: { label: 'done = 1' } },
+                { id: 'end', type: 'START_END', data: { mode: 'end' } }
+            ];
+            const edges = [
+                { source: 'start', target: 'set_x' },
+                { source: 'set_x', target: 'sw' },
+                { source: 'case1', target: 'act1' },
+                { source: 'act1', target: 'case1', targetHandle: 't-bottom' },
+                { source: 'sw', target: 'after_sw' },
+                { source: 'after_sw', target: 'end' }
+            ];
+
+            const runner = new DiagramRunner(nodes, edges);
+            const stepTrail = [];
+
+            let res;
+            while (!runner.isFinished) {
+                res = runner.step();
+                if (res.currentNodeId) stepTrail.push(res.currentNodeId);
+            }
+
+            // Expected order:
+            // start -> set_x -> sw -> case1 -> act1 -> after_sw -> end
+            expect(stepTrail).toEqual(['start', 'set_x', 'sw', 'case1', 'act1', 'after_sw', 'end']);
+            expect(runner.variables['msg']).toBe('in_case_1');
+            expect(runner.variables['done']).toBe(1);
+        });
+
+        it('Skočí do jiné funkce při volání jejího názvu a po jejím skončení se vrátí zpět', () => {
+            const nodes = [
+                // main function
+                { id: 'main_start', type: 'START_END', data: { mode: 'start', label: 'main' } },
+                { id: 'call_act', type: 'ACTION', data: { label: 'greet()' } },
+                { id: 'main_after', type: 'ACTION', data: { label: 'fin = true' } },
+                { id: 'main_end', type: 'START_END', data: { mode: 'end', label: 'END' } },
+
+                // greet function
+                { id: 'greet_start', type: 'START_END', data: { mode: 'start', label: 'greet' } },
+                { id: 'greet_body', type: 'ACTION', data: { label: 'PRINT("Hello from func")' } },
+                { id: 'greet_end', type: 'START_END', data: { mode: 'end', label: 'END' } }
+            ];
+            const edges = [
+                { source: 'main_start', target: 'call_act' },
+                { source: 'call_act', target: 'main_after' },
+                { source: 'main_after', target: 'main_end' },
+
+                { source: 'greet_start', target: 'greet_body' },
+                { source: 'greet_body', target: 'greet_end' }
+            ];
+
+            const runner = new DiagramRunner(nodes, edges);
+            const stepTrail = [];
+
+            while (!runner.isFinished) {
+                const res = runner.step();
+                if (res.currentNodeId) stepTrail.push(res.currentNodeId);
+            }
+
+            // main_start -> call_act (jumps to greet_start) -> greet_start -> greet_body -> greet_end (returns to main_after) -> main_after -> main_end
+            expect(stepTrail).toEqual([
+                'main_start',
+                'call_act',
+                'greet_start',
+                'greet_body',
+                'greet_end',
+                'main_after',
+                'main_end'
+            ]);
+            expect(runner.output).toContain('Hello from func');
+            expect(runner.variables['fin']).toBe(true);
+        });
+
+        it('Při volání funkce s přiřazením (x = add()) předá návratovou hodnotu zpět', () => {
+            const nodes = [
+                // main function
+                { id: 'main_start', type: 'START_END', data: { mode: 'start', label: 'main' } },
+                { id: 'call_act', type: 'ACTION', data: { label: 'val = calc(10, 5)' } },
+                { id: 'main_after', type: 'ACTION', data: { label: 'total = val * 2' } },
+                { id: 'main_end', type: 'START_END', data: { mode: 'end', label: 'END' } },
+
+                // calc(a, b) function
+                { id: 'calc_start', type: 'START_END', data: { mode: 'start', label: 'calc(a, b)' } },
+                { id: 'calc_body', type: 'ACTION', data: { label: 'RETURN a + b' } },
+                { id: 'calc_end', type: 'START_END', data: { mode: 'end', label: 'END' } }
+            ];
+            const edges = [
+                { source: 'main_start', target: 'call_act' },
+                { source: 'call_act', target: 'main_after' },
+                { source: 'main_after', target: 'main_end' },
+
+                { source: 'calc_start', target: 'calc_body' },
+                { source: 'calc_body', target: 'calc_end' }
+            ];
+
+            const runner = new DiagramRunner(nodes, edges);
+            while (!runner.isFinished) {
+                runner.step();
+            }
+
+            expect(runner.variables['val']).toBe(15);
+            expect(runner.variables['total']).toBe(30);
+        });
+    });
 });

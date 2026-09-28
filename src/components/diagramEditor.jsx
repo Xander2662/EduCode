@@ -16,8 +16,8 @@ const DEFAULT_BLOCK_STRINGS = {
   START_END: '',
   ACTION: 'Operace',
   IO: 'x',
-  CONDITION: 'x > 0',
-  LOOP_CONTAINER: '',
+  CONDITION: 'x < 0',
+  LOOP_CONTAINER: 'x < 0',
   FOR_CONTAINER: '',
   SWITCH_CONTAINER: 'x',
   COMMENT: 'Komentář'
@@ -42,6 +42,131 @@ const nodeTypes = {
   CASE_CONTAINER: CaseContainerNode
 };
 const edgeTypes = { customEdge: CustomEdge };
+
+export const syncCaseAutoWiring = (caseNode, allNodes, allEdges, edgeStyle = 'true-false') => {
+  const CONNECTABLE_TYPES = ['PROCESS', 'ACTION', 'IO', 'CONDITION'];
+  const switchId = caseNode.data?.switchId || caseNode.parentId;
+
+  const getAbsPos = (node) => {
+    let x = node.position.x;
+    let y = node.position.y;
+    let curr = node;
+    let depth = 0;
+    while (curr.parentId && depth < 10) {
+      const parent = allNodes.find(p => p.id === curr.parentId);
+      if (!parent) break;
+      x += parent.position.x;
+      y += parent.position.y;
+      curr = parent;
+      depth++;
+    }
+    return { x, y };
+  };
+
+  const casePos = getAbsPos(caseNode);
+  const cX = casePos.x;
+  const cY = casePos.y;
+  const cW = caseNode.measured?.width || parseInt(caseNode.style?.width || 250);
+  const cH = caseNode.measured?.height || parseInt(caseNode.style?.height || 166);
+
+  const innerBlocks = allNodes.filter(n => {
+    if (!CONNECTABLE_TYPES.includes(n.type)) return false;
+    if (n.parentId === caseNode.id) return true;
+    if (n.parentId && n.parentId !== caseNode.id && n.parentId !== switchId) return false;
+    const nPos = getAbsPos(n);
+    const nW = n.measured?.width || n.width || 100;
+    const nH = n.measured?.height || n.height || 50;
+    const cx = nPos.x + nW / 2;
+    const cy = nPos.y + nH / 2;
+    return cx >= cX && cx <= cX + cW && cy >= cY && cy <= cY + cH + 30;
+  });
+
+  // Remove existing edges connected to this case's s-top or t-bottom
+  let eds = allEdges.filter(e => 
+    !(e.source === caseNode.id && e.sourceHandle === 's-top') &&
+    !(e.target === caseNode.id && e.targetHandle === 't-bottom')
+  );
+
+  if (innerBlocks.length === 0) {
+    return eds;
+  }
+
+  // Sort inner blocks by vertical position (Y level)
+  innerBlocks.sort((a, b) => {
+    const aY = getAbsPos(a).y;
+    const bY = getAbsPos(b).y;
+    return aY - bY;
+  });
+
+  const highest = innerBlocks[0];
+  const lowest = innerBlocks[innerBlocks.length - 1];
+
+  // 1. Connect upper node of case (s-top) to highest connectable block (t-top)
+  eds.push({
+    id: `e_${caseNode.id}_top_${highest.id}`,
+    source: caseNode.id,
+    target: highest.id,
+    sourceHandle: 's-top',
+    targetHandle: 't-top',
+    type: 'customEdge',
+    interactionWidth: 0,
+    data: { edgeStyle: 'straight', isCaseAutoEdge: true },
+    markerEnd: { type: MarkerType.ArrowClosed }
+  });
+
+  // 2. Connect lowest connectable block to lower node of case (t-bottom)
+  if (lowest.type !== 'CONDITION') {
+    eds.push({
+      id: `e_${lowest.id}_bottom_${caseNode.id}`,
+      source: lowest.id,
+      target: caseNode.id,
+      sourceHandle: 's-bottom',
+      targetHandle: 't-bottom',
+      type: 'customEdge',
+      interactionWidth: 0,
+      data: { edgeStyle: 'straight', isCaseAutoEdge: true },
+      markerEnd: { type: MarkerType.ArrowClosed }
+    });
+  } else {
+    const pref = edgeLabels[edgeStyle || 'true-false'] || { t: 'True', f: 'False' };
+    const isSwapped = lowest.data?.isSwapped === true;
+    const bLabel = isSwapped ? pref.f : pref.t;
+    const rLabel = isSwapped ? pref.t : pref.f;
+
+    const innerIds = new Set(innerBlocks.map(b => b.id));
+    const hasBottomToInner = eds.some(e => e.source === lowest.id && e.sourceHandle === 's-bottom' && innerIds.has(e.target));
+    const hasRightToInner = eds.some(e => e.source === lowest.id && e.sourceHandle === 's-right' && innerIds.has(e.target));
+
+    if (!hasBottomToInner) {
+      eds.push({
+        id: `e_${lowest.id}_cond_b_${caseNode.id}`,
+        source: lowest.id,
+        target: caseNode.id,
+        sourceHandle: 's-bottom',
+        targetHandle: 't-bottom',
+        type: 'customEdge',
+        interactionWidth: 0,
+        data: { label: bLabel, isCondition: true, edgeStyle: 'straight', isCaseAutoEdge: true },
+        markerEnd: { type: MarkerType.ArrowClosed }
+      });
+    }
+    if (!hasRightToInner) {
+      eds.push({
+        id: `e_${lowest.id}_cond_r_${caseNode.id}`,
+        source: lowest.id,
+        target: caseNode.id,
+        sourceHandle: 's-right',
+        targetHandle: 't-bottom',
+        type: 'customEdge',
+        interactionWidth: 0,
+        data: { label: rLabel, isCondition: true, edgeStyle: 'straight', isCaseAutoEdge: true },
+        markerEnd: { type: MarkerType.ArrowClosed }
+      });
+    }
+  }
+
+  return eds;
+};
 
 function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colorMode, isDarkMode, groupColoring, showDebugger, conditionShape, selectionMode, hotkeys, activeWindowRef, onSelectionChange, externalSelectedIds, activeRuntimeNodeId, breakpoints = [], onBreakpointToggle, onPaneClick, onInteract, onLogAction, onRequestTutorial, editorMode }) {
   const safeHotkeys = hotkeys || {};
@@ -85,6 +210,8 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   });
   const lastDragTimeRef = useRef(0);
   const dragStartPositionsRef = useRef(null);
+  const switchDragRef = useRef(null);
+  const caseDragRef = useRef(null);
   const reactFlowWrapper = useRef(null);
   useEffect(() => {
     const handleMouseMove = (e) => { 
@@ -362,11 +489,32 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     if (onLogAction) onLogAction('REDO_PERFORMED');
   }, [readOnly, nodes, edges, setNodes, setEdges, handleInteract, updateNodeLabel, updateNodeData, edgeStyle, onLogAction]);
 
-  const mappedNodes = useMemo(() => nodes.map(n => ({
+  const mappedNodes = useMemo(() => {
+    const regularCaseCountBySwitch = new Map();
+    nodes.forEach(n => {
+      if (n.type === 'CASE_CONTAINER' && !n.data?.isDefault) {
+        const swId = n.data?.switchId || n.parentId;
+        if (swId) {
+          regularCaseCountBySwitch.set(swId, (regularCaseCountBySwitch.get(swId) || 0) + 1);
+        }
+      }
+    });
+
+    return nodes.map(n => {
+      let canMoveCase = true;
+      if (n.type === 'CASE_CONTAINER') {
+        const swId = n.data?.switchId || n.parentId;
+        const regCount = regularCaseCountBySwitch.get(swId) || 0;
+        canMoveCase = regCount > 1;
+      }
+      return {
         ...n,
-        zIndex: (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? -1 : (n.type === 'SWITCH_CONTAINER' ? -10000 : (n.type === 'CASE_CONTAINER' ? -9999 : 10)),
+        className: n.type === 'CASE_CONTAINER' ? (canMoveCase ? 'cursor-grab' : 'cursor-default') : n.className,
+        draggable: n.type === 'CASE_CONTAINER' ? canMoveCase : (n.draggable !== undefined ? n.draggable : true),
+        zIndex: (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? -1 : (n.type === 'SWITCH_CONTAINER' ? -2 : (n.type === 'CASE_CONTAINER' ? 1 : 10)),
         data: { 
             ...n.data, 
+            canMoveCase,
             colorMode, 
             showDebugger,
             readOnly,
@@ -378,7 +526,9 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             onToggleIOType: () => toggleIOType(n.id, n.data.ioType || 'input'),
             onToggleEntityType: () => toggleEntityType(n.id, n.data.entityType || 'FUNCTION')
         }
-  })), [nodes, colorMode, showDebugger, readOnly, conditionShape, externalSelectedIds, activeRuntimeNodeId, breakpoints, onBreakpointToggle, toggleIOType, toggleEntityType]);
+      };
+    });
+  }, [nodes, colorMode, showDebugger, readOnly, conditionShape, externalSelectedIds, activeRuntimeNodeId, breakpoints, onBreakpointToggle, toggleIOType, toggleEntityType]);
 
   const [nodeCount, setNodeCount] = useState(0);
   useEffect(() => { setNodeCount(nodes.length); }, [nodes.length]);
@@ -392,7 +542,20 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         if (!groupColoring || groupDefs.length === 0) return [];
         return computeGroupBounds(nodes, groupDefs, colorMode);
   }, [nodes, groupDefs, groupColoring, colorMode]);
-  const allNodes = useMemo(() => [...bgNodes, ...mappedNodes], [bgNodes, mappedNodes]);
+  const sortedMappedNodes = useMemo(() => {
+    const nodeMap = new Map(mappedNodes.map(n => [n.id, n]));
+    const getDepth = (n) => {
+      let d = 0;
+      let curr = n;
+      while (curr && curr.parentId && curr.parentId !== '1' && d < 10) {
+        curr = nodeMap.get(curr.parentId);
+        d++;
+      }
+      return d;
+    };
+    return [...mappedNodes].sort((a, b) => getDepth(a) - getDepth(b));
+  }, [mappedNodes]);
+  const allNodes = useMemo(() => [...bgNodes, ...sortedMappedNodes], [bgNodes, sortedMappedNodes]);
   const allEdges = useMemo(() => edges.map(e => ({ ...e, data: { ...e.data, readOnly, edgeStyle } })), [edges, readOnly, edgeStyle]);
 
   useEffect(() => {
@@ -453,6 +616,27 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     });
   }, [edgeStyle, nodeCount, setEdges]); 
 
+  useEffect(() => {
+    if (readOnly) return;
+    const caseContainers = nodes.filter(n => n.type === 'CASE_CONTAINER');
+    if (caseContainers.length === 0) return;
+
+    setEdges(eds => {
+      let nextEds = eds;
+      caseContainers.forEach(cNode => {
+        nextEds = syncCaseAutoWiring(cNode, nodes, nextEds, edgeStyle);
+      });
+      const changed = nextEds.length !== eds.length || nextEds.some((e, i) => 
+        e.id !== eds[i]?.id || 
+        e.source !== eds[i]?.source || 
+        e.target !== eds[i]?.target ||
+        e.sourceHandle !== eds[i]?.sourceHandle ||
+        e.targetHandle !== eds[i]?.targetHandle
+      );
+      return changed ? nextEds : eds;
+    });
+  }, [nodes, edgeStyle, readOnly, setEdges]); 
+
   const executeDelete = useCallback(() => {
     takeSnapshot();
     handleInteract();
@@ -472,15 +656,46 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             }
         });
     }
-    
-    setNodes(nds => nds.filter(n => !selectedNodeIds.has(n.id)));
-    setEdges(eds => eds.filter(e => !selectedEdgeIds.has(e.id) && !selectedNodeIds.has(e.source) && !selectedNodeIds.has(e.target)));
-    setDeleteConfirm(false);
-  }, [selectedNodes, selectedEdges, setNodes, setEdges, handleInteract, onLogAction, nodes, takeSnapshot]);
 
-  const handleCopy = useCallback(() => { 
-    if (selectedNodes.length > 0) {
-      const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
+    // Also include any blocks spatially inside deleted cases
+    const caseNodesToDelete = nodes.filter(n => selectedNodeIds.has(n.id) && n.type === 'CASE_CONTAINER');
+    caseNodesToDelete.forEach(caseNode => {
+      const switchNode = caseNode.parentId ? nodes.find(p => p.id === caseNode.parentId) : (caseNode.data?.switchId ? nodes.find(p => p.id === caseNode.data.switchId) : null);
+      const cAbsX = (switchNode ? switchNode.position.x : 0) + caseNode.position.x;
+      const cAbsY = (switchNode ? switchNode.position.y : 0) + caseNode.position.y;
+      const cW = caseNode.style?.width ? parseInt(caseNode.style.width) : 250;
+      const cH = caseNode.measured?.height || parseInt(caseNode.style?.height || 166);
+      
+      nodes.forEach(n => {
+        if (selectedNodeIds.has(n.id)) return;
+        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER'].includes(n.type)) return;
+        const nW = n.measured?.width || n.width || 100;
+        const nH = n.measured?.height || n.height || 50;
+        const cx = n.position.x + nW / 2;
+        const cy = n.position.y + nH / 2;
+        if (cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH + 30) {
+          selectedNodeIds.add(n.id);
+        }
+      });
+    });
+    
+    const remainingNodes = nodes.filter(n => !selectedNodeIds.has(n.id));
+    setNodes(remainingNodes);
+    setEdges(eds => {
+      let filteredEds = eds.filter(e => !selectedEdgeIds.has(e.id) && !selectedNodeIds.has(e.source) && !selectedNodeIds.has(e.target));
+      const remainingCases = remainingNodes.filter(n => n.type === 'CASE_CONTAINER');
+      remainingCases.forEach(caseNode => {
+        filteredEds = syncCaseAutoWiring(caseNode, remainingNodes, filteredEds, edgeStyle);
+      });
+      return filteredEds;
+    });
+    setDeleteConfirm(false);
+  }, [selectedNodes, selectedEdges, setNodes, setEdges, handleInteract, onLogAction, nodes, takeSnapshot, edgeStyle]);
+
+  const handleCopy = useCallback((nodesParam = null) => { 
+    const nodesSource = (nodesParam && nodesParam.length > 0) ? nodesParam : selectedNodes;
+    if (nodesSource.length > 0) {
+      const selectedNodeIds = new Set(nodesSource.map(n => n.id));
       
       // Cascade copy to all descendants (Cases of Switches)
       let added = true;
@@ -494,6 +709,28 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
               }
           });
       }
+
+      // Also include any blocks spatially inside copied cases
+      const caseNodes = nodes.filter(n => selectedNodeIds.has(n.id) && n.type === 'CASE_CONTAINER');
+      caseNodes.forEach(caseNode => {
+        const switchNode = caseNode.parentId ? nodes.find(p => p.id === caseNode.parentId) : null;
+        const cAbsX = (switchNode ? switchNode.position.x : 0) + caseNode.position.x;
+        const cAbsY = (switchNode ? switchNode.position.y : 0) + caseNode.position.y;
+        const cW = caseNode.style?.width ? parseInt(caseNode.style.width) : 250;
+        const cH = caseNode.measured?.height || parseInt(caseNode.style?.height || 166);
+        
+        nodes.forEach(n => {
+          if (selectedNodeIds.has(n.id)) return;
+          if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER'].includes(n.type)) return;
+          const nW = n.measured?.width || n.width || 100;
+          const nH = n.measured?.height || n.height || 50;
+          const cx = n.position.x + nW / 2;
+          const cy = n.position.y + nH / 2;
+          if (cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH + 30) {
+            selectedNodeIds.add(n.id);
+          }
+        });
+      });
       
       const nodesToCopy = nodes.filter(n => selectedNodeIds.has(n.id));
       setClipboard({ nodes: nodesToCopy, edges: edges.filter(e => selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target)) });
@@ -519,6 +756,196 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             const centerY = bounds.top + bounds.height / 2;
             pastePos = screenToFlowPosition({ x: centerX, y: centerY });
         }
+    }
+
+    const copiedCases = clipboard.nodes.filter(n => n.type === 'CASE_CONTAINER');
+    let targetSwitch = (pastePos && copiedCases.length > 0) ? nodes.find(n => {
+      if (n.type !== 'SWITCH_CONTAINER') return false;
+      const swW = n.style?.width ? parseInt(n.style.width) : (n.measured?.width || 350);
+      const swH = n.style?.height ? parseInt(n.style.height) : (n.measured?.height || 230);
+      return pastePos.x >= n.position.x && pastePos.x <= n.position.x + swW &&
+             pastePos.y >= n.position.y && pastePos.y <= n.position.y + Math.max(swH, 200);
+    }) : null;
+
+    if (!targetSwitch && copiedCases.length > 0 && !clipboard.nodes.some(n => n.type === 'SWITCH_CONTAINER')) {
+      targetSwitch = nodes.find(n => n.id === copiedCases[0].parentId || n.id === copiedCases[0].data?.switchId) || null;
+    }
+
+    if (targetSwitch && copiedCases.length > 0) {
+      // Paste case(s) into targetSwitch!
+      const targetCases = nodes.filter(n => n.type === 'CASE_CONTAINER' && (n.parentId === targetSwitch.id || n.data?.switchId === targetSwitch.id));
+      const targetHasDefault = targetCases.some(c => c.data?.isDefault);
+
+      // Rule: you cannot copy default into the same switch (it will do nothing).
+      // But in a different switch it will copy it (if there is not one already).
+      const validCopiedCases = copiedCases.filter(c => {
+        if (!c.data?.isDefault) return true;
+        const sourceSwitchId = c.parentId || c.data?.switchId;
+        if (targetSwitch.id === sourceSwitchId) return false;
+        if (targetHasDefault) return false;
+        return true;
+      });
+
+      if (validCopiedCases.length === 0) {
+        return;
+      }
+
+      const defCase = targetCases.find(c => c.data?.isDefault);
+      const isDefRight = defCase && targetCases.every(c => c.id === defCase.id || c.position.x < defCase.position.x);
+
+      // Non-default cases come first (sorted by x), and any copied default case is placed last!
+      const sortedCopiedCases = [...validCopiedCases].sort((a, b) => {
+        if (a.data?.isDefault) return 1;
+        if (b.data?.isDefault) return -1;
+        return a.position.x - b.position.x;
+      });
+
+      const nonDefaultCopiedCount = sortedCopiedCases.filter(c => !c.data?.isDefault).length;
+      const shiftDefX = isDefRight ? nonDefaultCopiedCount * 265 : 0;
+      let nextSlotX = isDefRight ? defCase.position.x : (targetCases.length > 0 ? Math.max(...targetCases.map(c => c.position.x)) + 265 : 15);
+
+      const idMap = {};
+      const casePositions = new Map();
+
+      sortedCopiedCases.forEach(c => {
+        const newId = 'case_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+        idMap[c.id] = newId;
+        casePositions.set(c.id, { x: nextSlotX, y: 44 });
+        nextSlotX += 265;
+      });
+
+      // Find inner blocks in clipboard that belong to each valid copied case
+      const innerBlocksNewNodes = [];
+      const validCaseIds = new Set(validCopiedCases.map(c => c.id));
+      const nonCaseCopiedNodes = clipboard.nodes.filter(n => n.type !== 'CASE_CONTAINER' && n.type !== 'SWITCH_CONTAINER');
+
+      nonCaseCopiedNodes.forEach(n => {
+        let associatedCase = null;
+        if (n.parentId && casePositions.has(n.parentId)) {
+          associatedCase = copiedCases.find(c => c.id === n.parentId);
+        } else {
+          associatedCase = copiedCases.find(c => {
+            const switchNode = c.parentId ? (nodes.find(p => p.id === c.parentId) || clipboard.nodes.find(p => p.id === c.parentId)) : null;
+            const cX = (switchNode ? switchNode.position.x : 0) + c.position.x;
+            const cY = (switchNode ? switchNode.position.y : 0) + c.position.y;
+            const cW = c.style?.width ? parseInt(c.style.width) : 250;
+            const cH = c.measured?.height || parseInt(c.style?.height || 166);
+            const cx = n.position.x + (n.measured?.width || 100) / 2;
+            const cy = n.position.y + (n.measured?.height || 50) / 2;
+            return cx >= cX && cx <= cX + cW && cy >= cY && cy <= cY + cH + 30;
+          }) || copiedCases[0];
+        }
+
+        if (!associatedCase || !validCaseIds.has(associatedCase.id)) {
+          return;
+        }
+
+        const newId = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+        idMap[n.id] = newId;
+
+        const targetCasePos = casePositions.get(associatedCase.id) || { x: 15, y: 44 };
+        const sourceSwitch = associatedCase ? (nodes.find(p => p.id === associatedCase.parentId || p.id === associatedCase.data?.switchId) || clipboard.nodes.find(p => p.id === associatedCase.parentId || p.id === associatedCase.data?.switchId)) : null;
+        const origCaseAbsX = (sourceSwitch ? sourceSwitch.position.x : 0) + (associatedCase ? associatedCase.position.x : 15);
+        const origCaseAbsY = (sourceSwitch ? sourceSwitch.position.y : 0) + (associatedCase ? associatedCase.position.y : 44);
+        const offX = n.position.x - origCaseAbsX;
+        const offY = n.position.y - origCaseAbsY;
+
+        const newAbsX = targetSwitch.position.x + targetCasePos.x + offX;
+        const newAbsY = targetSwitch.position.y + targetCasePos.y + offY;
+
+        innerBlocksNewNodes.push({
+          ...n,
+          id: newId,
+          position: { x: Math.round(newAbsX), y: Math.round(newAbsY) },
+          selected: true,
+          parentId: undefined,
+          data: {
+            ...n.data,
+            onStartEdit: takeSnapshot,
+            onChange: (e) => updateNodeLabel(newId, e.target.value, true),
+            onUpdateData: (newData) => updateNodeData(newId, newData)
+          }
+        });
+      });
+
+      const newCaseNodes = sortedCopiedCases.map(c => {
+        const newId = idMap[c.id];
+        const newPos = casePositions.get(c.id);
+        return {
+          ...c,
+          id: newId,
+          parentId: targetSwitch.id,
+          position: newPos,
+          selected: true,
+          data: {
+            ...c.data,
+            switchId: targetSwitch.id,
+            isDefault: !!c.data?.isDefault,
+            onStartEdit: takeSnapshot,
+            onChange: (e) => updateNodeLabel(newId, e.target.value, true),
+            onUpdateData: (newData) => updateNodeData(newId, newData)
+          }
+        };
+      });
+
+      const defInnerNodes = (isDefRight && defCase) ? nodes.filter(n => {
+        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER'].includes(n.type)) return false;
+        if (n.parentId === defCase.id) return true;
+        if (n.parentId && n.parentId !== targetSwitch.id) return false;
+        const defAbsX = targetSwitch.position.x + defCase.position.x;
+        const defAbsY = targetSwitch.position.y + defCase.position.y;
+        const defW = defCase.style?.width ? parseInt(defCase.style.width) : 250;
+        const cx = n.position.x + (n.measured?.width || 100) / 2;
+        const cy = n.position.y + (n.measured?.height || 50) / 2;
+        return cx >= defAbsX && cx <= defAbsX + defW && cy >= defAbsY;
+      }) : [];
+      const defInnerIds = new Set(defInnerNodes.map(inN => inN.id));
+
+      const newEdges = clipboard.edges
+        .filter(e => idMap[e.source] && idMap[e.target])
+        .map(e => ({
+          ...e,
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+          source: idMap[e.source],
+          target: idMap[e.target],
+          selected: true
+        }));
+
+      const targetContainerWidth = Math.max(350, (targetCases.length + sortedCopiedCases.length) * 265 + 65);
+
+      let allNextNodes = [];
+      setNodes(nds => {
+        const next = nds.map(n => {
+          if (n.id === targetSwitch.id) {
+            const currentW = n.style?.width ? parseInt(n.style.width) : 350;
+            return {
+              ...n,
+              style: {
+                ...n.style,
+                width: Math.max(currentW, targetContainerWidth)
+              }
+            };
+          }
+          if (isDefRight && n.id === defCase.id) {
+            return { ...n, position: { ...n.position, x: n.position.x + shiftDefX } };
+          }
+          if (defInnerIds.has(n.id)) {
+            return { ...n, position: { ...n.position, x: n.position.x + shiftDefX } };
+          }
+          return { ...n, selected: false };
+        }).concat(newCaseNodes).concat(innerBlocksNewNodes);
+        allNextNodes = next;
+        return next;
+      });
+
+      setEdges(eds => {
+        let nextEds = eds.map(e => ({ ...e, selected: false })).concat(newEdges);
+        newCaseNodes.forEach(cn => {
+          nextEds = syncCaseAutoWiring(cn, allNextNodes, nextEds, edgeStyle);
+        });
+        return nextEds;
+      });
+      return;
     }
     
     let minX = Infinity, minY = Infinity;
@@ -571,7 +998,7 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     const newEdges = clipboard.edges.map(e => ({ ...e, id: Date.now().toString() + Math.random().toString(36).substr(2, 5), source: idMap[e.source], target: idMap[e.target], selected: true }));
     setNodes(nds => nds.map(n => ({ ...n, selected: false })).concat(newNodes));
     setEdges(eds => eds.map(e => ({ ...e, selected: false })).concat(newEdges));
-  }, [clipboard, onLogAction, updateNodeLabel, updateNodeData, setNodes, setEdges, handleInteract, screenToFlowPosition, takeSnapshot]);
+  }, [clipboard, onLogAction, updateNodeLabel, updateNodeData, setNodes, setEdges, handleInteract, screenToFlowPosition, takeSnapshot, edgeStyle, nodes]);
 
   const handleDuplicate = useCallback(() => {
     if (selectedNodes.length === 0) return;
@@ -590,6 +1017,196 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           added = true;
         }
       });
+    }
+
+    // Also include any blocks spatially inside duplicated cases
+    const caseNodes = nodes.filter(n => selectedNodeIds.has(n.id) && n.type === 'CASE_CONTAINER');
+    caseNodes.forEach(caseNode => {
+      const switchNode = caseNode.parentId ? nodes.find(p => p.id === caseNode.parentId) : (caseNode.data?.switchId ? nodes.find(p => p.id === caseNode.data.switchId) : null);
+      const cAbsX = (switchNode ? switchNode.position.x : 0) + caseNode.position.x;
+      const cAbsY = (switchNode ? switchNode.position.y : 0) + caseNode.position.y;
+      const cW = caseNode.style?.width ? parseInt(caseNode.style.width) : 250;
+      const cH = caseNode.measured?.height || parseInt(caseNode.style?.height || 166);
+      
+      nodes.forEach(n => {
+        if (selectedNodeIds.has(n.id)) return;
+        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER'].includes(n.type)) return;
+        const nW = n.measured?.width || n.width || 100;
+        const nH = n.measured?.height || n.height || 50;
+        const cx = n.position.x + nW / 2;
+        const cy = n.position.y + nH / 2;
+        if (cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH + 30) {
+          selectedNodeIds.add(n.id);
+        }
+      });
+    });
+
+    // Rule: you cannot duplicate default at all!
+    if (!selectedNodes.some(n => n.type === 'SWITCH_CONTAINER')) {
+      const defaultCases = nodes.filter(n => selectedNodeIds.has(n.id) && n.type === 'CASE_CONTAINER' && n.data?.isDefault);
+      defaultCases.forEach(defNode => {
+        selectedNodeIds.delete(defNode.id);
+        const switchNode = defNode.parentId ? nodes.find(p => p.id === defNode.parentId) : (defNode.data?.switchId ? nodes.find(p => p.id === defNode.data.switchId) : null);
+        const cAbsX = (switchNode ? switchNode.position.x : 0) + defNode.position.x;
+        const cAbsY = (switchNode ? switchNode.position.y : 0) + defNode.position.y;
+        const cW = defNode.style?.width ? parseInt(defNode.style.width) : 250;
+        const cH = defNode.measured?.height || parseInt(defNode.style?.height || 166);
+        nodes.forEach(n => {
+          if (n.parentId === defNode.id) {
+            selectedNodeIds.delete(n.id);
+          } else {
+            const cx = n.position.x + (n.measured?.width || 100) / 2;
+            const cy = n.position.y + (n.measured?.height || 50) / 2;
+            if (cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH + 30) {
+              selectedNodeIds.delete(n.id);
+            }
+          }
+        });
+      });
+
+      if (selectedNodeIds.size === 0) {
+        return;
+      }
+    }
+
+    const nonDefaultCaseNodes = nodes.filter(n => selectedNodeIds.has(n.id) && n.type === 'CASE_CONTAINER' && !n.data?.isDefault);
+    const onlyCases = nonDefaultCaseNodes.length > 0 && !selectedNodes.some(n => n.type === 'SWITCH_CONTAINER');
+    const targetSwitch = onlyCases ? nodes.find(p => p.id === nonDefaultCaseNodes[0].parentId || p.id === nonDefaultCaseNodes[0].data?.switchId) : null;
+
+    if (onlyCases && targetSwitch) {
+      const targetCases = nodes.filter(n => n.type === 'CASE_CONTAINER' && (n.parentId === targetSwitch.id || n.data?.switchId === targetSwitch.id));
+      const defCase = targetCases.find(c => c.data?.isDefault);
+      const isDefRight = defCase && targetCases.every(c => c.id === defCase.id || c.position.x < defCase.position.x);
+
+      const sortedCopiedCases = [...nonDefaultCaseNodes].sort((a, b) => a.position.x - b.position.x);
+      const shiftDefX = isDefRight ? sortedCopiedCases.length * 265 : 0;
+      let nextSlotX = isDefRight ? defCase.position.x : (targetCases.length > 0 ? Math.max(...targetCases.map(c => c.position.x)) + 265 : 15);
+
+      const idMap = {};
+      const casePositions = new Map();
+
+      sortedCopiedCases.forEach(c => {
+        const newId = 'case_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+        idMap[c.id] = newId;
+        casePositions.set(c.id, { x: nextSlotX, y: 44 });
+        nextSlotX += 265;
+      });
+
+      const innerBlocksNewNodes = [];
+      const nonCaseCopiedNodes = nodes.filter(n => selectedNodeIds.has(n.id) && n.type !== 'CASE_CONTAINER' && n.type !== 'SWITCH_CONTAINER');
+
+      nonCaseCopiedNodes.forEach(n => {
+        const newId = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
+        idMap[n.id] = newId;
+
+        let associatedCase = null;
+        if (n.parentId && casePositions.has(n.parentId)) {
+          associatedCase = caseNodes.find(c => c.id === n.parentId);
+        } else {
+          associatedCase = caseNodes.find(c => {
+            const switchNode = c.parentId ? nodes.find(p => p.id === c.parentId) : null;
+            const cX = (switchNode ? switchNode.position.x : 0) + c.position.x;
+            const cY = (switchNode ? switchNode.position.y : 0) + c.position.y;
+            const cW = c.style?.width ? parseInt(c.style.width) : 250;
+            const cH = c.measured?.height || parseInt(c.style?.height || 166);
+            const cx = n.position.x + (n.measured?.width || 100) / 2;
+            const cy = n.position.y + (n.measured?.height || 50) / 2;
+            return cx >= cX && cx <= cX + cW && cy >= cY && cy <= cY + cH + 30;
+          }) || caseNodes[0];
+        }
+
+        const targetCasePos = associatedCase ? casePositions.get(associatedCase.id) : { x: 15, y: 44 };
+        const sourceSwitch = targetSwitch;
+        const origCaseAbsX = sourceSwitch.position.x + (associatedCase ? associatedCase.position.x : 15);
+        const origCaseAbsY = sourceSwitch.position.y + (associatedCase ? associatedCase.position.y : 44);
+        const offX = n.position.x - origCaseAbsX;
+        const offY = n.position.y - origCaseAbsY;
+
+        const newAbsX = targetSwitch.position.x + targetCasePos.x + offX;
+        const newAbsY = targetSwitch.position.y + targetCasePos.y + offY;
+
+        innerBlocksNewNodes.push({
+          ...n,
+          id: newId,
+          position: { x: Math.round(newAbsX), y: Math.round(newAbsY) },
+          selected: true,
+          parentId: undefined,
+          data: {
+            ...n.data,
+            onStartEdit: takeSnapshot,
+            onChange: (e) => updateNodeLabel(newId, e.target.value, true),
+            onUpdateData: (newData) => updateNodeData(newId, newData)
+          }
+        });
+      });
+
+      const newCaseNodes = sortedCopiedCases.map(c => {
+        const newId = idMap[c.id];
+        const newPos = casePositions.get(c.id);
+        return {
+          ...c,
+          id: newId,
+          parentId: targetSwitch.id,
+          position: newPos,
+          selected: true,
+          data: {
+            ...c.data,
+            switchId: targetSwitch.id,
+            onStartEdit: takeSnapshot,
+            onChange: (e) => updateNodeLabel(newId, e.target.value, true),
+            onUpdateData: (newData) => updateNodeData(newId, newData)
+          }
+        };
+      });
+
+      const defInnerNodes = (isDefRight && defCase) ? nodes.filter(n => {
+        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER'].includes(n.type)) return false;
+        if (n.parentId === defCase.id) return true;
+        if (n.parentId && n.parentId !== targetSwitch.id) return false;
+        const defAbsX = targetSwitch.position.x + defCase.position.x;
+        const defAbsY = targetSwitch.position.y + defCase.position.y;
+        const defW = defCase.style?.width ? parseInt(defCase.style.width) : 250;
+        const cx = n.position.x + (n.measured?.width || 100) / 2;
+        const cy = n.position.y + (n.measured?.height || 50) / 2;
+        return cx >= defAbsX && cx <= defAbsX + defW && cy >= defAbsY;
+      }) : [];
+      const defInnerIds = new Set(defInnerNodes.map(inN => inN.id));
+
+      const newEdges = edges
+        .filter(e => idMap[e.source] && idMap[e.target])
+        .map(e => ({
+          ...e,
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+          source: idMap[e.source],
+          target: idMap[e.target],
+          selected: true
+        }));
+
+      let allNextNodes = [];
+      setNodes(nds => {
+        const next = nds.map(n => {
+          if (isDefRight && n.id === defCase.id) {
+            return { ...n, position: { ...n.position, x: n.position.x + shiftDefX } };
+          }
+          if (defInnerIds.has(n.id)) {
+            return { ...n, position: { ...n.position, x: n.position.x + shiftDefX } };
+          }
+          return { ...n, selected: false };
+        }).concat(newCaseNodes).concat(innerBlocksNewNodes);
+        allNextNodes = next;
+        return next;
+      });
+
+      setEdges(eds => {
+        let nextEds = eds.map(e => ({ ...e, selected: false })).concat(newEdges);
+        newCaseNodes.forEach(cn => {
+          nextEds = syncCaseAutoWiring(cn, allNextNodes, nextEds, edgeStyle);
+        });
+        return nextEds;
+      });
+
+      if (onLogAction) onLogAction('NODES_DUPLICATED', { count: newCaseNodes.length + innerBlocksNewNodes.length });
+      return;
     }
 
     const nodesToDuplicate = nodes.filter(n => selectedNodeIds.has(n.id));
@@ -1068,26 +1685,374 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       });
     }
     dragStartPositionsRef.current = startMap;
+
+    const getNodeAbsPos = (n) => {
+      let x = n.position.x;
+      let y = n.position.y;
+      let curr = n;
+      let depth = 0;
+      while (curr.parentId && depth < 10) {
+        const parent = currentNodes.find(p => p.id === curr.parentId);
+        if (!parent) break;
+        x += parent.position.x;
+        y += parent.position.y;
+        curr = parent;
+        depth++;
+      }
+      return { x, y };
+    };
+
+    if (node?.type === 'SWITCH_CONTAINER') {
+      const swNode = currentNodes.find(n => n.id === node.id) || node;
+      const myCases = currentNodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === node.id || n.parentId === node.id));
+      const caseIds = new Set(myCases.map(c => c.id));
+      
+      const swPos = getNodeAbsPos(swNode);
+      const swX = swPos.x;
+      const swY = swPos.y;
+      const swW = swNode.style?.width ? parseInt(swNode.style.width) : (swNode.measured?.width || 350);
+      const swH = swNode.style?.height ? parseInt(swNode.style.height) : (swNode.measured?.height || 230);
+
+      const innerNodes = currentNodes.filter(n => {
+        if (n.id === node.id || caseIds.has(n.id)) return false;
+        if (['GROUP_BG', 'START_END', 'LOOP_CONTAINER', 'FOR_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type)) return false;
+        if (n.parentId && caseIds.has(n.parentId)) return true;
+        
+        const nPos = getNodeAbsPos(n);
+        const nX = nPos.x;
+        const nY = nPos.y;
+        const nW = n.measured?.width || n.width || 100;
+        const nH = n.measured?.height || n.height || 50;
+        const cx = nX + nW / 2;
+        const cy = nY + nH / 2;
+        return cx >= swX && cx <= swX + swW && cy >= swY;
+      });
+
+      const currentEdges = reactFlowInstance ? reactFlowInstance.getEdges() : edges;
+      const innerIds = new Set([node.id, ...caseIds, ...innerNodes.map(inNode => inNode.id)]);
+      const innerEdges = currentEdges.filter(e => innerIds.has(e.source) && innerIds.has(e.target)).map(e => e.id);
+
+      const allMovedElements = innerNodes.map(inNode => {
+        const inPos = getNodeAbsPos(inNode);
+        return { id: inNode.id, absX: inPos.x, absY: inPos.y, startX: inNode.position.x, startY: inNode.position.y };
+      });
+
+      switchDragRef.current = {
+        switchId: node.id,
+        startX: swNode.position.x,
+        startY: swNode.position.y,
+        movedElements: allMovedElements,
+        innerEdges
+      };
+    } else if (node?.type === 'CASE_CONTAINER') {
+      const caseNode = currentNodes.find(n => n.id === node.id) || node;
+      const switchId = caseNode.data?.switchId || caseNode.parentId;
+      const allSwitchCases = currentNodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === switchId || n.parentId === switchId));
+      const regularCases = allSwitchCases.filter(c => !c.data?.isDefault);
+      if (regularCases.length <= 1) {
+        caseDragRef.current = null;
+        switchDragRef.current = null;
+        return;
+      }
+
+      const cPos = getNodeAbsPos(caseNode);
+      const cAbsX = cPos.x;
+      const cAbsY = cPos.y;
+      const cW = caseNode.style?.width ? parseInt(caseNode.style.width) : (caseNode.measured?.width || 250);
+      const cH = caseNode.style?.height ? parseInt(caseNode.style.height) : (caseNode.measured?.height || 150);
+
+      const innerNodes = currentNodes.filter(n => {
+        if (n.id === caseNode.id) return false;
+        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER'].includes(n.type)) return false;
+        if (n.parentId === caseNode.id) return true;
+        if (n.parentId && n.parentId !== caseNode.id && n.parentId !== switchId) return false;
+        const nW = n.measured?.width || n.width || 100;
+        const nH = n.measured?.height || n.height || 50;
+        const nPos = getNodeAbsPos(n);
+        const cx = nPos.x + nW / 2;
+        const cy = nPos.y + nH / 2;
+        return cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH + 30;
+      });
+
+      const siblingCases = currentNodes.filter(n => n.type === 'CASE_CONTAINER' && n.id !== node.id && (n.data?.switchId === switchId || n.parentId === switchId));
+
+      const allCases = [
+        { id: caseNode.id, startX: caseNode.position.x, w: cW, isDragged: true },
+        ...siblingCases.map(sc => ({
+          id: sc.id,
+          startX: sc.position.x,
+          w: sc.style?.width ? parseInt(sc.style.width) : (sc.measured?.width || 250),
+          isDragged: false
+        }))
+      ];
+      allCases.sort((a, b) => a.startX - b.startX);
+
+      const currentEdges = reactFlowInstance ? reactFlowInstance.getEdges() : edges;
+      const caseInnerIds = new Set([caseNode.id, ...innerNodes.map(inN => inN.id)]);
+      const caseInnerEdges = currentEdges.filter(e => caseInnerIds.has(e.source) && caseInnerIds.has(e.target)).map(e => e.id);
+
+      caseDragRef.current = {
+        caseId: node.id,
+        switchId,
+        cW,
+        cH,
+        startX: caseNode.position.x,
+        startY: caseNode.position.y,
+        allCasesInitialOrder: allCases,
+        innerEdges: caseInnerEdges,
+        innerNodes: innerNodes.map(inNode => {
+          const inPos = getNodeAbsPos(inNode);
+          return {
+            id: inNode.id,
+            absX: inPos.x,
+            absY: inPos.y,
+            relX: inPos.x - cAbsX,
+            relY: inPos.y - cAbsY,
+            startX: inNode.position.x,
+            startY: inNode.position.y
+          };
+        }),
+        siblingCases: siblingCases.map(sc => {
+          const scPos = getNodeAbsPos(sc);
+          const scAbsX = scPos.x;
+          const scAbsY = scPos.y;
+          const scW = sc.style?.width ? parseInt(sc.style.width) : (sc.measured?.width || 250);
+          const scH = sc.style?.height ? parseInt(sc.style.height) : (sc.measured?.height || 150);
+          const scInner = currentNodes.filter(n => {
+            if (n.id === sc.id || ['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER'].includes(n.type)) return false;
+            if (n.parentId === sc.id) return true;
+            if (n.parentId && n.parentId !== sc.id && n.parentId !== switchId) return false;
+            const nW = n.measured?.width || n.width || 100;
+            const nH = n.measured?.height || n.height || 50;
+            const nPos = getNodeAbsPos(n);
+            const cx = nPos.x + nW / 2;
+            const cy = nPos.y + nH / 2;
+            return cx >= scAbsX && cx <= scAbsX + scW && cy >= scAbsY && cy <= scAbsY + scH + 30;
+          });
+          const scIds = new Set([sc.id, ...scInner.map(scIn => scIn.id)]);
+          const scEdges = currentEdges.filter(e => scIds.has(e.source) && scIds.has(e.target)).map(e => e.id);
+          return {
+            id: sc.id,
+            absX: scAbsX,
+            absY: scAbsY,
+            startX: sc.position.x,
+            w: scW,
+            innerEdges: scEdges,
+            innerNodes: scInner.map(inNode => {
+              const inPos = getNodeAbsPos(inNode);
+              return {
+                id: inNode.id,
+                absX: inPos.x,
+                absY: inPos.y,
+                relX: inPos.x - scAbsX,
+                relY: inPos.y - scAbsY,
+                startX: inNode.position.x,
+                startY: inNode.position.y
+              };
+            }),
+            currentShiftX: 0
+          };
+        })
+      };
+
+      const caseEl = document.querySelector(`.react-flow__node[data-id="${node.id}"]`);
+      if (caseEl) {
+        caseEl.classList.add('is-dragging-case');
+        caseEl.style.transition = 'none';
+      }
+      innerNodes.forEach(inN => {
+        const inEl = document.querySelector(`.react-flow__node[data-id="${inN.id}"]`);
+        if (inEl) {
+          inEl.classList.add('case-inner-dragging');
+          inEl.style.transition = 'none';
+        }
+      });
+      caseDragRef.current.siblingCases?.forEach(sc => {
+        const scEl = document.querySelector(`.react-flow__node[data-id="${sc.id}"]`);
+        if (scEl) {
+          scEl.style.transition = 'transform 0.25s cubic-bezier(0.2, 0, 0, 1)';
+        }
+        sc.innerNodes?.forEach(scIn => {
+          const scInEl = document.querySelector(`.react-flow__node[data-id="${scIn.id}"]`);
+          if (scInEl) {
+            scInEl.classList.add('case-inner-sliding');
+            scInEl.style.transition = 'transform 0.25s cubic-bezier(0.2, 0, 0, 1)';
+          }
+        });
+      });
+      switchDragRef.current = null;
+    } else {
+      switchDragRef.current = null;
+      caseDragRef.current = null;
+    }
   }, [takeSnapshot, handleInteract, reactFlowInstance, nodes]);
 
   const onNodeDrag = useCallback((event, node) => {
     if (readOnly) return;
     setContextMenu(null); setShowExportMenu(false);
 
-    const now = Date.now();
-    if (now - (lastDragTimeRef.current || 0) < 50) return;
-    lastDragTimeRef.current = now;
+    if (switchDragRef.current && node?.id === switchDragRef.current.switchId) {
+      const dx = node.position.x - switchDragRef.current.startX;
+      const dy = node.position.y - switchDragRef.current.startY;
+      switchDragRef.current.movedElements.forEach(item => {
+        const el = document.querySelector(`.react-flow__node[data-id="${item.id}"]`);
+        if (el) {
+          el.style.transform = `translate(${item.absX + dx}px, ${item.absY + dy}px)`;
+        }
+      });
+      switchDragRef.current.innerEdges?.forEach(edgeId => {
+        const el = document.querySelector(`.react-flow__edge[data-id="${edgeId}"]`);
+        if (el) {
+          el.style.transform = `translate(${dx}px, ${dy}px)`;
+        }
+      });
+    }
+
+    if (caseDragRef.current && node?.id === caseDragRef.current.caseId) {
+      const currentX = node.position.x;
+      caseDragRef.current.currentX = currentX;
+      const dx = currentX - caseDragRef.current.startX;
+
+      // Move inner blocks of the dragged case synchronously
+      caseDragRef.current.innerNodes.forEach(item => {
+        const el = document.querySelector(`.react-flow__node[data-id="${item.id}"]`);
+        if (el) {
+          el.style.transform = `translate(${item.absX + dx}px, ${item.absY}px)`;
+        }
+      });
+
+      // Animate sibling cases and their inner blocks based on slot midpoint boundaries
+      const allCases = caseDragRef.current.allCasesInitialOrder || [];
+      const myInitialIndex = allCases.findIndex(c => c.id === node.id);
+      let targetIndex = 0;
+      for (let i = 0; i < allCases.length - 1; i++) {
+        const boundary = (allCases[i].startX + allCases[i+1].startX) / 2;
+        if (currentX > boundary) {
+          targetIndex = i + 1;
+        }
+      }
+      caseDragRef.current.targetIndex = targetIndex;
+
+      const GAP = 15;
+      caseDragRef.current.siblingCases?.forEach(sc => {
+        const scIndex = allCases.findIndex(c => c.id === sc.id);
+        let shiftX = 0;
+        if (myInitialIndex < targetIndex) {
+          if (scIndex > myInitialIndex && scIndex <= targetIndex) {
+            shiftX = -(caseDragRef.current.cW + GAP);
+          }
+        } else if (myInitialIndex > targetIndex) {
+          if (scIndex >= targetIndex && scIndex < myInitialIndex) {
+            shiftX = caseDragRef.current.cW + GAP;
+          }
+        }
+        sc.currentShiftX = shiftX;
+
+        const scEl = document.querySelector(`.react-flow__node[data-id="${sc.id}"]`);
+        if (scEl) {
+          scEl.style.transform = `translate(${sc.absX + shiftX}px, ${sc.absY}px)`;
+        }
+        sc.innerNodes?.forEach(scIn => {
+          const scInEl = document.querySelector(`.react-flow__node[data-id="${scIn.id}"]`);
+          if (scInEl) {
+            scInEl.style.transform = `translate(${scIn.absX + shiftX}px, ${scIn.absY}px)`;
+          }
+        });
+      });
+    }
 
     let draggedNodes = nodes.filter(n => n.selected && n.type !== 'GROUP_BG');
     if (draggedNodes.length === 0) draggedNodes = [node];
     
     if (draggedNodes.some(n => n.type === 'COMMENT' || n.type === 'GROUP_BG' || n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER' || n.type === 'SWITCH_CONTAINER' || n.type === 'CASE_CONTAINER')) return;
 
+    // Real-time automatic case wiring/unwiring while dragging connectable blocks
+    if (['ACTION', 'IO', 'CONDITION'].includes(node?.type)) {
+      const draggedIds = new Set(draggedNodes.map(n => n.id));
+      const startPosNode = dragStartPositionsRef.current?.get(node.id) || node.position;
+      const dx = node.position.x - startPosNode.x;
+      const dy = node.position.y - startPosNode.y;
+
+      const liveNodes = (reactFlowInstance ? reactFlowInstance.getNodes() : nodes).map(n => {
+        if (n.id === node.id) {
+          return { ...n, position: node.position, positionAbsolute: node.positionAbsolute ?? node.position };
+        }
+        if (draggedIds.has(n.id) && dragStartPositionsRef.current?.has(n.id)) {
+          const sp = dragStartPositionsRef.current.get(n.id);
+          const pos = { x: sp.x + dx, y: sp.y + dy };
+          return { ...n, position: pos, positionAbsolute: pos };
+        }
+        return n;
+      });
+      const caseContainers = liveNodes.filter(n => n.type === 'CASE_CONTAINER');
+      if (caseContainers.length > 0) {
+        setEdges(eds => {
+          let nextEds = eds;
+          caseContainers.forEach(cNode => {
+            nextEds = syncCaseAutoWiring(cNode, liveNodes, nextEds, edgeStyle);
+          });
+          const changed = nextEds.length !== eds.length || nextEds.some((e, i) => e.id !== eds[i]?.id || e.source !== eds[i]?.source || e.target !== eds[i]?.target);
+          return changed ? nextEds : eds;
+        });
+
+        // Dynamic real-time stretch/contract of switch cases while holding and dragging a block
+        const switchContainers = liveNodes.filter(n => n.type === 'SWITCH_CONTAINER');
+        switchContainers.forEach(swNode => {
+          const swCases = liveNodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === swNode.id || n.parentId === swNode.id));
+          if (swCases.length === 0) return;
+
+          let maxInnerBottom = 0;
+          swCases.forEach(c => {
+            const cAbsX = swNode.position.x + c.position.x;
+            const cAbsY = swNode.position.y + c.position.y;
+            const cW = c.style?.width ? parseInt(c.style.width) : (c.measured?.width || 250);
+            const cH = c.style?.height ? parseInt(c.style.height) : (c.measured?.height || 166);
+
+            const innerBlocks = liveNodes.filter(n => {
+              if (!['ACTION', 'IO', 'CONDITION'].includes(n.type)) return false;
+              if (n.parentId === c.id) return true;
+              if (n.parentId && n.parentId !== swNode.id && n.parentId !== c.id) return false;
+              const nPos = getNodeAbsPos(n);
+              const nW = n.measured?.width || n.width || 100;
+              const nH = n.measured?.height || n.height || 50;
+              const cx = nPos.x + nW / 2;
+              const cy = nPos.y + nH / 2;
+              return cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH + 30;
+            });
+
+            innerBlocks.forEach(inNode => {
+              const inPos = getNodeAbsPos(inNode);
+              const nH = inNode.measured?.height || inNode.height || 50;
+              const bottomRel = (inPos.y + nH) - cAbsY;
+              if (bottomRel > maxInnerBottom) {
+                maxInnerBottom = bottomRel;
+              }
+            });
+          });
+
+          const targetCaseH = Math.max(166, Math.round(maxInnerBottom + 30));
+          const targetSwitchH = targetCaseH + 64;
+
+          const swEl = document.querySelector(`.react-flow__node[data-id="${swNode.id}"]`);
+          if (swEl && parseInt(swEl.style.height) !== targetSwitchH) {
+            swEl.style.height = `${targetSwitchH}px`;
+          }
+          swCases.forEach(c => {
+            const cEl = document.querySelector(`.react-flow__node[data-id="${c.id}"]`);
+            if (cEl && parseInt(cEl.style.height) !== targetCaseH) {
+              cEl.style.height = `${targetCaseH}px`;
+            }
+          });
+        });
+      }
+    }
+
     const draggedIds = new Set(draggedNodes.map(n => n.id));
     if (edges.some(e => (draggedIds.has(e.source) && !draggedIds.has(e.target)) || (draggedIds.has(e.target) && !draggedIds.has(e.source)))) return;
 
-    // Morphing logic for dropping multiple nodes into a loop/for container
-    if (draggedNodes.length > 1) {
+    // Morphing logic for dropping multiple nodes into a loop/for container (disabled per user request)
+    const ENABLE_LOOP_INSERTION = false;
+    if (ENABLE_LOOP_INSERTION && draggedNodes.length > 1) {
         const allContainers = nodes.filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
         const ptX = node.position.x + (node.measured?.width || 120) / 2;
         const ptY = node.position.y + (node.measured?.height || 50) / 2;
@@ -1139,12 +2104,176 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         edgeElem.classList.add('drop-target');
         hoveredEdgeRef.current = edgeElem;
     }
-  }, [edges, nodes, readOnly, setNodes]);
+  }, [edges, nodes, readOnly, setNodes, setEdges, edgeStyle, reactFlowInstance]);
 
   const onNodeDragStop = useCallback((event, node, draggedNodesList) => {
     if (readOnly) return;
     handleInteract();
     if (hoveredEdgeRef.current) { hoveredEdgeRef.current.classList.remove('drop-target'); hoveredEdgeRef.current = null; }
+
+    document.querySelectorAll('.react-flow__node-SWITCH_CONTAINER.drop-target-switch').forEach(el => el.classList.remove('drop-target-switch'));
+    document.querySelectorAll('.is-dragging-case').forEach(el => {
+      el.classList.remove('is-dragging-case');
+      el.style.transition = '';
+    });
+    document.querySelectorAll('.case-inner-dragging').forEach(el => {
+      el.classList.remove('case-inner-dragging');
+      el.style.transition = '';
+    });
+    document.querySelectorAll('.case-inner-sliding').forEach(el => {
+      el.classList.remove('case-inner-sliding');
+      el.style.transition = '';
+    });
+    document.querySelectorAll('.react-flow__node-CASE_CONTAINER').forEach(el => {
+      el.style.transition = '';
+    });
+
+    if (switchDragRef.current && node?.id === switchDragRef.current.switchId) {
+      const dx = node.position.x - switchDragRef.current.startX;
+      const dy = node.position.y - switchDragRef.current.startY;
+
+      // Always clear inline transform overrides so React Flow can render nodes in their true positions
+      switchDragRef.current.movedElements.forEach(item => {
+        const el = document.querySelector(`.react-flow__node[data-id="${item.id}"]`);
+        if (el) {
+          el.style.transform = '';
+        }
+      });
+      switchDragRef.current.innerEdges?.forEach(edgeId => {
+        const el = document.querySelector(`.react-flow__edge[data-id="${edgeId}"]`);
+        if (el) {
+          el.style.transform = '';
+        }
+      });
+
+      if (switchDragRef.current.movedElements.length > 0 && (dx !== 0 || dy !== 0)) {
+        const moveMap = new Map();
+        const currentNodes = reactFlowInstance ? reactFlowInstance.getNodes() : nodes;
+        switchDragRef.current.movedElements.forEach(item => {
+          const inNode = currentNodes.find(n => n.id === item.id);
+          // If the node has parentId (i.e. parented to a case or switch), its position is RELATIVE!
+          // Moving the parent already moves the child; its relative position must NOT be overwritten!
+          if (!inNode?.parentId || inNode.parentId === '1') {
+            const finalX = Math.round(item.absX + dx);
+            const finalY = Math.round(item.absY + dy);
+            moveMap.set(item.id, { x: finalX, y: finalY });
+          }
+        });
+        if (moveMap.size > 0) {
+          setNodes(nds => nds.map(n => moveMap.has(n.id) ? { ...n, position: moveMap.get(n.id) } : n));
+        }
+      }
+
+      setEdges(eds => {
+        let nextEds = [...eds];
+        const myCases = nodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === node.id || n.parentId === node.id));
+        myCases.forEach(c => {
+          nextEds = syncCaseAutoWiring(c, nodes, nextEds, edgeStyle);
+        });
+        return nextEds;
+      });
+      switchDragRef.current = null;
+    }
+
+    if (caseDragRef.current && node?.id === caseDragRef.current.caseId) {
+      const allCases = caseDragRef.current.allCasesInitialOrder || [];
+      const myInitialIndex = allCases.findIndex(c => c.id === node.id);
+      const targetIndex = caseDragRef.current.targetIndex ?? myInitialIndex;
+
+      const reorderedCases = [...allCases];
+      const [draggedItem] = reorderedCases.splice(myInitialIndex, 1);
+      reorderedCases.splice(targetIndex, 0, draggedItem);
+
+      // Clean up DOM classes and transitions (do not wipe transform)
+      const caseEl = document.querySelector(`.react-flow__node[data-id="${node.id}"]`);
+      if (caseEl) {
+        caseEl.classList.remove('is-dragging-case');
+        caseEl.style.transition = 'none';
+      }
+      
+      caseDragRef.current.innerNodes.forEach(item => {
+        const el = document.querySelector(`.react-flow__node[data-id="${item.id}"]`);
+        if (el) {
+          el.classList.remove('case-inner-dragging');
+          el.style.transition = 'none';
+        }
+      });
+
+      caseDragRef.current.siblingCases?.forEach(sc => {
+        const scEl = document.querySelector(`.react-flow__node[data-id="${sc.id}"]`);
+        if (scEl) {
+          scEl.style.transition = 'none';
+        }
+        sc.innerNodes?.forEach(scIn => {
+          const scInEl = document.querySelector(`.react-flow__node[data-id="${scIn.id}"]`);
+          if (scInEl) {
+            scInEl.classList.remove('case-inner-sliding');
+            scInEl.style.transition = 'none';
+          }
+        });
+      });
+
+      // 3. Assign target slots
+      const GAP = 15;
+      let curSlotX = GAP;
+      const finalMoves = new Map();
+      const currentNodes = reactFlowInstance ? reactFlowInstance.getNodes() : nodes;
+      const swNode = currentNodes.find(n => n.id === caseDragRef.current.switchId);
+      const swAbsX = swNode ? swNode.position.x : 0;
+      const swAbsY = swNode ? swNode.position.y : 0;
+
+      reorderedCases.forEach(c => {
+        const targetX = curSlotX;
+        const targetY = 44;
+        finalMoves.set(c.id, { x: targetX, y: targetY });
+
+        const cEl = document.querySelector(`.react-flow__node[data-id="${c.id}"]`);
+        if (cEl) {
+          cEl.style.transform = `translate(${swAbsX + targetX}px, ${swAbsY + targetY}px)`;
+        }
+
+        const totalDx = targetX - c.startX;
+        const siblingObj = (c.id === node.id) ? caseDragRef.current : caseDragRef.current.siblingCases?.find(sc => sc.id === c.id);
+        const innerNodes = siblingObj?.innerNodes || [];
+
+        innerNodes.forEach(inItem => {
+          const inNode = currentNodes.find(n => n.id === inItem.id);
+          const finalX = (inNode?.parentId === c.id) ? inItem.startX : Math.round(inItem.startX + totalDx);
+          const finalY = inItem.startY;
+          finalMoves.set(inItem.id, { x: finalX, y: finalY });
+
+          const inEl = document.querySelector(`.react-flow__node[data-id="${inItem.id}"]`);
+          if (inEl) {
+            const finalAbsX = (inNode?.parentId === c.id) ? (swAbsX + targetX + inItem.startX) : (inItem.absX + totalDx);
+            inEl.style.transform = `translate(${finalAbsX}px, ${inItem.absY}px)`;
+          }
+        });
+
+        curSlotX += c.w + GAP;
+      });
+
+      let updatedNodesState = [];
+      setNodes(currentNds => {
+        const next = currentNds.map(n => finalMoves.has(n.id) ? { ...n, position: finalMoves.get(n.id) } : n);
+        updatedNodesState = next;
+        return next;
+      });
+
+      // 4. Auto-wire all cases in switch
+      setEdges(eds => {
+        let nextEds = [...eds];
+        reorderedCases.forEach(c => {
+          const cNode = updatedNodesState.find(n => n.id === c.id) || (reactFlowInstance ? reactFlowInstance.getNode(c.id) : null);
+          if (cNode) {
+            nextEds = syncCaseAutoWiring(cNode, updatedNodesState, nextEds, edgeStyle);
+          }
+        });
+        return nextEds;
+      });
+
+      caseDragRef.current = null;
+      return;
+    }
 
     let draggedNodes = (draggedNodesList && draggedNodesList.length > 0)
       ? draggedNodesList
@@ -1163,12 +2292,18 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             let tcW = n.measured?.width || parseInt(n.style?.width || 0);
             let tcH = n.measured?.height || parseInt(n.style?.height || 0);
             if (!tcW && n.type === 'CASE_CONTAINER') tcW = 250;
-            if (!tcH && n.type === 'CASE_CONTAINER') tcH = 150;
+            if (!tcH && n.type === 'CASE_CONTAINER') tcH = 166;
             if (!tcW && n.type === 'SWITCH_CONTAINER') tcW = 350;
             if (!tcH && n.type === 'SWITCH_CONTAINER') tcH = 230;
 
-            return mousePos.x >= n.position.x && mousePos.x <= n.position.x + tcW &&
-                   mousePos.y >= n.position.y && mousePos.y <= n.position.y + tcH;
+            const pNode = n.parentId ? nodes.find(p => p.id === n.parentId) : null;
+            const absX = (pNode ? pNode.position.x : 0) + n.position.x;
+            const absY = (pNode ? pNode.position.y : 0) + n.position.y;
+
+            const yMatch = n.type === 'CASE_CONTAINER' 
+                ? (mousePos.y >= absY && mousePos.y <= absY + tcH + 30) 
+                : (mousePos.y >= absY && mousePos.y <= absY + tcH);
+            return mousePos.x >= absX && mousePos.x <= absX + tcW && yMatch;
         });
 
         const targetContainer = intersectingContainers.length > 0 ? intersectingContainers.sort((a, b) => {
@@ -1177,104 +2312,100 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             return areaA - areaB;
         })[0] : null;
 
-        // Auto-disconnect if dragged out of a connected Case Container
+        let needsSnap = false;
+        const newPositions = new Map();
+        const unparentedCaseIds = new Set();
+
         draggedNodes.forEach(dn => {
-            const connectedCaseEdges = edges.filter(e => 
-                (e.source === dn.id && e.targetHandle === 't-bottom') || 
-                (e.target === dn.id && e.sourceHandle === 's-top')
-            );
-            
-            connectedCaseEdges.forEach(e => {
-                const caseId = e.source === dn.id ? e.target : e.source;
-                const caseNode = nodes.find(n => n.id === caseId && n.type === 'CASE_CONTAINER');
-                if (caseNode && (!targetContainer || targetContainer.id !== caseNode.id)) {
-                    setEdges(eds => eds.filter(ed => ed.id !== e.id));
-                    
-                    const innerNodes = nodes.filter(n => {
-                        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type) || n.parentId || draggedIds.has(n.id)) return false;
-                        let nX = n.position.x; let nY = n.position.y;
-                        if (n.parentId) { const p = nodes.find(x => x.id === n.parentId); if (p) { nX += p.position.x; nY += p.position.y; } }
-                        const cx = nX + (n.measured?.width || 100)/2;
-                        const cy = nY + (n.measured?.height || 50)/2;
-                        
-                        let cX = caseNode.position.x; let cY = caseNode.position.y;
-                        if (caseNode.parentId) { const p = nodes.find(x => x.id === caseNode.parentId); if (p) { cX += p.position.x; cY += p.position.y; } }
-                        const cW = caseNode.measured?.width || parseInt(caseNode.style?.width || 250);
-                        const cH = caseNode.measured?.height || parseInt(caseNode.style?.height || 150);
-                        
-                        return cx >= cX && cx <= cX + cW && cy >= cY && cy <= cY + cH;
-                    });
-                    
-                    if (innerNodes.length > 0) {
-                        innerNodes.sort((a, b) => a.position.y - b.position.y);
-                        setEdges(eds => {
-                            if (eds.find(ed => ed.id === e.id)) return eds; // already handled
-                            const newEd = { ...e, id: `e_${Date.now()}_rewire` };
-                            if (e.source === dn.id) newEd.source = innerNodes[innerNodes.length - 1].id;
-                            else newEd.target = innerNodes[0].id;
-                            return [...eds, newEd];
-                        });
-                    }
-                }
-            });
-        });
+            if (!['ACTION', 'IO', 'CONDITION'].includes(dn.type)) return;
 
-        if (targetContainer && targetContainer.type === 'CASE_CONTAINER') {
-            let needsSnap = false;
-            const newPositions = new Map();
+            const dnW = dn.measured?.width || parseInt(dn.style?.width || 100);
+            const dnH = dn.measured?.height || parseInt(dn.style?.height || 50);
 
-            draggedNodes.forEach(dn => {
-                const dnW = dn.measured?.width || parseInt(dn.style?.width || 100);
-                const dnH = dn.measured?.height || parseInt(dn.style?.height || 50);
-                const cx = dn.position.x + dnW/2;
-                const cy = dn.position.y + dnH/2;
-                
+            if (targetContainer && targetContainer.type === 'CASE_CONTAINER') {
+                const targetParent = targetContainer.parentId ? nodes.find(p => p.id === targetContainer.parentId) : null;
+                const tcAbsX = (targetParent ? targetParent.position.x : 0) + targetContainer.position.x;
+                const tcAbsY = (targetParent ? targetParent.position.y : 0) + targetContainer.position.y;
                 const tcW = targetContainer.measured?.width || parseInt(targetContainer.style?.width || 250);
-                const tcH = targetContainer.measured?.height || parseInt(targetContainer.style?.height || 150);
+                const tcH = targetContainer.measured?.height || parseInt(targetContainer.style?.height || 166);
 
-                if (cx < targetContainer.position.x || cx > targetContainer.position.x + tcW ||
-                    cy < targetContainer.position.y || cy > targetContainer.position.y + tcH) {
-                    newPositions.set(dn.id, { x: mousePos.x - dnW/2, y: mousePos.y - dnH/2 });
+                if (dn.parentId === targetContainer.id) {
+                    // Block is already inside this case: clamp relative position inside case bounds
+                    const clampedX = Math.max(15, Math.min(tcW - dnW - 15, Math.round(dn.position.x)));
+                    const clampedY = Math.max(50, Math.round(dn.position.y));
+                    if (clampedX !== dn.position.x || clampedY !== dn.position.y) {
+                        newPositions.set(dn.id, { x: clampedX, y: clampedY, parentId: targetContainer.id });
+                        needsSnap = true;
+                    }
+                } else {
+                    // Block entered this case from outside: convert canvas absolute pos to relative case pos
+                    const relX = Math.max(15, Math.min(tcW - dnW - 15, Math.round(mousePos.x - tcAbsX - dnW / 2)));
+                    const relY = Math.max(50, Math.round(mousePos.y - tcAbsY - dnH / 2));
+                    newPositions.set(dn.id, { x: relX, y: relY, parentId: targetContainer.id });
                     needsSnap = true;
                 }
-            });
-
-            if (needsSnap) {
-                snappedPositions = newPositions;
-                setNodes(nds => nds.map(n => newPositions.has(n.id) ? { ...n, position: newPositions.get(n.id) } : n));
+            } else if (dn.parentId && nodes.find(p => p.id === dn.parentId)?.type === 'CASE_CONTAINER') {
+                // Block dragged OUT of a case container onto canvas: un-parent and convert to absolute coordinates
+                const prevCase = nodes.find(p => p.id === dn.parentId);
+                if (prevCase) unparentedCaseIds.add(prevCase.id);
+                const absX = Math.round(mousePos.x - dnW / 2);
+                const absY = Math.round(mousePos.y - dnH / 2);
+                newPositions.set(dn.id, { x: absX, y: absY, parentId: '1' });
+                needsSnap = true;
             }
+        });
 
-            if (targetContainer.type === 'CASE_CONTAINER' && draggedNodes.length === 1) {
-                const dn = draggedNodes[0];
-                if (['PROCESS', 'IO', 'CONDITION'].includes(dn.type)) {
-                    // Check if it's the ONLY node in the case
-                    const innerNodes = nodes.filter(n => {
-                        if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER'].includes(n.type) || n.parentId || n.id === dn.id) return false;
-                        let nX = n.position.x; let nY = n.position.y;
-                        if (n.parentId) { const p = nodes.find(x => x.id === n.parentId); if (p) { nX += p.position.x; nY += p.position.y; } }
-                        const cx = nX + (n.measured?.width || 100)/2;
-                        const cy = nY + (n.measured?.height || 50)/2;
-                        
-                        let tcX = targetContainer.position.x; let tcY = targetContainer.position.y;
-                        if (targetContainer.parentId) { const p = nodes.find(x => x.id === targetContainer.parentId); if (p) { tcX += p.position.x; tcY += p.position.y; } }
-                        const cW = targetContainer.measured?.width || parseInt(targetContainer.style?.width || 250);
-                        const cH = targetContainer.measured?.height || parseInt(targetContainer.style?.height || 150);
-                        
-                        return cx >= tcX && cx <= tcX + cW && cy >= tcY && cy <= tcY + cH;
-                    });
-                    
-                    if (innerNodes.length === 0) {
-                        setEdges(eds => {
-                            // First remove any existing connections from the container
-                            const filteredEds = eds.filter(e => !(e.source === targetContainer.id && e.sourceHandle === 's-top') && !(e.target === targetContainer.id && e.targetHandle === 't-bottom'));
-                            const newEd1 = { id: `e_${Date.now()}_1`, source: targetContainer.id, target: dn.id, sourceHandle: 's-top', targetHandle: 't-top', type: 'customEdge', data: { edgeStyle: 'straight' }, markerEnd: { type: MarkerType.ArrowClosed } };
-                            const newEd2 = { id: `e_${Date.now()}_2`, source: dn.id, target: targetContainer.id, sourceHandle: 's-bottom', targetHandle: 't-bottom', type: 'customEdge', data: { edgeStyle: 'straight' }, markerEnd: { type: MarkerType.ArrowClosed } };
-                            return [...filteredEds, newEd1, newEd2];
-                        });
+        if (needsSnap) {
+            snappedPositions = newPositions;
+            setNodes(nds => nds.map(n => {
+                if (newPositions.has(n.id)) {
+                    const posInfo = newPositions.get(n.id);
+                    return { ...n, position: { x: posInfo.x, y: posInfo.y }, parentId: posInfo.parentId };
+                }
+                return n;
+            }));
+        }
+
+        // Commit real-time case and switch heights from DOM to React state
+        setNodes(nds => {
+            let modified = false;
+            const nextNodes = nds.map(n => {
+                if (n.type === 'CASE_CONTAINER' || n.type === 'SWITCH_CONTAINER') {
+                    const el = document.querySelector(`.react-flow__node[data-id="${n.id}"]`);
+                    if (el && el.style.height) {
+                        const h = parseInt(el.style.height);
+                        if (h && parseInt(n.style?.height || 0) !== h) {
+                            modified = true;
+                            return { ...n, style: { ...n.style, height: h } };
+                        }
                     }
                 }
+                return n;
+            });
+            return modified ? nextNodes : nds;
+        });
+
+        // Auto-wire all cases to highest and lowest connectable blocks, and remove disconnected edges
+        setEdges(eds => {
+            let nextEds = eds;
+            if (unparentedCaseIds.size > 0) {
+                const unparentedIds = new Set([...newPositions.keys()]);
+                nextEds = nextEds.filter(e => 
+                    !(unparentedCaseIds.has(e.source) && unparentedIds.has(e.target)) &&
+                    !(unparentedIds.has(e.source) && unparentedCaseIds.has(e.target))
+                );
             }
-        }
+            const allCurrentNodes = (reactFlowInstance ? reactFlowInstance.getNodes() : nodes).map(n => 
+                newPositions.has(n.id) 
+                    ? { ...n, position: { x: newPositions.get(n.id).x, y: newPositions.get(n.id).y }, parentId: newPositions.get(n.id).parentId }
+                    : n
+            );
+            const caseContainers = allCurrentNodes.filter(n => n.type === 'CASE_CONTAINER');
+            caseContainers.forEach(caseNode => {
+                nextEds = syncCaseAutoWiring(caseNode, allCurrentNodes, nextEds, edgeStyle);
+            });
+            return nextEds;
+        });
     }
 
     // --- Record block move in log ---
@@ -1342,7 +2473,9 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
     if (edges.some(e => (draggedIds.has(e.source) && !draggedIds.has(e.target)) || (draggedIds.has(e.target) && !draggedIds.has(e.source)))) return;
 
-    if (draggedNodes.length > 1) {
+    // Morphing logic for dropping multiple nodes into a loop/for container (disabled per user request)
+    const ENABLE_LOOP_INSERTION = false;
+    if (ENABLE_LOOP_INSERTION && draggedNodes.length > 1) {
         let appliedMorph = false;
         let newNodes = [];
         
@@ -1467,6 +2600,9 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         const cY = containerNode.positionAbsolute?.y || containerNode.position.y;
         const cW = containerNode.measured?.width || parseInt(containerNode.style?.width || 250);
         const cH = containerNode.measured?.height || parseInt(containerNode.style?.height || 150);
+        if (containerNode.type === 'CASE_CONTAINER') {
+            return cx >= cX && cx <= cX + cW && cy >= cY && cy <= cY + cH + 30;
+        }
         return cx >= cX && cx <= cX + cW && cy >= cY && cy <= cY + cH;
     };
 
@@ -1895,17 +3031,38 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           </div>
       )}
       
-      <ConfirmDialog
-        isOpen={deleteConfirm}
-        position="absolute"
-        title="Smazat vybrané prvky?"
-        confirmText="Smazat (Enter)"
-        cancelText="Zrušit (Esc)"
-        confirmVariant="danger"
-        maxWidth="max-w-[280px]"
-        onConfirm={executeDelete}
-        onCancel={() => setDeleteConfirm(false)}
-      />
+      {(() => {
+        const isCaseSelected = selectedNodes.some(n => n.type === 'CASE_CONTAINER');
+        const isSwitchSelected = selectedNodes.some(n => n.type === 'SWITCH_CONTAINER');
+        let dialogTitle = "Smazat vybrané prvky?";
+        let dialogDesc = undefined;
+        let maxWidth = "max-w-[280px]";
+        
+        if (isCaseSelected) {
+          dialogTitle = "Smazat větev (Case) a její bloky?";
+          dialogDesc = "Smazáním této větve budou odstraněny i všechny bloky umístěné uvnitř.";
+          maxWidth = "max-w-[320px]";
+        } else if (isSwitchSelected) {
+          dialogTitle = "Smazat Switch a jeho větve?";
+          dialogDesc = "Smazáním tohoto přepínače budou odstraněny všechny jeho větve a bloky uvnitř.";
+          maxWidth = "max-w-[320px]";
+        }
+
+        return (
+          <ConfirmDialog
+            isOpen={deleteConfirm}
+            position="absolute"
+            title={dialogTitle}
+            desc={dialogDesc}
+            confirmText="Smazat (Enter)"
+            cancelText="Zrušit (Esc)"
+            confirmVariant="danger"
+            maxWidth={maxWidth}
+            onConfirm={executeDelete}
+            onCancel={() => setDeleteConfirm(false)}
+          />
+        );
+      })()}
 
       {pendingImport && (
         <div className="absolute inset-0 bg-gray-900/40 dark:bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]">
@@ -1971,7 +3128,52 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           onNodesChange={(changes) => { 
               const isUserChange = changes.some(c => c.type !== 'dimensions' && c.type !== 'replace');
               if (isUserChange) handleInteract(); 
-              if (!readOnly) onNodesChange(changes); 
+              if (readOnly) return;
+
+              let finalChanges = changes;
+              const hasCaseChange = changes.some(c => c.type === 'position' && c.position);
+              if (hasCaseChange) {
+                finalChanges = [...changes];
+                changes.forEach(c => {
+                  if (c.type === 'position' && c.position) {
+                    const node = (reactFlowInstance ? reactFlowInstance.getNode(c.id) : null) || nodes.find(n => n.id === c.id);
+                    if (node?.type === 'CASE_CONTAINER') {
+                      const switchId = node.data?.switchId || node.parentId;
+                      const allSwitchContainers = nodes.filter(n => n.type === 'SWITCH_CONTAINER');
+                      const switchNode = (reactFlowInstance ? reactFlowInstance.getNode(switchId) : null) || nodes.find(n => n.id === switchId);
+                      const allSwitchCases = nodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === switchId || n.parentId === switchId));
+                      const regularCases = allSwitchCases.filter(sc => !sc.data?.isDefault);
+
+                      c.position.y = 44;
+
+                      if (regularCases.length <= 1) {
+                        c.position.x = caseDragRef.current?.startX ?? node.position.x;
+                        return;
+                      }
+
+                      const swEl = document.querySelector(`.react-flow__node[data-id="${switchId}"]`);
+                      const domSwW = swEl ? (parseInt(swEl.style.width) || swEl.offsetWidth) : 0;
+                      const swW = Math.max(domSwW, switchNode?.style?.width ? parseInt(switchNode.style.width) : (switchNode?.measured?.width || 350));
+                      const cW = node.style?.width ? parseInt(node.style.width) : (node.measured?.width || 250);
+                      const minX = 15;
+                      let maxX = Math.max(minX, swW - cW - 15);
+                      if (caseDragRef.current?.allCasesInitialOrder) {
+                        const lastCase = caseDragRef.current.allCasesInitialOrder[caseDragRef.current.allCasesInitialOrder.length - 1];
+                        if (lastCase) {
+                          maxX = Math.max(maxX, lastCase.startX + Math.max(0, lastCase.w - cW) + 20);
+                        }
+                      }
+                      c.position.x = Math.max(minX, Math.min(maxX, c.position.x));
+
+                      if (caseDragRef.current && caseDragRef.current.caseId === node.id) {
+                        caseDragRef.current.currentX = c.position.x;
+                      }
+                    }
+                  }
+                });
+              }
+
+              onNodesChange(finalChanges); 
           }} 
           onEdgesChange={(changes) => { 
               const isUserChange = changes.some(c => c.type !== 'replace');

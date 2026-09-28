@@ -818,5 +818,275 @@ ENDFUNCTION`;
         expect(exitEdge).toBeDefined();
         expect(exitEdge.sourceHandle).toBe('s-bottom');
     });
+
+    it('should translate nested LOOP_CONTAINERs (loop-within-loop) from simple to advanced with correct loopback edges', () => {
+        // Simple mode: outer loop contains inner loop, inner loop contains body
+        const simpleXml = `<mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+    <mxCell id="start1" value="main" style="ellipse;mode=start;entityType=FUNCTION;" vertex="1" parent="1">
+      <mxGeometry x="360" y="40" width="100" height="40" as="geometry" />
+    </mxCell>
+    <mxCell id="outer_loop" value="i &lt; 3" type="LOOP_CONTAINER" style="swimlane;LOOP_CONTAINER;" vertex="1" parent="1">
+      <mxGeometry x="270" y="110" width="500" height="400" as="geometry" />
+    </mxCell>
+    <mxCell id="inner_loop" value="j &lt; 3" type="LOOP_CONTAINER" style="swimlane;LOOP_CONTAINER;" vertex="1" parent="1">
+      <mxGeometry x="300" y="200" width="400" height="270" as="geometry" />
+    </mxCell>
+    <mxCell id="body" value="x = x + 1" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
+      <mxGeometry x="360" y="310" width="120" height="50" as="geometry" />
+    </mxCell>
+    <mxCell id="end1" value="ENDFUNCTION" style="ellipse;mode=end;" vertex="1" parent="1">
+      <mxGeometry x="360" y="560" width="120" height="40" as="geometry" />
+    </mxCell>
+    <mxCell id="e1" edge="1" parent="1" source="start1" target="body" />
+    <mxCell id="e2" edge="1" parent="1" source="body" target="end1" />
+  </root>
+</mxGraphModel>`;
+
+        // Step 1: Simple XML -> Pseudocode
+        const { code: pseudo } = parseDrawioToPseudocode(simpleXml);
+        expect(pseudo).toContain('WHILE i < 3 DO');
+        expect(pseudo).toContain('WHILE j < 3 DO');
+        expect(pseudo).toContain('x = x + 1');
+
+        // Step 2: Pseudocode -> Advanced
+        const { xml: advXml } = parsePseudocodeToDrawio(pseudo, simpleXml, 'true-false', 'hexagon', 'advanced');
+        expect(advXml).not.toContain('LOOP_CONTAINER');
+
+        const { nodes: advNodes, edges: advEdges } = drawioToReactFlow(advXml);
+
+        const outerCond = advNodes.find(n => n.type === 'CONDITION' && (n.data?.label || '').includes('i'));
+        const innerCond = advNodes.find(n => n.type === 'CONDITION' && (n.data?.label || '').includes('j'));
+        const bodyNode = advNodes.find(n => n.data?.label === 'x = x + 1');
+
+        expect(outerCond).toBeDefined();
+        expect(innerCond).toBeDefined();
+        expect(bodyNode).toBeDefined();
+
+        // Outer condition True -> inner condition
+        const outerTrueEdge = advEdges.find(e => e.source === outerCond.id && (e.data?.label === 'True' || e.sourceHandle === 's-bottom'));
+        expect(outerTrueEdge).toBeDefined();
+        expect(outerTrueEdge.target).toBe(innerCond.id);
+
+        // Inner condition True -> body
+        const innerTrueEdge = advEdges.find(e => e.source === innerCond.id && (e.data?.label === 'True' || e.sourceHandle === 's-bottom'));
+        expect(innerTrueEdge).toBeDefined();
+        expect(innerTrueEdge.target).toBe(bodyNode.id);
+
+        // Body -> inner condition (inner loopback)
+        const innerLoopback = advEdges.find(e => e.source === bodyNode.id && e.target === innerCond.id);
+        expect(innerLoopback).toBeDefined();
+
+        // Inner condition False -> outer condition (re-enter outer loop check)
+        const innerFalseEdge = advEdges.find(e => e.source === innerCond.id && (e.data?.label === 'False' || e.sourceHandle === 's-right'));
+        expect(innerFalseEdge).toBeDefined();
+        expect(innerFalseEdge.target).toBe(outerCond.id);
+    });
+
+    it('should translate nested LOOP_CONTAINERs with statement before inner loop from simple to advanced with correct loopback', () => {
+        const simpleXml = `<mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+    <mxCell id="start1" value="main" style="ellipse;mode=start;entityType=FUNCTION;" vertex="1" parent="1">
+      <mxGeometry x="360" y="40" width="100" height="40" as="geometry" />
+    </mxCell>
+    <mxCell id="outer_loop" value="i &lt; 3" type="LOOP_CONTAINER" style="swimlane;LOOP_CONTAINER;" vertex="1" parent="1">
+      <mxGeometry x="270" y="110" width="500" height="400" as="geometry" />
+    </mxCell>
+    <mxCell id="act1" value="A = 1" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
+      <mxGeometry x="360" y="180" width="120" height="50" as="geometry" />
+    </mxCell>
+    <mxCell id="inner_loop" value="j &lt; 3" type="LOOP_CONTAINER" style="swimlane;LOOP_CONTAINER;" vertex="1" parent="1">
+      <mxGeometry x="300" y="260" width="400" height="200" as="geometry" />
+    </mxCell>
+    <mxCell id="act2" value="B = 2" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
+      <mxGeometry x="360" y="340" width="120" height="50" as="geometry" />
+    </mxCell>
+    <mxCell id="end1" value="ENDFUNCTION" style="ellipse;mode=end;" vertex="1" parent="1">
+      <mxGeometry x="360" y="560" width="120" height="40" as="geometry" />
+    </mxCell>
+    <mxCell id="e1" edge="1" parent="1" source="start1" target="act1" />
+    <mxCell id="e2" edge="1" parent="1" source="act1" target="act2" />
+    <mxCell id="e3" edge="1" parent="1" source="act2" target="end1" />
+  </root>
+</mxGraphModel>`;
+
+        const { code: pseudo } = parseDrawioToPseudocode(simpleXml);
+        expect(pseudo).toContain('WHILE i < 3 DO');
+        expect(pseudo).toContain('A = 1');
+        expect(pseudo).toContain('WHILE j < 3 DO');
+        expect(pseudo).toContain('B = 2');
+
+        const { xml: advXml } = parsePseudocodeToDrawio(pseudo, simpleXml, 'true-false', 'hexagon', 'advanced');
+        const { nodes: advNodes, edges: advEdges } = drawioToReactFlow(advXml);
+
+        const outerCond = advNodes.find(n => n.type === 'CONDITION' && (n.data?.label || '').includes('i'));
+        const innerCond = advNodes.find(n => n.type === 'CONDITION' && (n.data?.label || '').includes('j'));
+        const nodeA = advNodes.find(n => n.data?.label === 'A = 1');
+        const nodeB = advNodes.find(n => n.data?.label === 'B = 2');
+
+        expect(outerCond).toBeDefined();
+        expect(innerCond).toBeDefined();
+        expect(nodeA).toBeDefined();
+        expect(nodeB).toBeDefined();
+
+        // Outer condition True -> statement A
+        const edgeOuterTrue = advEdges.find(e => e.source === outerCond.id && (e.data?.label === 'True' || e.sourceHandle === 's-bottom'));
+        expect(edgeOuterTrue?.target).toBe(nodeA.id);
+
+        // Statement A -> inner condition
+        const edgeAtoInner = advEdges.find(e => e.source === nodeA.id);
+        expect(edgeAtoInner?.target).toBe(innerCond.id);
+
+        // Inner condition True -> statement B
+        const edgeInnerTrue = advEdges.find(e => e.source === innerCond.id && (e.data?.label === 'True' || e.sourceHandle === 's-bottom'));
+        expect(edgeInnerTrue?.target).toBe(nodeB.id);
+
+        // Statement B -> inner condition (inner loopback)
+        const innerLoopback = advEdges.find(e => e.source === nodeB.id && e.target === innerCond.id);
+        expect(innerLoopback).toBeDefined();
+
+        // Inner condition False -> outer condition (outer loopback)
+        const outerLoopback = advEdges.find(e => e.source === innerCond.id && (e.data?.label === 'False' || e.sourceHandle === 's-right'));
+        expect(outerLoopback?.target).toBe(outerCond.id);
+    });
+
+    it('should translate SWITCH from simple XML to advanced mode and back with existingXml', () => {
+        const simpleXml = `<mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+    <mxCell id="start1" value="main" style="ellipse;mode=start;entityType=FUNCTION;" vertex="1" parent="1">
+      <mxGeometry x="360" y="40" width="100" height="40" as="geometry" />
+    </mxCell>
+    <mxCell id="sw1" value="x" type="SWITCH_CONTAINER" style="swimlane;SWITCH_CONTAINER;switchVar=x;" vertex="1" parent="1">
+      <mxGeometry x="270" y="110" width="600" height="250" as="geometry" />
+    </mxCell>
+    <mxCell id="case1" value="Case 1" type="CASE_CONTAINER" style="swimlane;CASE_CONTAINER;caseVal=1;" caseVal="1" vertex="1" parent="sw1">
+      <mxGeometry x="20" y="44" width="160" height="166" as="geometry" />
+    </mxCell>
+    <mxCell id="act1" value="y = 10" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
+      <mxGeometry x="310" y="200" width="120" height="50" as="geometry" />
+    </mxCell>
+    <mxCell id="case2" value="Case 2" type="CASE_CONTAINER" style="swimlane;CASE_CONTAINER;caseVal=2;" caseVal="2" vertex="1" parent="sw1">
+      <mxGeometry x="200" y="44" width="160" height="166" as="geometry" />
+    </mxCell>
+    <mxCell id="act2" value="y = 20" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
+      <mxGeometry x="490" y="200" width="120" height="50" as="geometry" />
+    </mxCell>
+    <mxCell id="case_def" value="Case default" type="CASE_CONTAINER" style="swimlane;CASE_CONTAINER;isDefault=true;" isDefault="true" vertex="1" parent="sw1">
+      <mxGeometry x="380" y="44" width="160" height="166" as="geometry" />
+    </mxCell>
+    <mxCell id="act3" value="y = 30" style="whiteSpace=wrap;html=1;" vertex="1" parent="1">
+      <mxGeometry x="670" y="200" width="120" height="50" as="geometry" />
+    </mxCell>
+    <mxCell id="end1" value="ENDFUNCTION" style="ellipse;mode=end;" vertex="1" parent="1">
+      <mxGeometry x="360" y="420" width="100" height="40" as="geometry" />
+    </mxCell>
+    <mxCell id="e_start" edge="1" parent="1" source="start1" target="sw1" />
+    <mxCell id="e_end" edge="1" parent="1" source="sw1" target="end1" />
+  </root>
+</mxGraphModel>`;
+
+        // 1. Simple XML -> Pseudocode
+        const { code: pseudo } = parseDrawioToPseudocode(simpleXml);
+        expect(pseudo).toContain('SWITCH x');
+        expect(pseudo).toContain('CASE 1:');
+        expect(pseudo).toContain('y = 10');
+        expect(pseudo).toContain('CASE 2:');
+        expect(pseudo).toContain('y = 20');
+        expect(pseudo).toContain('DEFAULT:');
+        expect(pseudo).toContain('y = 30');
+        expect(pseudo).toContain('ENDSWITCH');
+
+        // 2. Simple XML + Pseudocode -> Advanced XML
+        const { xml: advXml } = parsePseudocodeToDrawio(pseudo, simpleXml, 'true-false', 'hexagon', 'advanced');
+        expect(advXml).not.toContain('SWITCH_CONTAINER');
+        expect(advXml).not.toContain('CASE_CONTAINER');
+        expect(advXml).toContain('value="x == 1"');
+        expect(advXml).toContain('value="x == 2"');
+
+        const { nodes: advNodes, edges: advEdges } = drawioToReactFlow(advXml);
+        const cond1 = advNodes.find(n => n.data?.label === 'x == 1');
+        const cond2 = advNodes.find(n => n.data?.label === 'x == 2');
+        const a1 = advNodes.find(n => n.data?.label === 'y = 10');
+        const a2 = advNodes.find(n => n.data?.label === 'y = 20');
+        const a3 = advNodes.find(n => n.data?.label === 'y = 30');
+
+        expect(cond1).toBeDefined();
+        expect(cond2).toBeDefined();
+        expect(a1).toBeDefined();
+        expect(a2).toBeDefined();
+        expect(a3).toBeDefined();
+
+        // 3. Advanced XML -> Pseudocode -> Simple XML
+        const { code: pseudoFromAdv } = parseDrawioToPseudocode(advXml);
+        expect(pseudoFromAdv).toContain('SWITCH x');
+        expect(pseudoFromAdv).toContain('CASE 1:');
+        expect(pseudoFromAdv).toContain('DEFAULT:');
+
+        const { xml: backSimpleXml } = parsePseudocodeToDrawio(pseudoFromAdv, advXml, 'true-false', 'hexagon', 'simple');
+        expect(backSimpleXml).toContain('SWITCH_CONTAINER');
+        expect(backSimpleXml).toContain('CASE_CONTAINER');
+
+        const { nodes: simpleNodes } = drawioToReactFlow(backSimpleXml);
+        const swNode = simpleNodes.find(n => n.type === 'SWITCH_CONTAINER');
+        expect(swNode).toBeDefined();
+
+        const cases = simpleNodes.filter(n => n.type === 'CASE_CONTAINER');
+        expect(cases.length).toBe(3);
+
+        const innerA1 = simpleNodes.find(n => n.data?.label === 'y = 10');
+        const innerA2 = simpleNodes.find(n => n.data?.label === 'y = 20');
+        const innerA3 = simpleNodes.find(n => n.data?.label === 'y = 30');
+
+        expect(innerA1).toBeDefined();
+        expect(innerA2).toBeDefined();
+        expect(innerA3).toBeDefined();
+
+        // Inner blocks must be parented to their respective cases
+        expect(innerA1.parentId).toBe(cases[0].id);
+        expect(innerA2.parentId).toBe(cases[1].id);
+        expect(innerA3.parentId).toBe(cases[2].id);
+
+        // Relative coordinates inside the case MUST be positive and fit inside the case dimensions
+        expect(innerA1.position.x).toBeGreaterThanOrEqual(0);
+        expect(innerA1.position.y).toBeGreaterThanOrEqual(0);
+        expect(innerA2.position.x).toBeGreaterThanOrEqual(0);
+        expect(innerA2.position.y).toBeGreaterThanOrEqual(0);
+        expect(innerA3.position.x).toBeGreaterThanOrEqual(0);
+        expect(innerA3.position.y).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should NOT treat FOR loop preceded by matching action block as DO-WHILE or delete preceding block', () => {
+        const pseudo = `FUNCTION main()
+    Operace()
+    FOR i = 0 TO 10 DO
+        Operace()
+    ENDFOR
+ENDFUNCTION`;
+
+        const { xml } = parsePseudocodeToDrawio(pseudo, null, 'true-false', 'hexagon', 'simple');
+        const { nodes, edges } = drawioToReactFlow(xml);
+
+        const forContainer = nodes.find(n => n.type === 'FOR_CONTAINER');
+        expect(forContainer).toBeDefined();
+        // Crucial: doWhile must be false!
+        expect(forContainer.data?.doWhile).toBe(false);
+
+        // Exactly two "Operace" blocks must be present (preceding block + inner block)
+        const operaceBlocks = nodes.filter(n => (n.data?.label || '').trim() === 'Operace');
+        expect(operaceBlocks.length).toBe(2);
+
+        // Preceding block must be outside the FOR container (above it)
+        const preBlock = operaceBlocks.find(b => b.position.y < forContainer.position.y);
+        const innerBlock = operaceBlocks.find(b => b.position.y >= forContainer.position.y);
+        expect(preBlock).toBeDefined();
+        expect(innerBlock).toBeDefined();
+    });
 });
+
 

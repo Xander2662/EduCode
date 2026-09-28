@@ -45,6 +45,7 @@ export const parseDrawioToPython = (xml) => {
         let switchVar = '';
         let caseVal = '';
         let isDefault = false;
+        let switchId = '';
         
         let type = 'ACTION';
         if (style.includes('shape=note') || style.includes('fillColor=#fff2cc') || value.startsWith('#') || value.startsWith('//')) type = 'COMMENT';
@@ -106,6 +107,12 @@ export const parseDrawioToPython = (xml) => {
                 const defMatch = style.match(/isDefault=([^;]+)/);
                 if (defMatch) isDefault = defMatch[1] === 'true';
             }
+            if (style.includes('switchId=')) {
+                const sidMatch = style.match(/switchId=([^;]+)/);
+                if (sidMatch) switchId = decodeURIComponent(sidMatch[1]);
+            }
+            const sidAttr = cell.getAttribute('switchId');
+            if (sidAttr) switchId = decodeURIComponent(sidAttr);
         }
         
         let isSwapped = false;
@@ -124,7 +131,7 @@ export const parseDrawioToPython = (xml) => {
         const height = geo ? parseFloat(geo.getAttribute('height') || 0) : 0;
         const parentId = cell.getAttribute('parent');
 
-        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep, switchVar, caseVal, isDefault, isSwapped, parentId };
+        nodes[id] = { id, value, type, x, y, width, height, next: [], prev: [], entityType, ioType, doWhile, forInit, forLimit, forStep, switchVar, caseVal, isDefault, isSwapped, parentId, switchId };
       } 
       else if (edge === '1') {
         const source = cell.getAttribute('source');
@@ -144,14 +151,46 @@ export const parseDrawioToPython = (xml) => {
       }
     });
 
+    const isIgnoredRootType = (t) => ['COMMENT', 'MERGE', 'END', 'GROUP_BG', 'LOOP_CONTAINER', 'FOR_CONTAINER', 'SWITCH_CONTAINER', 'CASE_CONTAINER'].includes(t);
+
+    const isInsideCase = (child, caseContainer) => {
+        if (!child || !caseContainer || child.id === caseContainer.id) return false;
+        if (isIgnoredRootType(child.type)) return false;
+        if (child.parentId === caseContainer.id) return true;
+        const cX = caseContainer.x;
+        const cY = caseContainer.y;
+        const cW = caseContainer.width || 250;
+        const cH = caseContainer.height || 166;
+        const nW = child.width || 100;
+        const nH = child.height || 50;
+        const centerX = child.x + nW / 2;
+        const centerY = child.y + nH / 2;
+        return centerX >= cX && centerX <= cX + cW && centerY >= cY && centerY <= cY + cH;
+    };
+
+    const isInsideSwitch = (child, switchNode) => {
+        if (!child || !switchNode || child.id === switchNode.id) return false;
+        if (child.parentId === switchNode.id || child.switchId === switchNode.id) return true;
+        const sX = switchNode.x;
+        const sY = switchNode.y;
+        const sW = switchNode.width || 350;
+        const sH = switchNode.height || 230;
+        const nW = child.width || 250;
+        const nH = child.height || 166;
+        const centerX = child.x + nW / 2;
+        const centerY = child.y + nH / 2;
+        return centerX >= sX && centerX <= sX + sW && centerY >= sY && centerY <= sY + sH;
+    };
+
     Object.values(nodes).filter(n => n.type === 'SWITCH_CONTAINER').forEach(switchNode => {
-        const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && n.parentId === switchNode.id);
+        const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && isInsideSwitch(n, switchNode));
         cases.sort((a, b) => {
             if (a.isDefault) return 1;
             if (b.isDefault) return -1;
             return a.x - b.x;
         });
         const mergeEdges = [...switchNode.next];
+        switchNode.mergeTarget = mergeEdges.length > 0 ? mergeEdges[0].target : null;
         switchNode.next = [];
         
         cases.forEach(caseNode => {
@@ -159,10 +198,18 @@ export const parseDrawioToPython = (xml) => {
             switchNode.next.push(edgeToCase);
             caseNode.prev.push(edgeToCase);
             
-            const blocksInside = Object.values(nodes).filter(n => n.id !== caseNode.id && n.parentId === caseNode.id);
+            // Clear any old edges on caseNode (e.g. from s-top handle)
+            caseNode.next = [];
+
+            const blocksInside = Object.values(nodes).filter(n => isInsideCase(n, caseNode));
             if (blocksInside.length > 0) {
                 blocksInside.sort((a, b) => a.y - b.y);
                 
+                // Clear edges that point to caseNode from inside (e.g. t-bottom handle)
+                blocksInside.forEach(b => {
+                    b.next = b.next.filter(e => e.target !== caseNode.id);
+                });
+
                 for (let i = 0; i < blocksInside.length - 1; i++) {
                     const curr = blocksInside[i];
                     const nxt = blocksInside[i+1];
@@ -202,8 +249,6 @@ export const parseDrawioToPython = (xml) => {
             }
         });
     });
-
-    const isIgnoredRootType = (t) => ['COMMENT', 'MERGE', 'END', 'GROUP_BG', 'LOOP_CONTAINER', 'FOR_CONTAINER', 'SWITCH_CONTAINER', 'CASE_CONTAINER'].includes(t);
 
     const loopContainers = Object.values(nodes).filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
     const isInsideLoop = (node, loop) => {
@@ -379,7 +424,7 @@ export const parseDrawioToPython = (xml) => {
     );
 
     let candidateRoots = [
-        ...Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type) && !loopContainers.some(l => isInsideLoop(n, l))),
+        ...Object.values(nodes).filter(n => !assigned.has(n.id) && n.prev.length === 0 && !isIgnoredRootType(n.type) && !loopContainers.some(l => isInsideLoop(n, l)) && !Object.values(nodes).filter(c => c.type === 'CASE_CONTAINER').some(c => isInsideCase(n, c))),
         ...unassignedTopContainers
     ].sort((a, b) => (a.y - b.y) || (a.x - b.x));
     
@@ -400,14 +445,18 @@ export const parseDrawioToPython = (xml) => {
         
         assigned.add(r.id);
         if (r.type === 'SWITCH_CONTAINER') {
-            const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && n.parentId === r.id);
-            cases.forEach(c => assigned.add(c.id));
+            const cases = Object.values(nodes).filter(n => n.type === 'CASE_CONTAINER' && isInsideSwitch(n, r));
+            cases.forEach(c => {
+                assigned.add(c.id);
+                const blocks = Object.values(nodes).filter(b => isInsideCase(b, c));
+                blocks.forEach(b => assigned.add(b.id));
+            });
         }
         markCluster(r.id);
     });
 
     const unassignedNodes = Object.values(nodes)
-        .filter(n => !assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type))
+        .filter(n => !assigned.has(n.id) && n.type !== 'START' && !isIgnoredRootType(n.type) && !Object.values(nodes).filter(c => c.type === 'CASE_CONTAINER').some(c => isInsideCase(n, c)))
         .sort((a, b) => (a.y - b.y) || (a.x - b.x));
 
     unassignedNodes.forEach(n => {
@@ -590,11 +639,13 @@ export const parseDrawioToPython = (xml) => {
                 printCommentsBeforeY(node.y, indent);
                 appendLine(`${indent}match ${node.switchVar || 'x'}:`, node.id);
                 
-                let mergeNode = null;
-                if (node.next.length > 1) {
-                    mergeNode = node.next.map(e => e.target).reduce((acc, target) => findConvergence(acc, target));
-                } else if (node.next.length === 1) {
-                    mergeNode = node.next[0].target;
+                let mergeNode = node.mergeTarget || null;
+                if (!mergeNode) {
+                    if (node.next.length > 1) {
+                        mergeNode = node.next.map(e => e.target).reduce((acc, target) => findConvergence(acc, target));
+                    } else if (node.next.length === 1) {
+                        mergeNode = node.next[0].target;
+                    }
                 }
 
                 if (node.next.length === 0) {

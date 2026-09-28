@@ -75,6 +75,22 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                 targetHeight = Math.min(targetHeight, SSL_Height);
             }
             
+            if (data.isCaseContainer) {
+                const switchId = myNode.parentId || data.switchId;
+                return nds.map(n => {
+                    if (n.id === id) {
+                        return { ...n, data: { ...n.data, isNew: false }, zIndex: -9999, style: { ...n.style, height: targetHeight, width: targetWidth } };
+                    }
+                    if (n.id === switchId) {
+                        return { ...n, style: { ...n.style, height: targetHeight + 64 } };
+                    }
+                    if (n.type === 'CASE_CONTAINER' && (n.parentId === switchId || n.data?.switchId === switchId)) {
+                        return { ...n, style: { ...n.style, height: targetHeight } };
+                    }
+                    return n;
+                });
+            }
+
             return nds.map(n => {
                 if (n.id === id) {
                     const nextZIndex = data.isCaseContainer ? -9999 : -Math.round(targetWidth);
@@ -439,6 +455,19 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                 }
             }
 
+            if (data.isCaseContainer) {
+                const switchId = myNode.parentId || data.switchId;
+                if (switchId) {
+                    const siblingCases = nds.filter(n => n.type === 'CASE_CONTAINER' && (n.parentId === switchId || n.data?.switchId === switchId));
+                    let maxCaseH = newHeight;
+                    siblingCases.forEach(sc => {
+                        const scH = sc.style?.height ? parseInt(sc.style.height) : minHeight;
+                        if (scH > maxCaseH) maxCaseH = scH;
+                    });
+                    newHeight = maxCaseH;
+                }
+            }
+
             if (Math.abs(newWidth - myWidth) > 1 || Math.abs(newHeight - myHeight) > 1) {
                 if (containerRef.current) {
                     const rfNode = containerRef.current.closest('.react-flow__node');
@@ -448,18 +477,57 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                     }
                 }
                 
+                if (data.isCaseContainer) {
+                    const switchId = myNode.parentId || data.switchId;
+                    if (switchId) {
+                        const switchEl = document.querySelector(`.react-flow__node[data-id="${switchId}"]`);
+                        if (switchEl) switchEl.style.height = (newHeight + 64) + 'px';
+                        const siblingCases = nds.filter(n => n.type === 'CASE_CONTAINER' && (n.parentId === switchId || n.data?.switchId === switchId) && n.id !== id);
+                        siblingCases.forEach(sc => {
+                            const scEl = document.querySelector(`.react-flow__node[data-id="${sc.id}"]`);
+                            if (scEl) scEl.style.height = newHeight + 'px';
+                            if (!sc.style) sc.style = {};
+                            sc.style.height = newHeight;
+                        });
+                    }
+                }
+
                 if (!myNode.style) myNode.style = {};
                 myNode.style.width = newWidth;
                 myNode.style.height = newHeight;
                 
                 if (!anyChildDragging) {
-                    setNodes(oldNds => oldNds.map(n => n.id === id ? { ...n, style: { ...n.style, width: newWidth, height: newHeight } } : n));
+                    if (data.isCaseContainer) {
+                        const switchId = myNode.parentId || data.switchId;
+                        setNodes(oldNds => oldNds.map(n => {
+                            if (n.id === id) return { ...n, style: { ...n.style, width: newWidth, height: newHeight } };
+                            if (n.id === switchId) return { ...n, style: { ...n.style, height: newHeight + 64 } };
+                            if (n.type === 'CASE_CONTAINER' && (n.parentId === switchId || n.data?.switchId === switchId)) {
+                                return { ...n, style: { ...n.style, height: newHeight } };
+                            }
+                            return n;
+                        }));
+                    } else {
+                        setNodes(oldNds => oldNds.map(n => n.id === id ? { ...n, style: { ...n.style, width: newWidth, height: newHeight } } : n));
+                    }
                 } else {
                     containerRef.current.dataset.needsCommit = 'true';
                 }
             } else if (!anyChildDragging && containerRef.current?.dataset.needsCommit === 'true') {
                 containerRef.current.dataset.needsCommit = 'false';
-                setNodes(oldNds => oldNds.map(n => n.id === id ? { ...n, style: { ...n.style, width: newWidth, height: newHeight } } : n));
+                if (data.isCaseContainer) {
+                    const switchId = myNode.parentId || data.switchId;
+                    setNodes(oldNds => oldNds.map(n => {
+                        if (n.id === id) return { ...n, style: { ...n.style, width: newWidth, height: newHeight } };
+                        if (n.id === switchId) return { ...n, style: { ...n.style, height: newHeight + 64 } };
+                        if (n.type === 'CASE_CONTAINER' && (n.parentId === switchId || n.data?.switchId === switchId)) {
+                            return { ...n, style: { ...n.style, height: newHeight } };
+                        }
+                        return n;
+                    }));
+                } else {
+                    setNodes(oldNds => oldNds.map(n => n.id === id ? { ...n, style: { ...n.style, width: newWidth, height: newHeight } } : n));
+                }
             }
             
             animationFrameId = requestAnimationFrame(checkBounds);

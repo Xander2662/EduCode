@@ -113,6 +113,34 @@ html.dark ::-webkit-scrollbar-thumb:active,
   cursor: grab;
 }
 
+/* Animated sliding for switch cases and their inner blocks */
+.react-flow__node-CASE_CONTAINER:not(.dragging):not(.is-dragging-case),
+.react-flow__node.case-inner-sliding {
+  transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1), width 0.1s ease-out, height 0.1s ease-out;
+}
+
+/* Disable transform transition ONLY on the node actively dragged or when dragging the switch container */
+.react-flow__node-CASE_CONTAINER.dragging,
+.react-flow__node-CASE_CONTAINER.is-dragging-case,
+.react-flow__node.case-inner-dragging,
+.react-flow__node-SWITCH_CONTAINER.dragging ~ .react-flow__node-CASE_CONTAINER,
+.react-flow:has(.react-flow__node-SWITCH_CONTAINER.dragging) .react-flow__node-CASE_CONTAINER,
+.react-flow__node-CASE_CONTAINER.no-transition {
+  transition: none !important;
+}
+
+/* Prominent highlight on switch container when hovered as drop target */
+.react-flow__node-SWITCH_CONTAINER.drop-target-switch {
+  border-color: #f43f5e !important;
+  box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.4), 0 10px 25px -5px rgba(244, 63, 94, 0.25) !important;
+  background-color: rgba(254, 226, 226, 0.6) !important;
+  transition: all 0.15s ease-out;
+}
+.dark .react-flow__node-SWITCH_CONTAINER.drop-target-switch {
+  background-color: rgba(136, 19, 55, 0.45) !important;
+}
+
+
 .react-flow__node-LOOP_CONTAINER .custom-drag-handle:active,
 .react-flow__node-FOR_CONTAINER .custom-drag-handle:active {
   cursor: grabbing;
@@ -189,4 +217,11 @@ html.dark ::-webkit-scrollbar-thumb:active,
   height: 8px;
   cursor: pointer;
   border-radius: 8px;
-}
+}
+
+/* Smooth dynamic animations for Case sliding and reordering */
+.react-flow__node-CASE_CONTAINER:not(.dragging) {
+  transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1), width 0.1s ease-out, height 0.1s ease-out;
+}
+
+
