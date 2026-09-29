@@ -47,7 +47,20 @@ export const syncCaseAutoWiring = (caseNode, allNodes, allEdges, edgeStyle = 'tr
   const CONNECTABLE_TYPES = ['PROCESS', 'ACTION', 'IO', 'CONDITION'];
   const switchId = caseNode.data?.switchId || caseNode.parentId;
 
-  const getAbsPos = (node) => {
+  const getNodeAbsPos = (node) => {
+    const isDragging = node.dragging || Boolean(document.querySelector(`.react-flow__node[data-id="${node.id}"].dragging`));
+    if (isDragging) {
+      const el = document.querySelector(`.react-flow__node[data-id="${node.id}"]`);
+      if (el && el.style.transform) {
+        const match = el.style.transform.match(/translate(?:3d)?\((-?[\d.]+)px,?\s*(-?[\d.]+)px/);
+        if (match) {
+          return { x: parseFloat(match[1]), y: parseFloat(match[2]) };
+        }
+      }
+    }
+    if (node.positionAbsolute && typeof node.positionAbsolute.x === 'number') {
+      return node.positionAbsolute;
+    }
     let x = node.position.x;
     let y = node.position.y;
     let curr = node;
@@ -63,21 +76,37 @@ export const syncCaseAutoWiring = (caseNode, allNodes, allEdges, edgeStyle = 'tr
     return { x, y };
   };
 
-  const casePos = getAbsPos(caseNode);
+  const casePos = getNodeAbsPos(caseNode);
   const cX = casePos.x;
   const cY = casePos.y;
   const cW = caseNode.measured?.width || parseInt(caseNode.style?.width || 250);
   const cH = caseNode.measured?.height || parseInt(caseNode.style?.height || 166);
 
+  const allSwitchCases = allNodes.filter(n => n.type === 'CASE_CONTAINER' && (n.parentId === switchId || n.data?.switchId === switchId || n.id === caseNode.id));
+
   const innerBlocks = allNodes.filter(n => {
     if (!CONNECTABLE_TYPES.includes(n.type)) return false;
-    if (n.parentId === caseNode.id) return true;
-    if (n.parentId && n.parentId !== caseNode.id && n.parentId !== switchId) return false;
-    const nPos = getAbsPos(n);
+
+    const isDragging = n.dragging || Boolean(document.querySelector(`.react-flow__node[data-id="${n.id}"].dragging`));
+    const nPos = getNodeAbsPos(n);
     const nW = n.measured?.width || n.width || 100;
     const nH = n.measured?.height || n.height || 50;
     const cx = nPos.x + nW / 2;
     const cy = nPos.y + nH / 2;
+
+    if (isDragging) {
+      const hitCase = allSwitchCases.find(c => {
+        const cP = getNodeAbsPos(c);
+        const w = c.measured?.width || parseInt(c.style?.width || 250);
+        const h = c.measured?.height || parseInt(c.style?.height || 166);
+        return cx >= cP.x && cx <= cP.x + w && cy >= cP.y && cy <= cP.y + h + 30;
+      });
+      return hitCase?.id === caseNode.id;
+    }
+
+    if (n.parentId === caseNode.id) return true;
+    if (n.parentId && n.parentId !== caseNode.id && n.parentId !== switchId) return false;
+
     return cx >= cX && cx <= cX + cW && cy >= cY && cy <= cY + cH + 30;
   });
 
@@ -87,14 +116,35 @@ export const syncCaseAutoWiring = (caseNode, allNodes, allEdges, edgeStyle = 'tr
     !(e.target === caseNode.id && e.targetHandle === 't-bottom')
   );
 
+  // Purge any cross-case edges between innerBlocks of this case and other cases
+  const otherCases = allSwitchCases.filter(c => c.id !== caseNode.id);
+  const otherCaseIds = new Set(otherCases.map(c => c.id));
+  const innerIds = new Set(innerBlocks.map(b => b.id));
+
+  eds = eds.filter(e => {
+    const srcInCase = innerIds.has(e.source);
+    const tgtInCase = innerIds.has(e.target);
+    if (srcInCase && !tgtInCase) {
+      if (otherCaseIds.has(e.target)) return false;
+      const tgtNode = allNodes.find(n => n.id === e.target);
+      if (tgtNode && (otherCaseIds.has(tgtNode.parentId) || otherCaseIds.has(tgtNode.data?.caseId))) return false;
+    }
+    if (tgtInCase && !srcInCase) {
+      if (otherCaseIds.has(e.source)) return false;
+      const srcNode = allNodes.find(n => n.id === e.source);
+      if (srcNode && (otherCaseIds.has(srcNode.parentId) || otherCaseIds.has(srcNode.data?.caseId))) return false;
+    }
+    return true;
+  });
+
   if (innerBlocks.length === 0) {
     return eds;
   }
 
   // Sort inner blocks by vertical position (Y level)
   innerBlocks.sort((a, b) => {
-    const aY = getAbsPos(a).y;
-    const bY = getAbsPos(b).y;
+    const aY = getNodeAbsPos(a).y;
+    const bY = getNodeAbsPos(b).y;
     return aY - bY;
   });
 
@@ -182,6 +232,24 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
   const [showExportMenu, setShowExportMenu] = useState(false);
   const reactFlowInstance = useReactFlow();
   const { screenToFlowPosition, flowToScreenPosition, getNode, getEdges } = reactFlowInstance;
+
+  const getNodeAbsPos = useCallback((n, nodeList = null) => {
+    if (!n) return { x: 0, y: 0 };
+    let x = n.position ? n.position.x : 0;
+    let y = n.position ? n.position.y : 0;
+    let curr = n;
+    let depth = 0;
+    const lookup = nodeList || (reactFlowInstance ? reactFlowInstance.getNodes() : nodes);
+    while (curr.parentId && depth < 10) {
+      const parent = lookup.find(p => p.id === curr.parentId);
+      if (!parent) break;
+      x += parent.position ? parent.position.x : 0;
+      y += parent.position ? parent.position.y : 0;
+      curr = parent;
+      depth++;
+    }
+    return { x, y };
+  }, [nodes, reactFlowInstance]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -500,6 +568,30 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       }
     });
 
+    const switchAncestorIds = new Set();
+    const loops = nodes.filter(n => n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER');
+    const switches = nodes.filter(n => n.type === 'SWITCH_CONTAINER');
+    switches.forEach(sw => {
+      let curr = sw;
+      let depth = 0;
+      while (curr && curr.parentId && curr.parentId !== '1' && depth < 10) {
+        switchAncestorIds.add(curr.parentId);
+        curr = nodes.find(p => p.id === curr.parentId);
+        depth++;
+      }
+      const swX = sw.position.x;
+      const swY = sw.position.y;
+      loops.forEach(lp => {
+        const lpX = lp.position.x;
+        const lpY = lp.position.y;
+        const lpW = lp.style?.width ? parseInt(lp.style.width) : (lp.measured?.width || 350);
+        const lpH = lp.style?.height ? parseInt(lp.style.height) : (lp.measured?.height || 200);
+        if (sw.parentId === lp.id || (swX >= lpX && swX <= lpX + lpW && swY >= lpY && swY <= lpY + lpH)) {
+          switchAncestorIds.add(lp.id);
+        }
+      });
+    });
+
     return nodes.map(n => {
       let canMoveCase = true;
       if (n.type === 'CASE_CONTAINER') {
@@ -507,11 +599,17 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
         const regCount = regularCaseCountBySwitch.get(swId) || 0;
         canMoveCase = regCount > 1;
       }
+      let zIndex = 10;
+      if (n.type === 'SWITCH_CONTAINER') zIndex = -2;
+      else if (n.type === 'CASE_CONTAINER') zIndex = 1;
+      else if (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') {
+        zIndex = switchAncestorIds.has(n.id) ? -5 : 5;
+      }
       return {
         ...n,
         className: n.type === 'CASE_CONTAINER' ? (canMoveCase ? 'cursor-grab' : 'cursor-default') : n.className,
         draggable: n.type === 'CASE_CONTAINER' ? canMoveCase : (n.draggable !== undefined ? n.draggable : true),
-        zIndex: (n.type === 'LOOP_CONTAINER' || n.type === 'FOR_CONTAINER') ? -1 : (n.type === 'SWITCH_CONTAINER' ? -2 : (n.type === 'CASE_CONTAINER' ? 1 : 10)),
+        zIndex,
         data: { 
             ...n.data, 
             canMoveCase,
@@ -1686,22 +1784,6 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
     }
     dragStartPositionsRef.current = startMap;
 
-    const getNodeAbsPos = (n) => {
-      let x = n.position.x;
-      let y = n.position.y;
-      let curr = n;
-      let depth = 0;
-      while (curr.parentId && depth < 10) {
-        const parent = currentNodes.find(p => p.id === curr.parentId);
-        if (!parent) break;
-        x += parent.position.x;
-        y += parent.position.y;
-        curr = parent;
-        depth++;
-      }
-      return { x, y };
-    };
-
     if (node?.type === 'SWITCH_CONTAINER') {
       const swNode = currentNodes.find(n => n.id === node.id) || node;
       const myCases = currentNodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === node.id || n.parentId === node.id));
@@ -1978,12 +2060,12 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
       const liveNodes = (reactFlowInstance ? reactFlowInstance.getNodes() : nodes).map(n => {
         if (n.id === node.id) {
-          return { ...n, position: node.position, positionAbsolute: node.positionAbsolute ?? node.position };
+          return { ...n, position: node.position, positionAbsolute: node.positionAbsolute ?? node.position, dragging: true };
         }
         if (draggedIds.has(n.id) && dragStartPositionsRef.current?.has(n.id)) {
           const sp = dragStartPositionsRef.current.get(n.id);
           const pos = { x: sp.x + dx, y: sp.y + dy };
-          return { ...n, position: pos, positionAbsolute: pos };
+          return { ...n, position: pos, positionAbsolute: pos, dragging: true };
         }
         return n;
       });
@@ -1996,56 +2078,6 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           });
           const changed = nextEds.length !== eds.length || nextEds.some((e, i) => e.id !== eds[i]?.id || e.source !== eds[i]?.source || e.target !== eds[i]?.target);
           return changed ? nextEds : eds;
-        });
-
-        // Dynamic real-time stretch/contract of switch cases while holding and dragging a block
-        const switchContainers = liveNodes.filter(n => n.type === 'SWITCH_CONTAINER');
-        switchContainers.forEach(swNode => {
-          const swCases = liveNodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === swNode.id || n.parentId === swNode.id));
-          if (swCases.length === 0) return;
-
-          let maxInnerBottom = 0;
-          swCases.forEach(c => {
-            const cAbsX = swNode.position.x + c.position.x;
-            const cAbsY = swNode.position.y + c.position.y;
-            const cW = c.style?.width ? parseInt(c.style.width) : (c.measured?.width || 250);
-            const cH = c.style?.height ? parseInt(c.style.height) : (c.measured?.height || 166);
-
-            const innerBlocks = liveNodes.filter(n => {
-              if (!['ACTION', 'IO', 'CONDITION'].includes(n.type)) return false;
-              if (n.parentId === c.id) return true;
-              if (n.parentId && n.parentId !== swNode.id && n.parentId !== c.id) return false;
-              const nPos = getNodeAbsPos(n);
-              const nW = n.measured?.width || n.width || 100;
-              const nH = n.measured?.height || n.height || 50;
-              const cx = nPos.x + nW / 2;
-              const cy = nPos.y + nH / 2;
-              return cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH + 30;
-            });
-
-            innerBlocks.forEach(inNode => {
-              const inPos = getNodeAbsPos(inNode);
-              const nH = inNode.measured?.height || inNode.height || 50;
-              const bottomRel = (inPos.y + nH) - cAbsY;
-              if (bottomRel > maxInnerBottom) {
-                maxInnerBottom = bottomRel;
-              }
-            });
-          });
-
-          const targetCaseH = Math.max(166, Math.round(maxInnerBottom + 30));
-          const targetSwitchH = targetCaseH + 64;
-
-          const swEl = document.querySelector(`.react-flow__node[data-id="${swNode.id}"]`);
-          if (swEl && parseInt(swEl.style.height) !== targetSwitchH) {
-            swEl.style.height = `${targetSwitchH}px`;
-          }
-          swCases.forEach(c => {
-            const cEl = document.querySelector(`.react-flow__node[data-id="${c.id}"]`);
-            if (cEl && parseInt(cEl.style.height) !== targetCaseH) {
-              cEl.style.height = `${targetCaseH}px`;
-            }
-          });
         });
       }
     }
@@ -2234,8 +2266,9 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       const finalMoves = new Map();
       const currentNodes = reactFlowInstance ? reactFlowInstance.getNodes() : nodes;
       const swNode = currentNodes.find(n => n.id === caseDragRef.current.switchId);
-      const swAbsX = swNode ? swNode.position.x : 0;
-      const swAbsY = swNode ? swNode.position.y : 0;
+      const swPos = swNode ? getNodeAbsPos(swNode) : { x: 0, y: 0 };
+      const swAbsX = swPos.x;
+      const swAbsY = swPos.y;
 
       reorderedCases.forEach(c => {
         const targetX = curSlotX;
@@ -2312,8 +2345,21 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             if (!tcH && n.type === 'SWITCH_CONTAINER') tcH = 230;
 
             const pNode = n.parentId ? nodes.find(p => p.id === n.parentId) : null;
-            const absX = (pNode ? pNode.position.x : 0) + n.position.x;
-            const absY = (pNode ? pNode.position.y : 0) + n.position.y;
+            let absX = (pNode ? pNode.position.x : 0) + n.position.x;
+            let absY = (pNode ? pNode.position.y : 0) + n.position.y;
+
+            const nEl = document.querySelector(`.react-flow__node[data-id="${n.id}"]`);
+            if (nEl && nEl.style.transform) {
+                const match = nEl.style.transform.match(/translate(?:3d)?\((-?[\d.]+)px,?\s*(-?[\d.]+)px/);
+                if (match) {
+                    absX = parseFloat(match[1]);
+                    absY = parseFloat(match[2]);
+                }
+            }
+            if (nEl) {
+                if (nEl.style.width) tcW = parseInt(nEl.style.width);
+                if (nEl.style.height) tcH = parseInt(nEl.style.height);
+            }
 
             const yMatch = n.type === 'CASE_CONTAINER' 
                 ? (mousePos.y >= absY && mousePos.y <= absY + tcH + 30) 
@@ -2339,10 +2385,23 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
             if (targetContainer && targetContainer.type === 'CASE_CONTAINER') {
                 const targetParent = targetContainer.parentId ? nodes.find(p => p.id === targetContainer.parentId) : null;
-                const tcAbsX = (targetParent ? targetParent.position.x : 0) + targetContainer.position.x;
-                const tcAbsY = (targetParent ? targetParent.position.y : 0) + targetContainer.position.y;
-                const tcW = targetContainer.measured?.width || parseInt(targetContainer.style?.width || 250);
-                const tcH = targetContainer.measured?.height || parseInt(targetContainer.style?.height || 166);
+                let tcAbsX = (targetParent ? targetParent.position.x : 0) + targetContainer.position.x;
+                let tcAbsY = (targetParent ? targetParent.position.y : 0) + targetContainer.position.y;
+                let tcW = targetContainer.measured?.width || parseInt(targetContainer.style?.width || 250);
+                let tcH = targetContainer.measured?.height || parseInt(targetContainer.style?.height || 166);
+
+                const tcEl = document.querySelector(`.react-flow__node[data-id="${targetContainer.id}"]`);
+                if (tcEl && tcEl.style.transform) {
+                    const match = tcEl.style.transform.match(/translate(?:3d)?\((-?[\d.]+)px,?\s*(-?[\d.]+)px/);
+                    if (match) {
+                        tcAbsX = parseFloat(match[1]);
+                        tcAbsY = parseFloat(match[2]);
+                    }
+                }
+                if (tcEl) {
+                    if (tcEl.style.width) tcW = parseInt(tcEl.style.width);
+                    if (tcEl.style.height) tcH = parseInt(tcEl.style.height);
+                }
 
                 if (dn.parentId === targetContainer.id) {
                     // Block is already inside this case: clamp relative position inside case bounds
@@ -2354,6 +2413,9 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
                     }
                 } else {
                     // Block entered this case from outside: convert canvas absolute pos to relative case pos
+                    if (dn.parentId && dn.parentId !== targetContainer.id) {
+                        unparentedCaseIds.add(dn.parentId);
+                    }
                     const relX = Math.max(15, Math.min(tcW - dnW - 15, Math.round(mousePos.x - tcAbsX - dnW / 2)));
                     const relY = Math.max(50, Math.round(mousePos.y - tcAbsY - dnH / 2));
                     newPositions.set(dn.id, { x: relX, y: relY, parentId: targetContainer.id });
@@ -2381,17 +2443,20 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             }));
         }
 
-        // Commit real-time case and switch heights from DOM to React state
+        // Commit real-time case and switch dimensions from DOM to React state
         setNodes(nds => {
             let modified = false;
             const nextNodes = nds.map(n => {
                 if (n.type === 'CASE_CONTAINER' || n.type === 'SWITCH_CONTAINER') {
                     const el = document.querySelector(`.react-flow__node[data-id="${n.id}"]`);
-                    if (el && el.style.height) {
-                        const h = parseInt(el.style.height);
-                        if (h && parseInt(n.style?.height || 0) !== h) {
+                    if (el) {
+                        const h = el.style.height ? parseInt(el.style.height) : null;
+                        const w = el.style.width ? parseInt(el.style.width) : null;
+                        const curH = parseInt(n.style?.height || 0);
+                        const curW = parseInt(n.style?.width || 0);
+                        if ((h && curH !== h) || (w && curW !== w)) {
                             modified = true;
-                            return { ...n, style: { ...n.style, height: h } };
+                            return { ...n, style: { ...n.style, ...(h ? { height: h } : {}), ...(w ? { width: w } : {}) } };
                         }
                     }
                 }
@@ -2609,10 +2674,13 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
 
     // Validate Case Container: MUST connect to something INSIDE it
     const isInside = (innerNode, containerNode) => {
-        const cx = (innerNode.positionAbsolute?.x || innerNode.position.x) + (innerNode.measured?.width || 100) / 2;
-        const cy = (innerNode.positionAbsolute?.y || innerNode.position.y) + (innerNode.measured?.height || 50) / 2;
-        const cX = containerNode.positionAbsolute?.x || containerNode.position.x;
-        const cY = containerNode.positionAbsolute?.y || containerNode.position.y;
+        if (innerNode.parentId === containerNode.id) return true;
+        const inPos = getNodeAbsPos ? getNodeAbsPos(innerNode) : { x: (innerNode.positionAbsolute?.x || innerNode.position.x), y: (innerNode.positionAbsolute?.y || innerNode.position.y) };
+        const cPos = getNodeAbsPos ? getNodeAbsPos(containerNode) : { x: (containerNode.positionAbsolute?.x || containerNode.position.x), y: (containerNode.positionAbsolute?.y || containerNode.position.y) };
+        const cx = inPos.x + (innerNode.measured?.width || 100) / 2;
+        const cy = inPos.y + (innerNode.measured?.height || 50) / 2;
+        const cX = cPos.x;
+        const cY = cPos.y;
         const cW = containerNode.measured?.width || parseInt(containerNode.style?.width || 250);
         const cH = containerNode.measured?.height || parseInt(containerNode.style?.height || 150);
         if (containerNode.type === 'CASE_CONTAINER') {
@@ -3032,7 +3100,11 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       }
       setShowExportMenu(false); 
     }} onPointerMove={handlePointerMove} onPointerUp={clearHover} onPointerLeave={clearHover}>
-      <style>{`.react-flow__edge.drop-target .react-flow__edge-path { stroke: #4f46e5 !important; stroke-width: 4px !important; filter: drop-shadow(0 0 6px rgba(79,70,229,0.5)); transition: all 0.2s ease; }`}</style>
+      <style>{`
+        .react-flow__edge.drop-target .react-flow__edge-path { stroke: #4f46e5 !important; stroke-width: 4px !important; filter: drop-shadow(0 0 6px rgba(79,70,229,0.5)); transition: all 0.2s ease; }
+        .react-flow__edgelabel-renderer { z-index: 1000 !important; pointer-events: none; }
+        .react-flow__edgelabel-renderer > * { pointer-events: all; }
+      `}</style>
       
       {hoveredToolbarItem && hoverProgress > 0 && (
           <div className="fixed z-[200] pointer-events-none flex items-center justify-center" style={{ left: cursorPos.x + 15, top: cursorPos.y + 15 }}>

@@ -93,7 +93,18 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
 
             return nds.map(n => {
                 if (n.id === id) {
-                    const nextZIndex = data.isCaseContainer ? -9999 : -Math.round(targetWidth);
+                    const isSwitchAncestor = nds.some(sw => {
+                        if (sw.type !== 'SWITCH_CONTAINER') return false;
+                        let curr = sw;
+                        let depth = 0;
+                        while (curr && curr.parentId && curr.parentId !== '1' && depth < 10) {
+                            if (curr.parentId === id) return true;
+                            curr = nds.find(p => p.id === curr.parentId);
+                            depth++;
+                        }
+                        return (sw.position.x >= myX && sw.position.x <= myX + targetWidth && sw.position.y >= myY && sw.position.y <= myY + targetHeight);
+                    });
+                    const nextZIndex = data.isCaseContainer ? 1 : (isSwitchAncestor ? -5 : 5);
                     return { ...n, data: { ...n.data, isNew: false }, zIndex: nextZIndex, style: { ...n.style, height: targetHeight, width: targetWidth } };
                 }
                 return n;
@@ -311,10 +322,20 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
                 draggingNodes.forEach(draggingNode => {
                     const nW = draggingNode.measured?.width || 120;
                     const nH = draggingNode.measured?.height || 50;
-                    const maxXNode = draggingNode.position.x + nW;
-                    const maxYNode = draggingNode.position.y + nH;
-                    const minXNode = draggingNode.position.x;
-                    const minYNode = draggingNode.position.y;
+                    let minXNode = draggingNode.position.x;
+                    let minYNode = draggingNode.position.y;
+
+                    const el = document.querySelector(`.react-flow__node[data-id="${draggingNode.id}"]`);
+                    if (el && el.style.transform) {
+                        const m = el.style.transform.match(/translate(?:3d)?\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px/);
+                        if (m) {
+                            minXNode = parseFloat(m[1]);
+                            minYNode = parseFloat(m[2]);
+                        }
+                    }
+
+                    const maxXNode = minXNode + nW;
+                    const maxYNode = minYNode + nH;
                     
                     const reqW = maxXNode - myX + paddingSides;
                     const reqH = maxYNode - myY + paddingBottom;
@@ -439,12 +460,21 @@ export function useContainerBounds(id, data, dragging, minWidth = 350, minHeight
             if (containerRef.current) {
                 const rfNode = containerRef.current.closest('.react-flow__node');
                 if (rfNode) {
-                    // Strictly enforce zIndex based on width so parents ALWAYS stay behind children, 
-                    // even if React Flow attempts to bring a selected node to the front!
                     if (!data.isCaseContainer) {
-                        rfNode.style.zIndex = -Math.round(newWidth);
+                        const isSwitchAncestor = nds.some(sw => {
+                            if (sw.type !== 'SWITCH_CONTAINER') return false;
+                            let curr = sw;
+                            let depth = 0;
+                            while (curr && curr.parentId && curr.parentId !== '1' && depth < 10) {
+                                if (curr.parentId === id) return true;
+                                curr = nds.find(p => p.id === curr.parentId);
+                                depth++;
+                            }
+                            return (sw.position.x >= myX && sw.position.x <= myX + newWidth && sw.position.y >= myY && sw.position.y <= myY + newHeight);
+                        });
+                        rfNode.style.zIndex = isSwitchAncestor ? -5 : 5;
                     } else {
-                        rfNode.style.zIndex = -9999;
+                        rfNode.style.zIndex = 1;
                     }
                     
                     if (!anyChildDragging || Date.now() < animateResizeUntil.current) {

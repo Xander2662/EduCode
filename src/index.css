@@ -90,21 +90,29 @@ html.dark ::-webkit-scrollbar-thumb:active,
   display: none !important;
 }
 
-/* Zabráníme tomu, aby React Flow při kliknutí na LOOP_CONTAINER zvednul z-index a překryl bloky */
-.react-flow__node-LOOP_CONTAINER.selected,
-.react-flow__node-FOR_CONTAINER.selected {
-  z-index: -100 !important;
+/* Edge labels (True/False tags) must always render above all nodes and containers */
+.react-flow__edgelabel-renderer {
+  z-index: 1000 !important;
+  pointer-events: none;
+}
+.react-flow__edgelabel-renderer > * {
+  pointer-events: all;
 }
 
 .react-flow__node-LOOP_CONTAINER,
-.react-flow__node-FOR_CONTAINER {
+.react-flow__node-FOR_CONTAINER,
+.react-flow__node-SWITCH_CONTAINER,
+.react-flow__node-CASE_CONTAINER {
   transition: width 0.1s ease-out, height 0.1s ease-out, z-index 0s;
 }
 
 .react-flow__node-LOOP_CONTAINER.animate-resize,
-.react-flow__node-FOR_CONTAINER.animate-resize {
+.react-flow__node-FOR_CONTAINER.animate-resize,
+.react-flow__node-SWITCH_CONTAINER.animate-resize,
+.react-flow__node-CASE_CONTAINER.animate-resize {
   transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), 
               height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), 
+              transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
               z-index 0s;
 }
 

@@ -573,20 +573,25 @@ export const SwitchContainerNode = ({ id, data, selected, dragging }) => {
   const draggingRef = React.useRef(dragging);
   draggingRef.current = dragging;
 
+  const peakStretchedW = React.useRef(new Map());
+  const wasAnyDragging = React.useRef(false);
+  const animateResizeTimer = React.useRef(null);
+
   // Layout Engine Effect
   React.useEffect(() => {
     const layoutEngine = () => {
         if (draggingRef.current) return;
         const nds = getNodes();
         const myNode = nds.find(n => n.id === id);
-        if (!myNode || myNode.dragging || nds.some(n => n.dragging) || Boolean(document.querySelector('.react-flow__node.dragging')) || Boolean(document.querySelector('.is-dragging-case'))) return;
+        if (!myNode) return;
+
+        // Skip if switch itself is dragging or a case is currently being reordered
+        if (myNode.dragging || Boolean(document.querySelector('.is-dragging-case'))) return;
 
         const myCases = nds.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === id || n.parentId === id));
-        if (myCases.some(c => c.dragging) || Boolean(document.querySelector('.is-dragging-case'))) return;
+        if (myCases.some(c => c.dragging)) return;
 
-        myCases.sort((a, b) => {
-            return a.position.x - b.position.x;
-        });
+        myCases.sort((a, b) => a.position.x - b.position.x);
 
         if (myCases.length === 0) {
             if (cases.length !== 0) setCases([]);
@@ -603,7 +608,9 @@ export const SwitchContainerNode = ({ id, data, selected, dragging }) => {
         const PADDING_BOTTOM = 20;
         const GAP = 15;
         const CASE_MIN_WIDTH = 250;
+        const CASE_MAX_WIDTH = 480;
         const CASE_MIN_HEIGHT = 166;
+        const CASE_MAX_HEIGHT = 800;
         const ADD_BUTTON_WIDTH = 65;
 
         const getAbsPos = (node) => {
@@ -622,71 +629,234 @@ export const SwitchContainerNode = ({ id, data, selected, dragging }) => {
             return { x, y };
         };
 
-        const swAbs = getAbsPos(myNode);
+        const getNodeLiveAbsPos = (node) => {
+            const el = document.querySelector(`.react-flow__node[data-id="${node.id}"]`);
+            if (el && (node.dragging || el.classList.contains('dragging') || Boolean(document.querySelector(`.react-flow__node[data-id="${node.id}"].dragging`)))) {
+                const tr = el.style.transform;
+                if (tr) {
+                    const match = tr.match(/translate(?:3d)?\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px/);
+                    if (match) {
+                        return { x: parseFloat(match[1]), y: parseFloat(match[2]) };
+                    }
+                }
+            }
+            if (node.positionAbsolute && typeof node.positionAbsolute.x === 'number') {
+                return node.positionAbsolute;
+            }
+            return getAbsPos(node);
+        };
+
+        const swAbs = getNodeLiveAbsPos(myNode);
         const absSwitchX = swAbs.x;
         const absSwitchY = swAbs.y;
 
-        // Global stretch check specifically for switch:
-        // Calculate the maximum bottom reach across ALL connectable blocks anywhere within any case of this switch
-        let maxInnerBottom = 0;
         const CONNECTABLE = ['ACTION', 'IO', 'CONDITION', 'PROCESS'];
+        const connectableNodes = nds.filter(n => CONNECTABLE.includes(n.type));
+        const isDraggingNode = (n) => Boolean(n.dragging || document.querySelector(`.react-flow__node[data-id="${n.id}"].dragging`));
+        const anyDragging = nds.some(n => n.dragging) || Boolean(document.querySelector('.react-flow__node.dragging'));
 
-        myCases.forEach(c => {
-            const cW = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
-            const cH = c.style?.height ? parseInt(c.style.height) : CASE_MIN_HEIGHT;
-            const cAbs = getAbsPos(c);
+        // Drag stopped just now: clear anti-collapse peak widths and enable smooth collapse animation
+        if (!anyDragging && wasAnyDragging.current) {
+            wasAnyDragging.current = false;
+            peakStretchedW.current.clear();
+
+            const swEl = document.querySelector(`.react-flow__node[data-id="${id}"]`);
+            if (swEl) swEl.classList.add('animate-resize');
+            myCases.forEach(c => {
+                const cEl = document.querySelector(`.react-flow__node[data-id="${c.id}"]`);
+                if (cEl) cEl.classList.add('animate-resize');
+            });
+
+            if (animateResizeTimer.current) clearTimeout(animateResizeTimer.current);
+            animateResizeTimer.current = setTimeout(() => {
+                const swEl = document.querySelector(`.react-flow__node[data-id="${id}"]`);
+                if (swEl) swEl.classList.remove('animate-resize');
+                myCases.forEach(c => {
+                    const cEl = document.querySelector(`.react-flow__node[data-id="${c.id}"]`);
+                    if (cEl) cEl.classList.remove('animate-resize');
+                });
+            }, 350);
+        } else if (anyDragging) {
+            wasAnyDragging.current = true;
+        }
+
+        // Calculate stretch and height per case
+        let globalMaxBottom = 0;
+        const caseMetrics = new Map();
+
+        const sortedMyCases = [...myCases].sort((a, b) => {
+            if (a.data?.isDefault && !b.data?.isDefault) return 1;
+            if (!a.data?.isDefault && b.data?.isDefault) return -1;
+            return a.position.x - b.position.x;
+        });
+
+        sortedMyCases.forEach(c => {
+            const cAbs = getNodeLiveAbsPos(c);
             const caseAbsX = cAbs.x;
             const caseAbsY = cAbs.y;
+            const currentCW = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
+            const currentCH = c.style?.height ? parseInt(c.style.height) : CASE_MIN_HEIGHT;
 
-            const innerBlocks = nds.filter(n => {
-                if (!CONNECTABLE.includes(n.type)) return false;
-                if (n.parentId === c.id) return true;
-                if (n.parentId && n.parentId !== id && n.parentId !== c.id) return false;
-                
-                const nAbs = getAbsPos(n);
+            // Find blocks belonging to or entering this case
+            const innerBlocks = connectableNodes.filter(n => {
+                const isDragging = isDraggingNode(n);
+                const nAbs = getNodeLiveAbsPos(n);
                 const nW = n.measured?.width || n.width || 100;
                 const nH = n.measured?.height || n.height || 50;
                 const cx = nAbs.x + nW / 2;
                 const cy = nAbs.y + nH / 2;
-                return cx >= caseAbsX && cx <= caseAbsX + cW && cy >= caseAbsY && cy <= caseAbsY + cH + 30;
+
+                if (isDragging) {
+                    // Check which case in this switch geometrically contains this dragging block
+                    const hitCase = sortedMyCases.find(sc => {
+                        const scAbs = getNodeLiveAbsPos(sc);
+                        const scW = sc.measured?.width || (sc.style?.width ? parseInt(sc.style.width) : CASE_MIN_WIDTH);
+                        const scH = sc.measured?.height || (sc.style?.height ? parseInt(sc.style.height) : CASE_MIN_HEIGHT);
+                        return cx >= scAbs.x && cx <= scAbs.x + scW && cy >= scAbs.y && cy <= scAbs.y + scH + 30;
+                    });
+                    return hitCase?.id === c.id;
+                }
+
+                if (n.parentId === c.id) return true;
+                if (n.parentId && n.parentId !== id && n.parentId !== c.id) {
+                    const pNode = nds.find(p => p.id === n.parentId);
+                    if (pNode?.type === 'CASE_CONTAINER') return false;
+                }
+                return (cx >= caseAbsX && cx <= caseAbsX + currentCW + 50 && cy >= caseAbsY && cy <= caseAbsY + currentCH + 50);
             });
+
+            let caseMaxRight = 0;
+            let caseMaxBottom = 0;
 
             innerBlocks.forEach(n => {
-                const nAbs = getAbsPos(n);
+                const nAbs = getNodeLiveAbsPos(n);
+                const nW = n.measured?.width || n.width || 100;
                 const nH = n.measured?.height || n.height || 50;
+                const rightRelCase = (nAbs.x + nW) - caseAbsX;
                 const bottomRelCase = (nAbs.y + nH) - caseAbsY;
-                if (bottomRelCase > maxInnerBottom) {
-                    maxInnerBottom = bottomRelCase;
-                }
+                if (rightRelCase > caseMaxRight) caseMaxRight = rightRelCase;
+                if (bottomRelCase > caseMaxBottom) caseMaxBottom = bottomRelCase;
             });
+
+            if (caseMaxBottom > globalMaxBottom) {
+                globalMaxBottom = caseMaxBottom;
+            }
+
+            const rawDesiredW = Math.max(CASE_MIN_WIDTH, Math.round(caseMaxRight + 25));
+            let targetW = CASE_MIN_WIDTH;
+
+            if (innerBlocks.length === 0) {
+                peakStretchedW.current.delete(c.id);
+                targetW = CASE_MIN_WIDTH;
+            } else if (anyDragging) {
+                const prevPeak = peakStretchedW.current.get(c.id) || CASE_MIN_WIDTH;
+                const newPeak = Math.max(prevPeak, rawDesiredW);
+                peakStretchedW.current.set(c.id, Math.min(CASE_MAX_WIDTH, newPeak));
+                targetW = Math.min(CASE_MAX_WIDTH, Math.max(CASE_MIN_WIDTH, peakStretchedW.current.get(c.id)));
+            } else {
+                targetW = Math.min(CASE_MAX_WIDTH, rawDesiredW);
+            }
+
+            const atLimitX = rawDesiredW >= CASE_MAX_WIDTH - 20;
+            caseMetrics.set(c.id, { targetW, atLimitX, rawDesiredW });
         });
 
-        // Retracts to the lowest point where overlap of another block anywhere within the cases is happening
-        const maxHeight = Math.max(CASE_MIN_HEIGHT, Math.round(maxInnerBottom + 30));
-        let currentX = GAP;
-        let changed = false;
+        const globalMaxHeight = Math.min(CASE_MAX_HEIGHT, Math.max(CASE_MIN_HEIGHT, Math.round(globalMaxBottom + 30)));
+        const atLimitY = globalMaxHeight >= CASE_MAX_HEIGHT - 20;
 
+        let currentX = GAP;
         const caseData = [];
 
-        myCases.forEach((c) => {
-            const w = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
+        sortedMyCases.forEach(c => {
+            const metrics = caseMetrics.get(c.id) || { targetW: CASE_MIN_WIDTH, atLimitX: false };
             const targetX = Math.round(currentX);
             const targetY = Math.round(PADDING_TOP);
-            const currentH = c.style?.height ? parseInt(c.style.height) : CASE_MIN_HEIGHT;
-            
-            if (!c.dragging) {
-                if (Math.round(c.position.x) !== targetX || Math.round(c.position.y) !== targetY || currentH !== maxHeight) {
-                    changed = true;
-                }
-            }
-            
-            caseData.push({ id: c.id, x: targetX, y: targetY, w, h: maxHeight, isDefault: c.data.isDefault, dragging: !!c.dragging });
-            currentX += w + GAP;
+            caseData.push({
+                id: c.id,
+                x: targetX,
+                y: targetY,
+                w: metrics.targetW,
+                h: globalMaxHeight,
+                atLimitX: metrics.atLimitX,
+                isDefault: c.data.isDefault,
+                dragging: !!c.dragging
+            });
+            currentX += metrics.targetW + GAP;
         });
 
-        // currentX already includes the GAP after the last case. We subtract it and add our dedicated button area width.
         const targetContainerWidth = Math.max(350, currentX - GAP + ADD_BUTTON_WIDTH);
-        const targetContainerHeight = Math.round(maxHeight + PADDING_TOP + PADDING_BOTTOM);
+        const targetContainerHeight = Math.round(globalMaxHeight + PADDING_TOP + PADDING_BOTTOM);
+
+        // Update real-time DOM visuals (60fps) during drag
+        if (anyDragging) {
+            const swEl = document.querySelector(`.react-flow__node[data-id="${id}"]`);
+            if (swEl) {
+                swEl.style.width = `${targetContainerWidth}px`;
+                swEl.style.height = `${targetContainerHeight}px`;
+            }
+
+            caseData.forEach(cd => {
+                const cEl = document.querySelector(`.react-flow__node[data-id="${cd.id}"]`);
+                if (cEl) {
+                    cEl.style.width = `${cd.w}px`;
+                    cEl.style.height = `${cd.h}px`;
+
+                    if (!cd.dragging) {
+                        const targetAbsX = Math.round(absSwitchX + cd.x);
+                        const targetAbsY = Math.round(absSwitchY + cd.y);
+                        cEl.style.transform = `translate(${targetAbsX}px, ${targetAbsY}px)`;
+                    }
+
+                    const origCase = myCases.find(c => c.id === cd.id);
+                    const shiftX = origCase ? (cd.x - origCase.position.x) : 0;
+                    if (shiftX !== 0 && !cd.dragging) {
+                        const caseInner = connectableNodes.filter(n => n.parentId === cd.id);
+                        caseInner.forEach(inN => {
+                            if (!isDraggingNode(inN)) {
+                                const inEl = document.querySelector(`.react-flow__node[data-id="${inN.id}"]`);
+                                if (inEl) {
+                                    const inAbs = getAbsPos(inN);
+                                    inEl.style.transform = `translate(${inAbs.x + shiftX}px, ${inAbs.y}px)`;
+                                }
+                            }
+                        });
+                    }
+
+                    const rTop = cEl.querySelector('.case-limit-right-top');
+                    const rBottom = cEl.querySelector('.case-limit-right-bottom');
+                    const bLeft = cEl.querySelector('.case-limit-bottom-left');
+                    const bRight = cEl.querySelector('.case-limit-bottom-right');
+
+                    if (rTop) rTop.style.opacity = cd.atLimitX ? '0.7' : '0';
+                    if (rBottom) rBottom.style.opacity = cd.atLimitX ? '0.7' : '0';
+                    if (bLeft) bLeft.style.opacity = atLimitY ? '0.7' : '0';
+                    if (bRight) bRight.style.opacity = atLimitY ? '0.7' : '0';
+
+                    if (cd.atLimitX || atLimitY) {
+                        cEl.classList.add('bg-rose-100/50', 'dark:bg-rose-900/30');
+                    } else {
+                        cEl.classList.remove('bg-rose-100/50', 'dark:bg-rose-900/30');
+                    }
+                }
+            });
+            return;
+        }
+
+        // Clean up visual limit indicators when not dragging
+        myCases.forEach(c => {
+            const cEl = document.querySelector(`.react-flow__node[data-id="${c.id}"]`);
+            if (cEl) {
+                const rTop = cEl.querySelector('.case-limit-right-top');
+                const rBottom = cEl.querySelector('.case-limit-right-bottom');
+                const bLeft = cEl.querySelector('.case-limit-bottom-left');
+                const bRight = cEl.querySelector('.case-limit-bottom-right');
+                if (rTop) rTop.style.opacity = '0';
+                if (rBottom) rBottom.style.opacity = '0';
+                if (bLeft) bLeft.style.opacity = '0';
+                if (bRight) bRight.style.opacity = '0';
+                cEl.classList.remove('bg-rose-100/50', 'dark:bg-rose-900/30');
+            }
+        });
 
         const caseDataStr = JSON.stringify(caseData);
         setCases(prev => JSON.stringify(prev) === caseDataStr ? prev : caseData);
@@ -696,8 +866,22 @@ export const SwitchContainerNode = ({ id, data, selected, dragging }) => {
         const myW = myNode.style?.width ? parseInt(myNode.style.width) : 350;
         const myH = myNode.style?.height ? parseInt(myNode.style.height) : 230;
 
+        let changed = false;
+        myCases.forEach(c => {
+            const cd = caseData.find(item => item.id === c.id);
+            if (cd && !c.dragging) {
+                const cCurX = Math.round(c.position.x);
+                const cCurY = Math.round(c.position.y);
+                const cCurW = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
+                const cCurH = c.style?.height ? parseInt(c.style.height) : CASE_MIN_HEIGHT;
+                if (cCurX !== cd.x || cCurY !== cd.y || cCurW !== cd.w || cCurH !== cd.h) {
+                    changed = true;
+                }
+            }
+        });
+
         const deletedCases = cases.filter(pc => !myCases.find(c => c.id === pc.id));
-        
+
         if (changed || myW !== targetContainerWidth || myH !== targetContainerHeight || deletedCases.length > 0) {
             setNodes(nodes => {
                 const switchNode = nodes.find(n => n.id === id);
@@ -713,7 +897,6 @@ export const SwitchContainerNode = ({ id, data, selected, dragging }) => {
                 myCases.forEach(c => {
                     const cW = c.style?.width ? parseInt(c.style.width) : CASE_MIN_WIDTH;
                     const cH = c.style?.height ? parseInt(c.style.height) : 150;
-                    // c.position is relative to switch, so absSwitchX + c.position.x is correct for cAbsX
                     const cAbsX = absSwitchX + c.position.x;
                     const cAbsY = absSwitchY + c.position.y;
                     
@@ -807,7 +990,7 @@ export const SwitchContainerNode = ({ id, data, selected, dragging }) => {
                     const caseInfo = caseData.find(cd => cd.id === n.id);
                     if (caseInfo) {
                         if (!n.dragging) {
-                            return { ...n, position: { x: caseInfo.x, y: caseInfo.y }, style: { ...n.style, height: caseInfo.h } };
+                            return { ...n, position: { x: caseInfo.x, y: caseInfo.y }, style: { ...n.style, width: caseInfo.w, height: caseInfo.h } };
                         }
                     }
                     if (nodeMoves.has(n.id)) {
@@ -825,7 +1008,10 @@ export const SwitchContainerNode = ({ id, data, selected, dragging }) => {
         animationFrameId = requestAnimationFrame(loop);
     };
     loop();
-    return () => cancelAnimationFrame(animationFrameId);
+    return () => {
+        cancelAnimationFrame(animationFrameId);
+        if (animateResizeTimer.current) clearTimeout(animateResizeTimer.current);
+    };
   }, [id, getNodes, setNodes, cases, containerWidth, containerHeight, dragging]);
 
   const handleSelectAll = React.useCallback((e) => {
@@ -1042,6 +1228,7 @@ export const SwitchContainerNode = ({ id, data, selected, dragging }) => {
 export const CaseContainerNode = ({ id, data, selected, dragging }) => {
   const { setNodes } = useReactFlow();
   const edges = useEdges();
+  const allNodes = useNodes();
   const isGray = data.colorMode === false;
   const borderColor = (selected || data.isRuntimeActive) ? 'border-rose-400' : (isGray ? 'border-gray-300 dark:border-gray-700' : 'border-rose-300 dark:border-rose-700/50');
   const tagBorder = data.isRuntimeActive ? 'border-red-500 ring-2 ring-red-400' : borderColor;
@@ -1056,19 +1243,43 @@ export const CaseContainerNode = ({ id, data, selected, dragging }) => {
   const hasTopEdge = edges.some(e => e.source === id && e.sourceHandle === 's-top');
   const hasBottomEdge = edges.some(e => e.target === id && e.targetHandle === 't-bottom');
 
+  const hasChild = React.useMemo(() => {
+    if (hasBottomEdge) return true;
+    const thisNode = allNodes.find(n => n.id === id);
+    if (!thisNode) return false;
+    const cAbsX = thisNode.positionAbsolute?.x ?? thisNode.position.x;
+    const cAbsY = thisNode.positionAbsolute?.y ?? thisNode.position.y;
+    const cW = thisNode.measured?.width || parseInt(thisNode.style?.width || 250);
+    const cH = thisNode.measured?.height || parseInt(thisNode.style?.height || 166);
+    
+    return allNodes.some(n => {
+      if (['GROUP_BG', 'START_END', 'CASE_CONTAINER', 'SWITCH_CONTAINER', 'LOOP_CONTAINER', 'FOR_CONTAINER', 'COMMENT'].includes(n.type)) return false;
+      const isDragging = n.dragging || Boolean(document.querySelector(`.react-flow__node[data-id="${n.id}"].dragging`));
+      if (n.parentId === id && !isDragging) return true;
+      if (n.parentId && n.parentId !== id && n.parentId !== thisNode.parentId && !isDragging) return false;
+      const nAbsX = n.positionAbsolute?.x ?? n.position.x;
+      const nAbsY = n.positionAbsolute?.y ?? n.position.y;
+      const nW = n.measured?.width || n.width || 100;
+      const nH = n.measured?.height || n.height || 50;
+      const cx = nAbsX + nW / 2;
+      const cy = nAbsY + nH / 2;
+      return cx >= cAbsX && cx <= cAbsX + cW && cy >= cAbsY && cy <= cAbsY + cH + 30;
+    });
+  }, [allNodes, id, hasBottomEdge]);
+
   const switchColorBorder = isGray ? '!border-gray-500' : '!border-rose-500';
-  const hollowHandleClass = `!w-2 !h-2 !min-w-2 !min-h-2 !bg-white dark:!bg-gray-900 !border-2 ${switchColorBorder} !rounded-full pointer-events-none z-20 transition-opacity`;
+  const hollowHandleClass = `!w-2 !h-2 !min-w-2 !min-h-2 !bg-white dark:!bg-gray-900 !border-2 ${switchColorBorder} !rounded-full z-20 transition-opacity`;
 
   return (
     <div 
-      className={`relative w-full h-full rounded border border-solid ${borderColor} ${bgColor} flex flex-col z-10 shadow-sm ${selected ? 'ring-2 ring-rose-400' : ''} ${canMove ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
+      className={`group relative w-full h-full rounded border border-solid ${borderColor} ${bgColor} flex flex-col z-0 shadow-sm ${selected ? 'ring-2 ring-rose-400' : ''} ${canMove ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
     >
       <Handle 
         type="source" 
         position={Position.Bottom} 
         id="s-top" 
         isConnectable={false}
-        className={`${hollowHandleClass} ${hasTopEdge ? 'opacity-100' : 'opacity-0'}`} 
+        className={`${hollowHandleClass} ${hasTopEdge ? 'opacity-100' : 'opacity-0'} pointer-events-none`} 
         style={{ left: '16px', right: 'auto', top: 0, bottom: 'auto', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }} 
       />
       
@@ -1097,13 +1308,22 @@ export const CaseContainerNode = ({ id, data, selected, dragging }) => {
 
       <div className="w-full flex-1 pointer-events-auto" />
       
+      {/* Right Limit Extensions */}
+      <div className="case-limit-right-top absolute bottom-full right-0 w-0 h-[40px] border-r-2 border-dashed border-rose-400 opacity-0 transition-opacity pointer-events-none" />
+      <div className="case-limit-right-bottom absolute top-full right-0 w-0 h-[40px] border-r-2 border-dashed border-rose-400 opacity-0 transition-opacity pointer-events-none" />
+      
+      {/* Bottom Limit Extensions */}
+      <div className="case-limit-bottom-left absolute right-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-rose-400 opacity-0 transition-opacity pointer-events-none" />
+      <div className="case-limit-bottom-right absolute left-full bottom-0 h-0 w-[40px] border-b-2 border-dashed border-rose-400 opacity-0 transition-opacity pointer-events-none" />
+
+      {/* Accessible lower handle - only visible when case has a child */}
       <Handle 
         type="target" 
         position={Position.Top} 
         id="t-bottom" 
-        isConnectable={false}
-        className={`${hollowHandleClass} ${hasBottomEdge ? 'opacity-100' : 'opacity-0'}`} 
-        style={{ left: '50%', right: 'auto', top: '100%', bottom: 'auto', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }} 
+        isConnectable={hasChild && !data.readOnly}
+        className={`${hollowHandleClass} ${hasChild ? 'opacity-100 cursor-crosshair pointer-events-auto after:content-[\'\'] after:absolute after:-top-3 after:-bottom-3 after:-left-3 after:-right-3 after:cursor-crosshair' : 'opacity-0 pointer-events-none'}`}
+        style={{ left: '50%', right: 'auto', top: '100%', bottom: 'auto', transform: 'translate(-50%, -50%)', ...(hasChild ? {} : { pointerEvents: 'none' }) }} 
       />
     </div>
   );

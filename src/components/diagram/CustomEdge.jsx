@@ -514,7 +514,7 @@ export const CustomEdge = ({ id, source, target, sourceX, sourceY, targetX, targ
       {labelText && (
         <EdgeLabelRenderer>
           <div
-            style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, pointerEvents: 'all' }}
+            style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, pointerEvents: 'all', zIndex: 1000 }}
             className="nodrag nopan"
             onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
             onMouseDown={(e) => e.stopPropagation()}
