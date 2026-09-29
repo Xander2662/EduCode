@@ -1732,10 +1732,16 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       const innerIds = new Set([node.id, ...caseIds, ...innerNodes.map(inNode => inNode.id)]);
       const innerEdges = currentEdges.filter(e => innerIds.has(e.source) && innerIds.has(e.target)).map(e => e.id);
 
-      const allMovedElements = innerNodes.map(inNode => {
-        const inPos = getNodeAbsPos(inNode);
-        return { id: inNode.id, absX: inPos.x, absY: inPos.y, startX: inNode.position.x, startY: inNode.position.y };
-      });
+      const allMovedElements = [
+        ...myCases.map(cNode => {
+          const cPos = getNodeAbsPos(cNode);
+          return { id: cNode.id, absX: cPos.x, absY: cPos.y, startX: cNode.position.x, startY: cNode.position.y };
+        }),
+        ...innerNodes.map(inNode => {
+          const inPos = getNodeAbsPos(inNode);
+          return { id: inNode.id, absX: inPos.x, absY: inPos.y, startX: inNode.position.x, startY: inNode.position.y };
+        })
+      ];
 
       switchDragRef.current = {
         switchId: node.id,
@@ -1900,12 +1906,6 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
           el.style.transform = `translate(${item.absX + dx}px, ${item.absY + dy}px)`;
         }
       });
-      switchDragRef.current.innerEdges?.forEach(edgeId => {
-        const el = document.querySelector(`.react-flow__edge[data-id="${edgeId}"]`);
-        if (el) {
-          el.style.transform = `translate(${dx}px, ${dy}px)`;
-        }
-      });
     }
 
     if (caseDragRef.current && node?.id === caseDragRef.current.caseId) {
@@ -1925,9 +1925,12 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       const allCases = caseDragRef.current.allCasesInitialOrder || [];
       const myInitialIndex = allCases.findIndex(c => c.id === node.id);
       let targetIndex = 0;
+      const draggedCenter = currentX + caseDragRef.current.cW / 2;
       for (let i = 0; i < allCases.length - 1; i++) {
-        const boundary = (allCases[i].startX + allCases[i+1].startX) / 2;
-        if (currentX > boundary) {
+        const slotCenter_i = allCases[i].startX + allCases[i].w / 2;
+        const slotCenter_next = allCases[i+1].startX + allCases[i+1].w / 2;
+        const boundary = (slotCenter_i + slotCenter_next) / 2;
+        if (draggedCenter > boundary) {
           targetIndex = i + 1;
         }
       }
@@ -2132,23 +2135,16 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
       const dx = node.position.x - switchDragRef.current.startX;
       const dy = node.position.y - switchDragRef.current.startY;
 
-      // Always clear inline transform overrides so React Flow can render nodes in their true positions
+      // Maintain DOM node transforms at their final positions to prevent any visual flicker or collapse
       switchDragRef.current.movedElements.forEach(item => {
         const el = document.querySelector(`.react-flow__node[data-id="${item.id}"]`);
         if (el) {
-          el.style.transform = '';
+          el.style.transform = `translate(${item.absX + dx}px, ${item.absY + dy}px)`;
         }
       });
-      switchDragRef.current.innerEdges?.forEach(edgeId => {
-        const el = document.querySelector(`.react-flow__edge[data-id="${edgeId}"]`);
-        if (el) {
-          el.style.transform = '';
-        }
-      });
-
+      const currentNodes = reactFlowInstance ? reactFlowInstance.getNodes() : nodes;
+      const moveMap = new Map();
       if (switchDragRef.current.movedElements.length > 0 && (dx !== 0 || dy !== 0)) {
-        const moveMap = new Map();
-        const currentNodes = reactFlowInstance ? reactFlowInstance.getNodes() : nodes;
         switchDragRef.current.movedElements.forEach(item => {
           const inNode = currentNodes.find(n => n.id === item.id);
           // If the node has parentId (i.e. parented to a case or switch), its position is RELATIVE!
@@ -2159,20 +2155,39 @@ function EditorCanvas({ xml, onXmlChange, onImportXml, readOnly, edgeStyle, colo
             moveMap.set(item.id, { x: finalX, y: finalY });
           }
         });
-        if (moveMap.size > 0) {
-          setNodes(nds => nds.map(n => moveMap.has(n.id) ? { ...n, position: moveMap.get(n.id) } : n));
-        }
       }
+
+      const movedIds = new Set(switchDragRef.current.movedElements.map(m => m.id));
+      let updatedNodesState = [];
+      setNodes(nds => {
+        const next = nds.map(n => {
+          if (moveMap.has(n.id)) {
+            return { ...n, position: moveMap.get(n.id) };
+          }
+          if (n.id === node.id) {
+            return { ...n, position: { x: Math.round(node.position.x), y: Math.round(node.position.y) } };
+          }
+          if (movedIds.has(n.id)) {
+            // Touch child nodes with new object reference so React Flow recomputes positionAbsolute
+            return { ...n };
+          }
+          return n;
+        });
+        updatedNodesState = next;
+        return next;
+      });
 
       setEdges(eds => {
         let nextEds = [...eds];
-        const myCases = nodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === node.id || n.parentId === node.id));
+        const stateNodes = updatedNodesState.length > 0 ? updatedNodesState : (reactFlowInstance ? reactFlowInstance.getNodes() : nodes);
+        const myCases = stateNodes.filter(n => n.type === 'CASE_CONTAINER' && (n.data?.switchId === node.id || n.parentId === node.id));
         myCases.forEach(c => {
-          nextEds = syncCaseAutoWiring(c, nodes, nextEds, edgeStyle);
+          nextEds = syncCaseAutoWiring(c, stateNodes, nextEds, edgeStyle);
         });
         return nextEds;
       });
       switchDragRef.current = null;
+      return;
     }
 
     if (caseDragRef.current && node?.id === caseDragRef.current.caseId) {

@@ -983,7 +983,6 @@ export const SwitchContainerNode = ({ id, data, selected, dragging }) => {
       
       {/* Moved the tag to left-8 to reduce gap to the top node */}
       <div 
-        onPointerDown={handleSelectAll}
         className={`custom-drag-handle absolute -top-4 left-8 px-2 py-1 bg-white dark:bg-gray-800 text-xs font-bold rounded shadow-sm border ${tagBorder} flex items-center gap-2 pointer-events-auto cursor-grab active:cursor-grabbing z-20`}
       >
         {data.showDebugger && (
